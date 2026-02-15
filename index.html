@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finland Random Walk</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+        
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .input-hint {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .checkbox-group input[type="radio"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            margin: 0;
+        }
+        
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+        }
+        
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: block;
+            width: 100%;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .map-container {
+            height: 500px;
+            position: relative;
+        }
+        
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        
+        .result-panel {
+            padding: 30px;
+            background: #f8f9fa;
+            display: none;
+        }
+        
+        .result-panel.active {
+            display: block;
+        }
+        
+        .result-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .result-card h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .coordinates {
+            font-family: 'Courier New', monospace;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-size: 0.95rem;
+            word-break: break-all;
+        }
+        
+        .distance-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        
+        .google-maps-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .google-maps-link:hover {
+            text-decoration: underline;
+        }
+        
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+        
+        .error.active {
+            display: block;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+        
+        .loading.active {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.8rem;
+            }
+            
+            .map-container {
+                height: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚶 Finland Random Walk</h1>
+            <p>Discover new places to explore within your chosen radius</p>
+        </header>
+        
+        <div class="controls">
+            <div class="input-group">
+                <label for="location">Starting Location</label>
+                <input type="text" id="location" placeholder="Enter address or coordinates (e.g., 'Helsinki' or '60.1699, 24.9384')">
+                <div class="input-hint">You can type an address or paste coordinates like "60.1699, 24.9384"</div>
+            </div>
+            
+            <div class="input-group">
+                <label for="distance">Maximum Distance (km)</label>
+                <input type="number" id="distance" min="0.1" max="50" step="0.1" value="5" placeholder="5">
+                <div class="input-hint">How far are you willing to walk?</div>
+            </div>
+            
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input type="radio" name="locationType" id="anyLocation" value="any" checked>
+                    <label for="anyLocation">Allow any location (forests, fields, buildings, etc.)</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" name="locationType" id="roadsOnly" value="roads">
+                    <label for="roadsOnly">Place on roads only (highways, paths, trails, etc.)</label>
+                </div>
+            </div>
+            
+            <button onclick="generateDestination()" id="generateBtn">
+                🎲 Generate Random Destination
+            </button>
+            
+            <div class="loading" id="loading">
+                <p>Finding your random destination...</p>
+            </div>
+            
+            <div class="error" id="error"></div>
+        </div>
+        
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+        
+        <div class="result-panel" id="resultPanel">
+            <div class="result-card">
+                <h3>📍 Your Random Destination</h3>
+                <p><strong>Coordinates:</strong></p>
+                <div class="coordinates" id="destCoords"></div>
+                <div class="distance-badge" id="distanceBadge"></div>
+                <br>
+                <a href="#" class="google-maps-link" id="mapsLink" target="_blank">
+                    Open in Google Maps →
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize map centered on Finland
+        let map = L.map('map').setView([64.5, 26.0], 5);
+        let markers = [];
+        let circle = null;
+        let routeLine = null;
+        
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        // Clear all markers and layers
+        function clearMap() {
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            if (circle) {
+                map.removeLayer(circle);
+                circle = null;
+            }
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+        }
+        
+        // Parse location input
+        function parseLocation(input) {
+            input = input.trim();
+            
+            // Check if it's coordinates (contains comma and numbers)
+            const coordRegex = /^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/;
+            const match = input.match(coordRegex);
+            
+            if (match) {
+                const lat = parseFloat(match[1]);
+                const lng = parseFloat(match[2]);
+                
+                // Validate coordinates
+                if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                    return { lat, lng, isAddress: false };
+                } else {
+                    throw new Error('Invalid coordinates. Latitude must be between -90 and 90, longitude between -180 and 180.');
+                }
+            }
+            
+            // It's an address, we'll use Nominatim to geocode
+            return { address: input, isAddress: true };
+        }
+        
+        // Geocode address using Nominatim
+        async function geocodeAddress(address) {
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`);
+            const data = await response.json();
+            
+            if (data.length === 0) {
+                throw new Error(`Could not find location: "${address}". Try being more specific or use coordinates instead.`);
+            }
+            
+            return {
+                lat: parseFloat(data[0].lat),
+                lng: parseFloat(data[0].lon)
+            };
+        }
+        
+        // Generate random point within circle
+        function generateRandomPoint(centerLat, centerLng, radiusKm) {
+            // Convert radius to degrees (approximate)
+            // At equator, 1 degree ≈ 111km
+            const radiusDeg = radiusKm / 111;
+            
+            // Generate random point in circle using polar coordinates
+            const r = radiusDeg * Math.sqrt(Math.random());
+            const theta = Math.random() * 2 * Math.PI;
+            
+            // Convert to lat/lng offset
+            const latOffset = r * Math.cos(theta);
+            // Adjust for latitude (longitude degrees get smaller as you move north)
+            const lngOffset = r * Math.sin(theta) / Math.cos(centerLat * Math.PI / 180);
+            
+            return {
+                lat: centerLat + latOffset,
+                lng: centerLng + lngOffset
+            };
+        }
+        
+        // Calculate distance between two points (Haversine formula)
+        function calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+        
+        // Fetch roads within radius using Overpass API
+        async function fetchRoadsInRadius(centerLat, centerLng, radiusKm) {
+            // Calculate bounding box (rough approximation)
+            const latOffset = radiusKm / 111;
+            const lngOffset = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
+            
+            const minLat = centerLat - latOffset;
+            const maxLat = centerLat + latOffset;
+            const minLng = centerLng - lngOffset;
+            const maxLng = centerLng + lngOffset;
+            
+            // Build Overpass QL query
+            const query = `
+                [out:json][timeout:15];
+                way["highway"](${minLat},${minLng},${maxLat},${maxLng});
+                out geom;
+            `;
+            
+            const response = await fetch('https://overpass-api.de/api/interpreter', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'data=' + encodeURIComponent(query)
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch roads. Please try again.');
+            }
+            
+            const data = await response.json();
+            
+            // Filter roads to only those within actual radius
+            const roads = [];
+            for (const element of data.elements) {
+                if (element.type === 'way' && element.geometry) {
+                    // Check if any point on this road is within radius
+                    for (const point of element.geometry) {
+                        const dist = calculateDistance(centerLat, centerLng, point.lat, point.lon);
+                        if (dist <= radiusKm) {
+                            roads.push(element);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            return roads;
+        }
+        
+        // Get random point on a random road
+        function getRandomPointOnRoad(roads) {
+            if (!roads || roads.length === 0) {
+                return null;
+            }
+            
+            // Pick random road
+            const road = roads[Math.floor(Math.random() * roads.length)];
+            const geometry = road.geometry;
+            
+            if (!geometry || geometry.length < 2) {
+                return null;
+            }
+            
+            // Pick random segment of the road
+            const segmentIndex = Math.floor(Math.random() * (geometry.length - 1));
+            const point1 = geometry[segmentIndex];
+            const point2 = geometry[segmentIndex + 1];
+            
+            // Pick random point along the segment (linear interpolation)
+            const t = Math.random();
+            const lat = point1.lat + t * (point2.lat - point1.lat);
+            const lng = point1.lon + t * (point2.lon - point1.lon);
+            
+            return { lat, lng };
+        }
+        
+        // Show error message
+        function showError(message) {
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = message;
+            errorEl.classList.add('active');
+            setTimeout(() => {
+                errorEl.classList.remove('active');
+            }, 5000);
+        }
+        
+        // Main function to generate destination
+        async function generateDestination() {
+            const locationInput = document.getElementById('location').value;
+            const distanceInput = document.getElementById('distance').value;
+            const loadingEl = document.getElementById('loading');
+            const btn = document.getElementById('generateBtn');
+            
+            // Validate inputs
+            if (!locationInput || !distanceInput) {
+                showError('Please enter both a location and maximum distance.');
+                return;
+            }
+            
+            const maxDistance = parseFloat(distanceInput);
+            if (isNaN(maxDistance) || maxDistance <= 0) {
+                showError('Please enter a valid distance greater than 0.');
+                return;
+            }
+            
+            // Show loading state
+            loadingEl.classList.add('active');
+            btn.disabled = true;
+            document.getElementById('error').classList.remove('active');
+            
+            try {
+                // Parse location
+                const locationData = parseLocation(locationInput);
+                let startLat, startLng;
+                
+                if (locationData.isAddress) {
+                    const coords = await geocodeAddress(locationData.address);
+                    startLat = coords.lat;
+                    startLng = coords.lng;
+                } else {
+                    startLat = locationData.lat;
+                    startLng = locationData.lng;
+                }
+                
+                // Clear previous markers and layers
+                clearMap();
+                
+                // Determine location type preference
+                const locationType = document.querySelector('input[name="locationType"]:checked').value;
+                
+                // Generate random destination
+                let dest;
+                
+                if (locationType === 'roads') {
+                    loadingEl.querySelector('p').textContent = 'Searching for roads in the area...';
+                    
+                    const roads = await fetchRoadsInRadius(startLat, startLng, maxDistance);
+                    
+                    if (roads.length === 0) {
+                        throw new Error('No roads found within the specified radius. Try increasing the distance.');
+                    }
+                    
+                    dest = getRandomPointOnRoad(roads);
+                    
+                    if (!dest) {
+                        throw new Error('Could not generate a valid point on a road. Please try again.');
+                    }
+                } else {
+                    // Any location
+                    dest = generateRandomPoint(startLat, startLng, maxDistance);
+                }
+                
+                // Calculate actual distance
+                const actualDistance = calculateDistance(startLat, startLng, dest.lat, dest.lng);
+                
+                // Add markers
+                const startMarker = L.marker([startLat, startLng])
+                    .addTo(map)
+                    .bindPopup('<b>Start</b><br>' + locationInput);
+                markers.push(startMarker);
+                
+                const destMarker = L.marker([dest.lat, dest.lng])
+                    .addTo(map)
+                    .bindPopup('<b>Destination</b><br>Go here!');
+                markers.push(destMarker);
+                
+                // Draw circle showing max distance
+                circle = L.circle([startLat, startLng], {
+                    color: '#667eea',
+                    fillColor: '#667eea',
+                    fillOpacity: 0.1,
+                    radius: maxDistance * 1000 // Convert km to meters
+                }).addTo(map);
+                
+                // Draw line between points
+                routeLine = L.polyline([[startLat, startLng], [dest.lat, dest.lng]], {
+                    color: '#764ba2',
+                    weight: 3,
+                    opacity: 0.7,
+                    dashArray: '10, 10'
+                }).addTo(map);
+                
+                // Fit map to show both points
+                const group = new L.featureGroup(markers);
+                map.fitBounds(group.getBounds().pad(0.2));
+                
+                // Update result panel
+                document.getElementById('destCoords').textContent = 
+                    `${dest.lat.toFixed(6)}, ${dest.lng.toFixed(6)}`;
+                document.getElementById('distanceBadge').textContent = 
+                    `📏 ${actualDistance.toFixed(2)} km away`;
+                document.getElementById('mapsLink').href = 
+                    `https://www.google.com/maps/search/?api=1&query=${dest.lat},${dest.lng}`;
+                document.getElementById('resultPanel').classList.add('active');
+                
+            } catch (error) {
+                showError(error.message || 'An error occurred. Please try again.');
+            } finally {
+                loadingEl.classList.remove('active');
+                loadingEl.querySelector('p').textContent = 'Finding your random destination...';
+                btn.disabled = false;
+            }
+        }
+        
+        // Allow Enter key to submit
+        document.getElementById('location').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                generateDestination();
+            }
+        });
+        
+        document.getElementById('distance').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                generateDestination();
+            }
+        });
+    </script>
+</body>
+</html>
