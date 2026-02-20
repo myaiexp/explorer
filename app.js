@@ -1,3 +1,21 @@
+// ─── POI types ────────────────────────────────────────────────────────────────
+
+const POI_TYPES = [
+    { label: 'park',           key: 'park',           filter: '["leisure"="park"]' },
+    { label: 'nature reserve', key: 'nature_reserve', filter: '["leisure"="nature_reserve"]' },
+    { label: 'forest',         key: 'forest',         filter: '["landuse"="forest"]' },
+    { label: 'beach',          key: 'beach',          filter: '["natural"="beach"]' },
+    { label: 'viewpoint',      key: 'viewpoint',      filter: '["tourism"="viewpoint"]' },
+    { label: 'playground',     key: 'playground',     filter: '["leisure"="playground"]' },
+    { label: 'sports pitch',   key: 'pitch',          filter: '["leisure"="pitch"]' },
+    { label: 'cafe',           key: 'cafe',           filter: '["amenity"="cafe"]' },
+    { label: 'restaurant',     key: 'restaurant',     filter: '["amenity"="restaurant"]' },
+    { label: 'pub or bar',     key: 'pub',            filter: '["amenity"~"pub|bar"]' },
+    { label: 'library',        key: 'library',        filter: '["amenity"="library"]' },
+    { label: 'museum',         key: 'museum',         filter: '["tourism"="museum"]' },
+    { label: 'historic site',  key: 'historic',       filter: '["historic"]' },
+];
+
 // ─── Map init ────────────────────────────────────────────────────────────────
 
 const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -47,6 +65,19 @@ function getVisits() {
 
 // ─── Map helpers ─────────────────────────────────────────────────────────────
 
+function createPinIcon(color) {
+    return L.divIcon({
+        className: '',
+        html: `<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 0C5.373 0 0 5.373 0 12c0 9 12 24 12 24s12-15 12-24C24 5.373 18.627 0 12 0z" fill="${color}"/>
+            <circle cx="12" cy="12" r="5" fill="white" fill-opacity="0.9"/>
+        </svg>`,
+        iconSize: [24, 36],
+        iconAnchor: [12, 36],
+        popupAnchor: [0, -38]
+    });
+}
+
 function clearMap() {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
@@ -93,18 +124,15 @@ function useMyLocation() {
         return;
     }
     btn.disabled = true;
-    btn.textContent = '⏳ Getting location…';
     navigator.geolocation.getCurrentPosition(
         (pos) => {
             document.getElementById('location').value =
                 `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`;
             btn.disabled = false;
-            btn.textContent = '📍 Use My Location';
         },
         (err) => {
             showError('Could not get your location: ' + err.message);
             btn.disabled = false;
-            btn.textContent = '📍 Use My Location';
         },
         { timeout: 10000 }
     );
@@ -204,15 +232,54 @@ function scoreRouteOverlap(routeCoords, existingPoints) {
     return overlapping / sample.length;
 }
 
+// ─── POIs (Overpass) ─────────────────────────────────────────────────────────
+
+async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
+    const latOffset = maxKm / 111;
+    const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
+    const bbox = `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
+    const query = `
+        [out:json][timeout:20];
+        (
+          node${filter}(${bbox});
+          way${filter}(${bbox});
+        );
+        out center tags;
+    `;
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(query)
+    });
+    if (!response.ok) throw new Error('Failed to fetch places. Please try again.');
+    const data = await response.json();
+    const pois = [];
+    for (const el of data.elements) {
+        let lat, lng;
+        if (el.type === 'node') {
+            lat = el.lat; lng = el.lon;
+        } else if (el.type === 'way' && el.center) {
+            lat = el.center.lat; lng = el.center.lon;
+        } else {
+            continue;
+        }
+        const dist = calculateDistance(centerLat, centerLng, lat, lng);
+        if (dist >= minKm && dist <= maxKm) {
+            pois.push({ lat, lng, name: el.tags?.name || null });
+        }
+    }
+    return pois;
+}
+
 // ─── Roads (Overpass) ────────────────────────────────────────────────────────
 
-async function fetchRoadsInRadius(centerLat, centerLng, maxKm) {
+async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
     const latOffset = maxKm / 111;
     const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
     const query = `
         [out:json][timeout:15];
-        way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
-        out geom;
+        way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
+        out center;
     `;
     const response = await fetch('https://overpass-api.de/api/interpreter', {
         method: 'POST',
@@ -221,48 +288,16 @@ async function fetchRoadsInRadius(centerLat, centerLng, maxKm) {
     });
     if (!response.ok) throw new Error('Failed to fetch roads. Please try again.');
     const data = await response.json();
-    const roads = [];
+    const points = [];
     for (const el of data.elements) {
-        if (el.type === 'way' && el.geometry) {
-            for (const pt of el.geometry) {
-                if (calculateDistance(centerLat, centerLng, pt.lat, pt.lon) <= maxKm) {
-                    roads.push(el); break;
-                }
+        if (el.type === 'way' && el.center) {
+            const dist = calculateDistance(centerLat, centerLng, el.center.lat, el.center.lon);
+            if (dist >= minKm && dist <= maxKm) {
+                points.push({ lat: el.center.lat, lng: el.center.lon });
             }
         }
     }
-    return roads;
-}
-
-function getRandomPointOnRoadWithRange(roads, centerLat, centerLng, minKm, maxKm, existingDests) {
-    if (!roads || roads.length === 0) return null;
-    const eligible = [];
-    for (const road of roads) {
-        if (!road.geometry) continue;
-        for (const pt of road.geometry) {
-            const dist = calculateDistance(centerLat, centerLng, pt.lat, pt.lon);
-            if (dist >= minKm && dist <= maxKm) eligible.push({ lat: pt.lat, lng: pt.lon });
-        }
-    }
-    if (eligible.length === 0) return null;
-    if (!existingDests || existingDests.length === 0) {
-        return eligible[Math.floor(Math.random() * eligible.length)];
-    }
-    const SAMPLE = 200;
-    let pool = eligible;
-    if (eligible.length > SAMPLE) {
-        const step = Math.floor(eligible.length / SAMPLE);
-        pool = eligible.filter((_, i) => i % step === 0);
-    }
-    const scored = pool.map(pt => {
-        const minDist = existingDests.reduce((min, [eLat, eLng]) =>
-            Math.min(min, calculateDistance(pt.lat, pt.lng, eLat, eLng)), Infinity);
-        return { ...pt, minDist };
-    });
-    scored.sort((a, b) => b.minDist - a.minDist);
-    const topN = Math.max(1, Math.ceil(scored.length * 0.3));
-    const top = scored.slice(0, topN);
-    return top[Math.floor(Math.random() * top.length)];
+    return points;
 }
 
 // ─── OSRM routing ─────────────────────────────────────────────────────────────
@@ -345,6 +380,41 @@ async function buildLoop(startLat, startLng, destLat, destLng, existingPoints) {
     return { outbound: outbound1, return: return1 };
 }
 
+// Build a single routed leg A → B. Returns {coords, duration, distance} or null.
+async function buildOneWay(startLat, startLng, destLat, destLng) {
+    return fetchRouteThrough([
+        { lat: startLat, lng: startLng },
+        { lat: destLat,  lng: destLng }
+    ]);
+}
+
+// ─── Duration badges ──────────────────────────────────────────────────────────
+
+function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
+    const label = tripMode === 'one-way' ? 'one way' : 'round trip';
+    document.getElementById('distanceBadge').textContent = `${totalWalkKm.toFixed(1)} km ${label}`;
+
+    const walkEl = document.getElementById('walkBadge');
+    if (walkDurationSec > 0) {
+        walkEl.textContent = `🚶 ~${Math.round(walkDurationSec / 60)} min`;
+        walkEl.style.display = 'inline-block';
+    } else {
+        walkEl.style.display = 'none';
+    }
+
+    const bikeEl = document.getElementById('bikeBadge');
+    const carEl  = document.getElementById('carBadge');
+    if (totalWalkKm > 0) {
+        bikeEl.textContent = `🚲 ~${Math.round(totalWalkKm / 15 * 60)} min`;
+        bikeEl.style.display = 'inline-block';
+        carEl.textContent  = `🚗 ~${Math.round(totalWalkKm / 35 * 60)} min`;
+        carEl.style.display  = 'inline-block';
+    } else {
+        bikeEl.style.display = 'none';
+        carEl.style.display  = 'none';
+    }
+}
+
 // ─── UI helpers ───────────────────────────────────────────────────────────────
 
 function showError(message) {
@@ -359,13 +429,15 @@ function showError(message) {
 function showSuccess(message) {
     const el = document.getElementById('error');
     el.textContent = message;
-    el.style.color = '#065f46';
-    el.style.background = '#d1fae5';
+    el.style.color = '#86efac';
+    el.style.background = 'rgba(34, 197, 94, 0.15)';
+    el.style.borderColor = 'rgba(34, 197, 94, 0.3)';
     el.classList.add('active');
     setTimeout(() => {
         el.classList.remove('active');
         el.style.color = '';
         el.style.background = '';
+        el.style.borderColor = '';
     }, 4000);
 }
 
@@ -373,49 +445,49 @@ function resetMarkVisitedBtn() {
     const btn = document.getElementById('markVisitedBtn');
     btn.classList.remove('marked');
     btn.disabled = false;
-    btn.textContent = '✓ Mark as Visited';
+    btn.textContent = 'Mark as visited';
 }
 
 // ─── Display route results on map ────────────────────────────────────────────
 
 function displayRoute(startLat, startLng, destLat, destLng, straightMax, straightMin,
-                      outboundRoute, returnRoute, locationInput) {
+                      outboundRoute, returnRoute, locationInput, destName, tripMode) {
     // Markers
-    const startMarker = L.marker([startLat, startLng])
+    const startMarker = L.marker([startLat, startLng], { icon: createPinIcon('#3b82f6') })
         .addTo(map).bindPopup('<b>Start</b><br>' + locationInput);
     markers.push(startMarker);
 
-    const destMarker = L.marker([destLat, destLng])
+    const destMarker = L.marker([destLat, destLng], { icon: createPinIcon('#f59e0b') })
         .addTo(map).bindPopup('<b>Destination</b><br>Turnaround point');
     markers.push(destMarker);
 
     // Radius circles
     if (straightMax > 0) {
         circle = L.circle([startLat, startLng], {
-            color: '#667eea', fillColor: '#667eea', fillOpacity: 0.08,
+            color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08,
             radius: straightMax * 1000
         }).addTo(map);
     }
     if (straightMin > 0) {
         innerCircle = L.circle([startLat, startLng], {
-            color: '#667eea', fillColor: 'transparent', fillOpacity: 0,
+            color: '#3b82f6', fillColor: 'transparent', fillOpacity: 0,
             weight: 1.5, opacity: 0.4, dashArray: '6, 4',
             radius: straightMin * 1000
         }).addTo(map);
     }
 
-    // Route polylines — single continuous green line
+    // Route polylines — blue outbound, amber return
     const allCoords = [];
     if (outboundRoute) {
         const line = L.polyline(outboundRoute.coords, {
-            color: '#10b981', weight: 3, opacity: 0.85
+            color: '#3b82f6', weight: 3, opacity: 0.85
         }).addTo(map);
         routeLines.push(line);
         allCoords.push(...outboundRoute.coords);
     }
     if (returnRoute) {
         const line = L.polyline(returnRoute.coords, {
-            color: '#10b981', weight: 3, opacity: 0.85
+            color: '#f59e0b', weight: 3, opacity: 0.85
         }).addTo(map);
         routeLines.push(line);
         allCoords.push(...returnRoute.coords);
@@ -424,7 +496,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
     // Fallback: dashed straight line if no routes at all
     if (!outboundRoute && !returnRoute) {
         const line = L.polyline([[startLat, startLng], [destLat, destLng]], {
-            color: '#764ba2', weight: 3, opacity: 0.7, dashArray: '10, 10'
+            color: '#3b82f6', weight: 3, opacity: 0.7, dashArray: '10, 10'
         }).addTo(map);
         routeLines.push(line);
         allCoords.push([startLat, startLng], [destLat, destLng]);
@@ -440,18 +512,19 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
     const totalWalkKm = outDist + retDist;
     const totalDuration = (outboundRoute?.duration || 0) + (returnRoute?.duration || 0);
 
+    const nameEl = document.getElementById('destName');
+    if (destName) {
+        const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(destName)}/@${destLat},${destLng},17z`;
+        nameEl.innerHTML = `<a href="${mapsUrl}" target="_blank">${destName}</a>`;
+        nameEl.style.display = 'block';
+    } else {
+        nameEl.innerHTML = '';
+        nameEl.style.display = 'none';
+    }
+
     document.getElementById('destCoords').textContent =
         `${destLat.toFixed(6)}, ${destLng.toFixed(6)}`;
-    document.getElementById('distanceBadge').textContent =
-        `📏 ${totalWalkKm.toFixed(1)} km round trip`;
-
-    const walkBadgeEl = document.getElementById('walkBadge');
-    if (totalDuration > 0) {
-        walkBadgeEl.textContent = `🚶 ~${Math.round(totalDuration / 60)} min`;
-        walkBadgeEl.style.display = 'inline-block';
-    } else {
-        walkBadgeEl.style.display = 'none';
-    }
+    updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
     document.getElementById('mapsLink').href =
         `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`;
@@ -462,13 +535,16 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
 
     currentSession = {
         startLat, startLng, startLabel: locationInput,
-        destLat, destLng,
+        destLat, destLng, destName: destName || null,
+        tripMode: tripMode || 'round',
         distance: totalWalkKm,
         routeCoords:         outboundRoute ? outboundRoute.coords   : null,
         routeDuration:       outboundRoute ? outboundRoute.duration  : null,
         returnRouteCoords:   returnRoute   ? returnRoute.coords      : null,
         returnRouteDuration: returnRoute   ? returnRoute.duration    : null
     };
+
+    saveToHistory(currentSession);
 }
 
 // ─── Resolve start location ──────────────────────────────────────────────────
@@ -512,32 +588,51 @@ async function generateDestination() {
         const existingDests = getAllExistingDestinations();
         const existingPoints = getAllExistingRoutePoints();
 
-        const locationType = document.querySelector('input[name="locationType"]:checked').value;
+        const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
+        const locationTypeVal = document.getElementById('locationTypeSelect').value;
+        const locationType = (locationTypeVal === 'any' || locationTypeVal === 'roads') ? locationTypeVal : 'poi';
 
-        // Distance inputs are round-trip walking distance.
-        // Empirically, straight-line ≈ budget / 2.6 produces loops close to the target.
-        const straightMin = minKm / 2.6;
-        const straightMax = maxKm / 2.6;
+        // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
+        const scale = tripMode === 'one-way' ? 1.3 : 2.6;
+        const straightMin = minKm / scale;
+        const straightMax = maxKm / scale;
         let dest;
+        let destName = null;
 
         if (locationType === 'roads') {
             loadingEl.querySelector('p').textContent = 'Searching for roads in the area…';
-            const roads = await fetchRoadsInRadius(startLat, startLng, straightMax);
-            if (roads.length === 0) throw new Error('No roads found within the radius. Try increasing the distance.');
-            dest = getRandomPointOnRoadWithRange(roads, startLat, startLng, straightMin, straightMax, existingDests);
-            if (!dest) throw new Error('Could not find a road point in range. Try adjusting min/max distance.');
+            const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax);
+            if (roads.length === 0) throw new Error('No roads found in this range. Try adjusting the distance.');
+            dest = pickMostNovelDestination(roads, existingDests);
+        } else if (locationType === 'poi') {
+            const poiDef = POI_TYPES.find(p => p.key === locationTypeVal);
+            if (!poiDef) throw new Error('Please select a place type.');
+            loadingEl.querySelector('p').textContent = `Searching for ${poiDef.label}s…`;
+            const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, poiDef.filter);
+            if (pois.length === 0) throw new Error(`No ${poiDef.label} found in this range. Try a larger distance.`);
+            dest = pickMostNovelDestination(pois, existingDests);
+            destName = dest.name;
         } else {
             const candidates = Array.from({ length: 5 }, () =>
                 generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
             dest = pickMostNovelDestination(candidates, existingDests);
         }
 
-        // Build oval loop
-        loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-        const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng, existingPoints);
+        // Build route
+        let outboundRoute, returnRoute;
+        if (tripMode === 'one-way') {
+            loadingEl.querySelector('p').textContent = 'Building route…';
+            outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
+            returnRoute = null;
+        } else {
+            loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
+            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng, existingPoints);
+            outboundRoute = loop.outbound;
+            returnRoute = loop.return;
+        }
 
         displayRoute(startLat, startLng, dest.lat, dest.lng,
-                     straightMax, straightMin, loop.outbound, loop.return, locationInput);
+                     straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode);
 
     } catch (error) {
         showError(error.message || 'An error occurred. Please try again.');
@@ -566,7 +661,7 @@ function togglePickMode() {
 
     pickMode = true;
     btn.classList.add('active');
-    btn.textContent = '✕ Cancel';
+    btn.textContent = 'Cancel';
     map.getContainer().style.cursor = 'crosshair';
     showSuccess('Click anywhere on the map to set your destination');
 
@@ -585,12 +680,21 @@ function togglePickMode() {
         try {
             const { startLat, startLng, locationInput: locInput } = await resolveStart();
             clearMap();
-            const existingPoints = getAllExistingRoutePoints();
-
-            loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-            const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+            const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
+            let outboundRoute, returnRoute;
+            if (tripMode === 'one-way') {
+                loadingEl.querySelector('p').textContent = 'Building route…';
+                outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
+                returnRoute = null;
+            } else {
+                const existingPoints = getAllExistingRoutePoints();
+                loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
+                const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+                outboundRoute = loop.outbound;
+                returnRoute = loop.return;
+            }
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                         loop.outbound, loop.return, locInput);
+                         outboundRoute, returnRoute, locInput, null, tripMode);
         } catch (error) {
             showError(error.message || 'An error occurred. Please try again.');
         } finally {
@@ -606,7 +710,7 @@ function exitPickMode() {
     pickMode = false;
     const btn = document.getElementById('pickDestBtn');
     btn.classList.remove('active');
-    btn.textContent = '📌 Pick destination on map';
+    btn.textContent = 'Pick on map';
     map.getContainer().style.cursor = '';
     if (pickHandler) {
         map.off('click', pickHandler);
@@ -641,7 +745,7 @@ function markAsVisited() {
     const btn = document.getElementById('markVisitedBtn');
     btn.classList.add('marked');
     btn.disabled = true;
-    btn.textContent = '✅ Visited!';
+    btn.textContent = 'Visited!';
 
     updateVisitedCounter();
     renderVisitedLayer();
@@ -654,12 +758,12 @@ function renderVisitedLayer() {
     for (const visit of getVisits()) {
         if (visit.routeCoords?.length > 0) {
             L.polyline(visit.routeCoords, {
-                color: '#10b981', weight: 2, opacity: 0.45
+                color: '#3b82f6', weight: 2, opacity: 0.35
             }).addTo(visitedLayerGroup);
         }
         if (visit.returnRouteCoords?.length > 0) {
             L.polyline(visit.returnRouteCoords, {
-                color: '#10b981', weight: 2, opacity: 0.45
+                color: '#f59e0b', weight: 2, opacity: 0.35
             }).addTo(visitedLayerGroup);
         }
         L.circleMarker([visit.startLat, visit.startLng], {
@@ -681,11 +785,11 @@ function toggleVisitedLayer() {
     if (visitedLayerVisible) {
         map.removeLayer(visitedLayerGroup);
         visitedLayerVisible = false;
-        btn.classList.remove('active');
+        btn.textContent = 'Show visited routes';
     } else {
         visitedLayerGroup.addTo(map);
         visitedLayerVisible = true;
-        btn.classList.add('active');
+        btn.textContent = 'Hide visited routes';
     }
 }
 
@@ -693,11 +797,11 @@ function toggleVisitedLayer() {
 
 function updateVisitedCounter() {
     const count = getVisits().length;
-    const places = count === 1 ? 'place' : 'places';
-    document.getElementById('visitedCount').textContent = `${count} ${places} visited`;
+    document.getElementById('visitedCount').textContent = `${count} visited`;
 
     const exploredEl = document.getElementById('exploredCount');
     if (count > 0) {
+        const places = count === 1 ? 'place' : 'places';
         exploredEl.textContent = `${count} ${places} explored`;
         exploredEl.style.display = 'block';
     } else {
@@ -777,24 +881,33 @@ async function rerouteWithCurrentSpread() {
         routeLines.forEach(l => map.removeLayer(l));
         routeLines = [];
 
-        const existingPoints = getAllExistingRoutePoints();
-        const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+        const { tripMode } = currentSession;
+        let outbound, ret;
+        if (tripMode === 'one-way') {
+            outbound = await buildOneWay(startLat, startLng, destLat, destLng);
+            ret = null;
+        } else {
+            const existingPoints = getAllExistingRoutePoints();
+            const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+            outbound = loop.outbound;
+            ret = loop.return;
+        }
 
         // Redraw routes
         const allCoords = [];
-        if (loop.outbound) {
-            const line = L.polyline(loop.outbound.coords, {
-                color: '#10b981', weight: 3, opacity: 0.85
+        if (outbound) {
+            const line = L.polyline(outbound.coords, {
+                color: '#3b82f6', weight: 3, opacity: 0.85
             }).addTo(map);
             routeLines.push(line);
-            allCoords.push(...loop.outbound.coords);
+            allCoords.push(...outbound.coords);
         }
-        if (loop.return) {
-            const line = L.polyline(loop.return.coords, {
-                color: '#10b981', weight: 3, opacity: 0.85
+        if (ret) {
+            const line = L.polyline(ret.coords, {
+                color: '#f59e0b', weight: 3, opacity: 0.85
             }).addTo(map);
             routeLines.push(line);
-            allCoords.push(...loop.return.coords);
+            allCoords.push(...ret.coords);
         }
         if (allCoords.length > 0) {
             map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
@@ -802,29 +915,21 @@ async function rerouteWithCurrentSpread() {
 
         // Update badges
         const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-        const outDist = loop.outbound ? loop.outbound.distance / 1000 : straightDist;
-        const retDist = loop.return   ? loop.return.distance   / 1000 : straightDist;
+        const outDist = outbound ? outbound.distance / 1000 : straightDist;
+        const retDist = ret      ? ret.distance      / 1000 : (tripMode === 'one-way' ? 0 : straightDist);
         const totalWalkKm = outDist + retDist;
-        const totalDuration = (loop.outbound?.duration || 0) + (loop.return?.duration || 0);
+        const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
 
-        document.getElementById('distanceBadge').textContent =
-            `📏 ${totalWalkKm.toFixed(1)} km round trip`;
-        const walkBadgeEl = document.getElementById('walkBadge');
-        if (totalDuration > 0) {
-            walkBadgeEl.textContent = `🚶 ~${Math.round(totalDuration / 60)} min`;
-            walkBadgeEl.style.display = 'inline-block';
-        } else {
-            walkBadgeEl.style.display = 'none';
-        }
+        updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
         // Update session
         currentSession = {
             ...currentSession,
             distance: totalWalkKm,
-            routeCoords:         loop.outbound ? loop.outbound.coords   : null,
-            routeDuration:       loop.outbound ? loop.outbound.duration  : null,
-            returnRouteCoords:   loop.return   ? loop.return.coords      : null,
-            returnRouteDuration: loop.return   ? loop.return.duration    : null
+            routeCoords:         outbound ? outbound.coords   : null,
+            routeDuration:       outbound ? outbound.duration  : null,
+            returnRouteCoords:   ret      ? ret.coords         : null,
+            returnRouteDuration: ret      ? ret.duration       : null
         };
     } catch (error) {
         showError(error.message || 'Failed to adjust route.');
@@ -851,7 +956,143 @@ function adjustSpread(delta) {
     spreadDebounce = setTimeout(rerouteWithCurrentSpread, 200);
 }
 
+// ─── Number input stepper ─────────────────────────────────────────────────────
+
+function stepNumInput(id, delta) {
+    const input = document.getElementById(id);
+    const min = parseFloat(input.min);
+    const max = parseFloat(input.max);
+    let val = (parseFloat(input.value) || 0) + delta;
+    if (!isNaN(min)) val = Math.max(min, val);
+    if (!isNaN(max)) val = Math.min(max, val);
+    input.value = val;
+}
+
+// ─── Overflow menu ────────────────────────────────────────────────────────────
+
+function toggleOverflowMenu() {
+    document.getElementById('overflowMenu').classList.toggle('open');
+}
+
+document.addEventListener('click', (e) => {
+    const menu = document.getElementById('overflowMenu');
+    const btn = document.getElementById('overflowBtn');
+    if (!menu.contains(e.target) && !btn.contains(e.target)) {
+        menu.classList.remove('open');
+    }
+});
+
+// ─── History ─────────────────────────────────────────────────────────────────
+
+const HISTORY_KEY = 'walk_history';
+const HISTORY_MAX = 20;
+const HISTORY_VISIBLE = 3;
+let historyExpanded = false;
+
+function getHistory() {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+}
+
+function saveToHistory(session) {
+    const entry = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        startLat:            session.startLat,
+        startLng:            session.startLng,
+        startLabel:          session.startLabel,
+        destLat:             session.destLat,
+        destLng:             session.destLng,
+        destName:            session.destName || null,
+        tripMode:            session.tripMode,
+        distance:            session.distance,
+        routeCoords:         session.routeCoords         || null,
+        routeDuration:       session.routeDuration       || null,
+        returnRouteCoords:   session.returnRouteCoords   || null,
+        returnRouteDuration: session.returnRouteDuration || null,
+    };
+    const history = getHistory();
+    history.unshift(entry);
+    if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    renderHistorySection();
+}
+
+function restoreResult(entry) {
+    clearMap();
+    const outbound = entry.routeCoords
+        ? { coords: entry.routeCoords, distance: entry.distance * 1000, duration: entry.routeDuration || 0 }
+        : null;
+    const ret = entry.returnRouteCoords
+        ? { coords: entry.returnRouteCoords, distance: 0, duration: entry.returnRouteDuration || 0 }
+        : null;
+    displayRoute(
+        entry.startLat, entry.startLng,
+        entry.destLat, entry.destLng,
+        0, 0, outbound, ret,
+        entry.startLabel, entry.destName, entry.tripMode
+    );
+}
+
+function renderHistorySection() {
+    const history = getHistory();
+    const section = document.getElementById('historySection');
+    const list = document.getElementById('historyList');
+    const moreBtn = document.getElementById('historyMoreBtn');
+
+    if (history.length === 0) {
+        section.classList.remove('visible');
+        return;
+    }
+
+    section.classList.add('visible');
+    const shown = historyExpanded ? history : history.slice(0, HISTORY_VISIBLE);
+    list.innerHTML = shown.map((entry, i) => {
+        const label = entry.destName ||
+            `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
+        const date = new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
+        const meta = [dist, date].filter(Boolean).join(' · ');
+        return `<div class="history-item" onclick="restoreResult(getHistory()[${i}])">
+            <div class="history-item-name">${label}</div>
+            <div class="history-item-meta">${meta}</div>
+        </div>`;
+    }).join('');
+
+    const hidden = history.length - HISTORY_VISIBLE;
+    if (history.length > HISTORY_VISIBLE) {
+        moreBtn.style.display = 'block';
+        moreBtn.textContent = historyExpanded ? 'Show less' : `Show ${hidden} more`;
+    } else {
+        moreBtn.style.display = 'none';
+    }
+}
+
+function toggleHistoryExpanded() {
+    historyExpanded = !historyExpanded;
+    renderHistorySection();
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
+
+// Populate location type select
+(function () {
+    const sel = document.getElementById('locationTypeSelect');
+    sel.add(new Option('location (anywhere)', 'any'));
+    sel.add(new Option('road', 'roads'));
+    for (const poi of POI_TYPES) {
+        sel.add(new Option(poi.label, poi.key));
+    }
+})();
+
+// Update distance label when trip mode changes
+document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        const isOneWay = document.getElementById('oneWay').checked;
+        document.getElementById('distanceLabel').textContent =
+            isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
+    });
+});
 
 renderVisitedLayer();
 updateVisitedCounter();
+renderHistorySection();

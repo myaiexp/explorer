@@ -2,126 +2,145 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
     <title>Wander</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🧭 Wander</h1>
-            <p>Pick a random destination and discover somewhere new</p>
-            <p class="explored-count" id="exploredCount" style="display:none"></p>
-        </header>
-
-        <div class="controls">
-            <div class="input-group">
-                <label for="location">Starting Location</label>
-                <div class="location-row">
-                    <input type="text" id="location"
-                        placeholder="Enter address or coordinates (e.g., 'Helsinki' or '60.1699, 24.9384')">
-                    <button type="button" class="use-location-btn" id="useLocationBtn"
-                        onclick="useMyLocation()">📍 Use My Location</button>
+    <div class="app">
+        <!-- Top bar -->
+        <div class="top-bar">
+            <span class="brand">Wander</span>
+            <div class="top-bar-right">
+                <span class="visited-count" id="visitedCount">0 visited</span>
+                <button type="button" class="overflow-btn" id="overflowBtn" onclick="toggleOverflowMenu()">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg>
+                </button>
+                <div class="overflow-menu" id="overflowMenu">
+                    <button type="button" id="toggleVisitedBtn" onclick="toggleVisitedLayer()">Show visited routes</button>
+                    <button type="button" onclick="exportVisits()">Export visits</button>
+                    <button type="button" onclick="document.getElementById('importInput').click()">Import visits</button>
+                    <input type="file" id="importInput" accept=".json" style="display:none" onchange="importVisits(event)">
                 </div>
-                <div class="input-hint">You can type an address or paste coordinates like "60.1699, 24.9384"</div>
+            </div>
+        </div>
+
+        <!-- Main content -->
+        <div class="main">
+            <!-- Map -->
+            <div class="map-area">
+                <div id="map"></div>
             </div>
 
-            <div class="input-group">
-                <label>Round-trip walking distance (km)</label>
-                <div class="distance-row">
-                    <div class="distance-field">
-                        <label for="minDistance" class="sub-label">Min km</label>
-                        <input type="number" id="minDistance" min="0" max="100" step="0.5" value="0" placeholder="0">
+            <!-- Controls panel -->
+            <div class="panel">
+                <div class="panel-scroll">
+                    <div class="input-group">
+                        <label for="location">Starting location</label>
+                        <div class="location-row">
+                            <input type="text" id="location"
+                                placeholder="Address or coordinates">
+                            <button type="button" class="icon-btn" id="useLocationBtn"
+                                onclick="useMyLocation()" title="Use my location">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
+                            </button>
+                        </div>
                     </div>
-                    <div class="distance-separator">—</div>
-                    <div class="distance-field">
-                        <label for="maxDistance" class="sub-label">Max km</label>
-                        <input type="number" id="maxDistance" min="0.5" max="100" step="0.5" value="5" placeholder="5">
+
+                    <div class="radio-group">
+                        <label class="radio-option">
+                            <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
+                            <span>Round trip</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="tripMode" id="oneWay" value="one-way">
+                            <span>One way</span>
+                        </label>
                     </div>
+
+                    <div class="action-row">
+                        <button type="button" class="btn-primary" id="generateBtn" onclick="generateDestination()">Walk to a random...</button>
+                    </div>
+
+                    <select id="locationTypeSelect" class="poi-select"></select>
+
+                    <div class="input-group">
+                        <label id="distanceLabel">Round-trip distance (km)</label>
+                        <div class="distance-row">
+                            <div class="distance-field">
+                                <div class="num-input">
+                                    <input type="number" id="minDistance" min="0" max="100" step="0.5" value="0" placeholder="Min">
+                                    <div class="num-btns">
+                                        <button type="button" class="num-btn" onclick="stepNumInput('minDistance',0.5)" tabindex="-1">&plus;</button>
+                                        <button type="button" class="num-btn" onclick="stepNumInput('minDistance',-0.5)" tabindex="-1">&minus;</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="distance-sep">&ndash;</span>
+                            <div class="distance-field">
+                                <div class="num-input">
+                                    <input type="number" id="maxDistance" min="0.5" max="100" step="0.5" value="5" placeholder="Max">
+                                    <div class="num-btns">
+                                        <button type="button" class="num-btn" onclick="stepNumInput('maxDistance',0.5)" tabindex="-1">&plus;</button>
+                                        <button type="button" class="num-btn" onclick="stepNumInput('maxDistance',-0.5)" tabindex="-1">&minus;</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="spreadSlider">Route spread</label>
+                        <div class="slider-row">
+                            <button type="button" class="spread-adj" onclick="adjustSpread(-5)">&minus;</button>
+                            <span class="slider-label">Direct</span>
+                            <input type="range" id="spreadSlider" min="0" max="100" value="50" step="5">
+                            <span class="slider-label">Wide</span>
+                            <button type="button" class="spread-adj" onclick="adjustSpread(5)">+</button>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn-primary btn-full" id="pickDestBtn" onclick="togglePickMode()">Pick on map</button>
+
+                    <div class="loading" id="loading">
+                        <div class="loading-pulse"></div>
+                        <p>Finding your random destination...</p>
+                    </div>
+
+                    <div class="error" id="error"></div>
+
+                    <!-- Result card (inside panel) -->
+                    <div class="result-card" id="resultPanel">
+                        <div class="result-header">Destination</div>
+                        <div class="dest-name" id="destName"></div>
+                        <div class="coordinates" id="destCoords"></div>
+                        <div class="badges-row">
+                            <span class="badge badge-dist" id="distanceBadge"></span>
+                            <span class="badge badge-time" id="walkBadge" style="display:none"></span>
+                            <span class="badge badge-bike" id="bikeBadge" style="display:none"></span>
+                            <span class="badge badge-car" id="carBadge" style="display:none"></span>
+                        </div>
+                        <div class="links-row">
+                            <a href="#" id="mapsLink" target="_blank">Google Maps</a>
+                            <a href="#" id="streetViewLink" target="_blank">Street View</a>
+                        </div>
+                        <button type="button" class="btn-visited" id="markVisitedBtn" onclick="markAsVisited()">Mark as visited</button>
+                    </div>
+
+                    <!-- History section -->
+                    <div class="history-section" id="historySection">
+                        <div class="history-header">Recent</div>
+                        <div class="history-list" id="historyList"></div>
+                        <button type="button" class="history-more" id="historyMoreBtn" onclick="toggleHistoryExpanded()"></button>
+                    </div>
+
+                    <p class="explored-count" id="exploredCount" style="display:none"></p>
                 </div>
-                <div class="input-hint">Total distance including the walk back on a different route</div>
-            </div>
-
-            <div class="radio-group">
-                <div class="radio-option">
-                    <input type="radio" name="locationType" id="anyLocation" value="any" checked>
-                    <label for="anyLocation">Allow any location (forests, fields, buildings, etc.)</label>
-                </div>
-                <div class="radio-option">
-                    <input type="radio" name="locationType" id="roadsOnly" value="roads">
-                    <label for="roadsOnly">Roads only (excludes motorways and trunks)</label>
-                </div>
-            </div>
-
-            <div class="input-group">
-                <label for="spreadSlider">Route spread</label>
-                <div class="slider-row">
-                    <button type="button" class="spread-adj" onclick="adjustSpread(-5)">−</button>
-                    <span class="slider-label">Direct</span>
-                    <input type="range" id="spreadSlider" min="0" max="100" value="50" step="5">
-                    <span class="slider-label">Wide</span>
-                    <button type="button" class="spread-adj" onclick="adjustSpread(5)">+</button>
-                </div>
-                <div class="input-hint">Adjust to reshape the loop — updates automatically</div>
-            </div>
-
-            <div class="action-row">
-                <button onclick="togglePickMode()" id="pickDestBtn">
-                    📌 Pick destination on map
-                </button>
-                <button type="button" class="secondary-btn" id="generateBtn" onclick="generateDestination()">
-                    🎲 Random
-                </button>
-            </div>
-
-            <div class="loading" id="loading">
-                <p>Finding your random destination…</p>
-            </div>
-
-            <div class="error" id="error"></div>
-        </div>
-
-        <div class="visited-toolbar">
-            <div class="toolbar-left">
-                <span class="toolbar-count" id="visitedCount">0 places visited</span>
-            </div>
-            <div class="toolbar-right">
-                <button type="button" class="toolbar-btn active" id="toggleVisitedBtn"
-                    onclick="toggleVisitedLayer()">👁 Visited Locations</button>
-                <button type="button" class="toolbar-btn" onclick="exportVisits()">📤 Export</button>
-                <button type="button" class="toolbar-btn"
-                    onclick="document.getElementById('importInput').click()">📥 Import</button>
-                <input type="file" id="importInput" accept=".json" style="display:none"
-                    onchange="importVisits(event)">
-            </div>
-        </div>
-
-        <div class="map-container">
-            <div id="map"></div>
-        </div>
-
-        <div class="result-panel" id="resultPanel">
-            <div class="result-card">
-                <h3>📍 Your Random Destination</h3>
-                <p><strong>Coordinates:</strong></p>
-                <div class="coordinates" id="destCoords"></div>
-                <div class="badges-row">
-                    <div class="distance-badge" id="distanceBadge"></div>
-                    <div class="walk-badge" id="walkBadge" style="display:none"></div>
-                </div>
-                <div class="links-row">
-                    <a href="#" class="google-maps-link" id="mapsLink" target="_blank">
-                        Open in Google Maps →
-                    </a>
-                    <a href="#" class="street-view-link" id="streetViewLink" target="_blank">
-                        Street View →
-                    </a>
-                </div>
-                <button type="button" class="visited-btn" id="markVisitedBtn" onclick="markAsVisited()">
-                    ✓ Mark as Visited
-                </button>
             </div>
         </div>
     </div>
