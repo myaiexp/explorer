@@ -190,20 +190,6 @@ function getAllExistingDestinations() {
     return getVisits().map(v => [v.destLat, v.destLng]);
 }
 
-function getAllExistingRoutePoints() {
-    const visits = getVisits();
-    const points = [];
-    for (const visit of visits) {
-        for (const key of ['routeCoords', 'returnRouteCoords']) {
-            const coords = visit[key];
-            if (!coords) continue;
-            const step = Math.max(1, Math.floor(coords.length / 15));
-            for (let i = 0; i < coords.length; i += step) points.push(coords[i]);
-        }
-    }
-    return points;
-}
-
 function pickMostNovelDestination(candidates, existingDests) {
     if (!existingDests || existingDests.length === 0) {
         return candidates[Math.floor(Math.random() * candidates.length)];
@@ -218,18 +204,35 @@ function pickMostNovelDestination(candidates, existingDests) {
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function scoreRouteOverlap(routeCoords, existingPoints) {
-    if (!existingPoints || existingPoints.length === 0) return 0;
-    const THRESHOLD = 0.03;
-    const step = Math.max(1, Math.floor(routeCoords.length / 50));
-    const sample = routeCoords.filter((_, i) => i % step === 0);
-    let overlapping = 0;
-    for (const [lat, lng] of sample) {
-        for (const [eLat, eLng] of existingPoints) {
-            if (calculateDistance(lat, lng, eLat, eLng) < THRESHOLD) { overlapping++; break; }
+// Score backtracking: fraction of outbound segments that have a nearby anti-parallel return segment.
+// Returns 0 (no backtracking) to 1 (fully backtracking).
+function scoreBacktracking(outboundCoords, returnCoords) {
+    if (!outboundCoords || !returnCoords || outboundCoords.length < 2 || returnCoords.length < 2) return 0;
+    const THRESHOLD_KM = 0.020; // ~20 metres
+    const ANGLE_THRESH = 150;   // degrees — must be nearly opposite direction
+    const step1 = Math.max(1, Math.floor(outboundCoords.length / 50));
+    const step2 = Math.max(1, Math.floor(returnCoords.length / 50));
+    const outSample = outboundCoords.filter((_, i) => i % step1 === 0);
+    const retSample = returnCoords.filter((_, i) => i % step2 === 0);
+    let backtracking = 0;
+    for (let i = 0; i < outSample.length - 1; i++) {
+        const [aLat, aLng] = outSample[i];
+        const [bLat, bLng] = outSample[i + 1];
+        const outBrng = bearingRad(aLat, aLng, bLat, bLng) * 180 / Math.PI;
+        const midALat = (aLat + bLat) / 2, midALng = (aLng + bLng) / 2;
+        for (let j = 0; j < retSample.length - 1; j++) {
+            const [cLat, cLng] = retSample[j];
+            const [dLat, dLng] = retSample[j + 1];
+            const midBLat = (cLat + dLat) / 2, midBLng = (cLng + dLng) / 2;
+            if (calculateDistance(midALat, midALng, midBLat, midBLng) < THRESHOLD_KM) {
+                const retBrng = bearingRad(cLat, cLng, dLat, dLng) * 180 / Math.PI;
+                let diff = Math.abs(outBrng - retBrng);
+                if (diff > 180) diff = 360 - diff;
+                if (diff > ANGLE_THRESH) { backtracking++; break; }
+            }
         }
     }
-    return overlapping / sample.length;
+    return outSample.length > 1 ? backtracking / (outSample.length - 1) : 0;
 }
 
 // ─── POIs (Overpass) ─────────────────────────────────────────────────────────
@@ -304,8 +307,12 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
 
 const OSRM_BASE = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
 
+let requestDelay = 300;
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 // Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance} or null.
 async function fetchRouteThrough(waypoints) {
+    await sleep(requestDelay);
     try {
         const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
         const url = `${OSRM_BASE}/${coordStr}?overview=full&geometries=geojson`;
@@ -339,7 +346,7 @@ function getSpreadParams() {
     return { offsetMult, viaTs: [0.25, 0.5, 0.75] };
 }
 
-async function buildLoop(startLat, startLng, destLat, destLng, existingPoints) {
+async function buildLoop(startLat, startLng, destLat, destLng) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
     const offsetKm = Math.max(0.1, straightDist * offsetMult);
@@ -356,9 +363,14 @@ async function buildLoop(startLat, startLng, destLat, destLng, existingPoints) {
     const outbound1 = await fetchRouteThrough([A, ...viasRight, B]);
     const return1   = await fetchRouteThrough([B, ...viasLeftReturn, A]);
 
-    if (!existingPoints || existingPoints.length === 0) {
+    if (!document.getElementById('backtrackToggle')?.checked) {
         return { outbound: outbound1, return: return1 };
     }
+
+    // Backtracking mode: show chirality 1 as orange preview
+    const tempLayers = [];
+    if (outbound1) tempLayers.push(L.polyline(outbound1.coords, { color: '#f97316', weight: 3, opacity: 0.75 }).addTo(map));
+    if (return1)   tempLayers.push(L.polyline(return1.coords,   { color: '#f97316', weight: 2, opacity: 0.5, dashArray: '6,4' }).addTo(map));
 
     // Chirality 2: outbound left, return right
     const viasLeftOutbound = viaTs.map(t =>
@@ -369,11 +381,17 @@ async function buildLoop(startLat, startLng, destLat, destLng, existingPoints) {
     const outbound2 = await fetchRouteThrough([A, ...viasLeftOutbound, B]);
     const return2   = await fetchRouteThrough([B, ...viasRightReturn,  A]);
 
-    const score1 = (outbound1 ? scoreRouteOverlap(outbound1.coords, existingPoints) : 1) +
-                   (return1   ? scoreRouteOverlap(return1.coords,   existingPoints) : 1);
-    const score2 = (outbound2 ? scoreRouteOverlap(outbound2.coords, existingPoints) : 1) +
-                   (return2   ? scoreRouteOverlap(return2.coords,   existingPoints) : 1);
+    // Show chirality 2 as green preview
+    if (outbound2) tempLayers.push(L.polyline(outbound2.coords, { color: '#22c55e', weight: 3, opacity: 0.75 }).addTo(map));
+    if (return2)   tempLayers.push(L.polyline(return2.coords,   { color: '#22c55e', weight: 2, opacity: 0.5, dashArray: '6,4' }).addTo(map));
 
+    // Hold briefly so user can compare both chiralities visually
+    await sleep(700);
+    tempLayers.forEach(l => map.removeLayer(l));
+
+    // Pick whichever has less backtracking
+    const score1 = (outbound1 && return1) ? scoreBacktracking(outbound1.coords, return1.coords) : 1;
+    const score2 = (outbound2 && return2) ? scoreBacktracking(outbound2.coords, return2.coords) : 1;
     if (score2 < score1 && outbound2 && return2) {
         return { outbound: outbound2, return: return2 };
     }
@@ -443,8 +461,9 @@ function showSuccess(message) {
 
 function resetMarkVisitedBtn() {
     const btn = document.getElementById('markVisitedBtn');
+    if (!btn) return;
     btn.classList.remove('marked');
-    btn.disabled = false;
+    btn.disabled = true;
     btn.textContent = 'Mark as visited';
 }
 
@@ -544,6 +563,9 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         returnRouteDuration: returnRoute   ? returnRoute.duration    : null
     };
 
+    const mvBtn = document.getElementById('markVisitedBtn');
+    if (mvBtn) mvBtn.disabled = false;
+
     saveToHistory(currentSession);
 }
 
@@ -586,7 +608,6 @@ async function generateDestination() {
         clearMap();
 
         const existingDests = getAllExistingDestinations();
-        const existingPoints = getAllExistingRoutePoints();
 
         const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
         const locationTypeVal = document.getElementById('locationTypeSelect').value;
@@ -626,7 +647,7 @@ async function generateDestination() {
             returnRoute = null;
         } else {
             loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng, existingPoints);
+            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
         }
@@ -687,9 +708,8 @@ function togglePickMode() {
                 outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
                 returnRoute = null;
             } else {
-                const existingPoints = getAllExistingRoutePoints();
                 loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-                const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+                const loop = await buildLoop(startLat, startLng, destLat, destLng);
                 outboundRoute = loop.outbound;
                 returnRoute = loop.return;
             }
@@ -749,6 +769,7 @@ function markAsVisited() {
 
     updateVisitedCounter();
     renderVisitedLayer();
+    document.getElementById('overflowMenu').classList.remove('open');
 }
 
 // ─── Visited layer ────────────────────────────────────────────────────────────
@@ -887,8 +908,7 @@ async function rerouteWithCurrentSpread() {
             outbound = await buildOneWay(startLat, startLng, destLat, destLng);
             ret = null;
         } else {
-            const existingPoints = getAllExistingRoutePoints();
-            const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
             outbound = loop.outbound;
             ret = loop.return;
         }
@@ -971,7 +991,10 @@ function stepNumInput(id, delta) {
 // ─── Overflow menu ────────────────────────────────────────────────────────────
 
 function toggleOverflowMenu() {
-    document.getElementById('overflowMenu').classList.toggle('open');
+    const menu = document.getElementById('overflowMenu');
+    const opening = !menu.classList.contains('open');
+    menu.classList.toggle('open');
+    if (opening) renderOverflowHistory();
 }
 
 document.addEventListener('click', (e) => {
@@ -981,6 +1004,39 @@ document.addEventListener('click', (e) => {
         menu.classList.remove('open');
     }
 });
+
+// ─── Overflow menu helpers ────────────────────────────────────────────────────
+
+function renderOverflowHistory() {
+    const list = document.getElementById('overflowHistoryList');
+    if (!list) return;
+    const history = getHistory();
+    if (history.length === 0) {
+        list.innerHTML = '<div class="overflow-no-history">No walks yet</div>';
+        return;
+    }
+    const shown = history.slice(0, 5);
+    list.innerHTML = shown.map((entry, i) => {
+        const label = entry.destName || `${entry.destLat.toFixed(3)}, ${entry.destLng.toFixed(3)}`;
+        const date = new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
+        const meta = [dist, date].filter(Boolean).join(' · ');
+        return `<button type="button" class="overflow-history-item" onclick="restoreResult(getHistory()[${i}]); document.getElementById('overflowMenu').classList.remove('open')">
+            <span class="overflow-history-name">${label}</span>
+            <span class="overflow-history-meta">${meta}</span>
+        </button>`;
+    }).join('');
+    const remaining = history.length - 5;
+    if (remaining > 0) {
+        list.innerHTML += `<div class="overflow-no-history">${remaining} more in panel below</div>`;
+    }
+}
+
+function adjustRequestDelay(delta) {
+    requestDelay = Math.max(0, Math.min(2000, requestDelay + delta));
+    const el = document.getElementById('requestDelayLabel');
+    if (el) el.textContent = `${requestDelay}ms`;
+}
 
 // ─── History ─────────────────────────────────────────────────────────────────
 
