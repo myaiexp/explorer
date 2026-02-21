@@ -304,8 +304,17 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
 
 const OSRM_BASE = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
 
+let requestDelay = 300;
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function adjustRequestDelay(delta) {
+    requestDelay = Math.max(0, Math.min(2000, requestDelay + delta));
+    document.getElementById('delayValue').textContent = requestDelay + 'ms';
+}
+
 // Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance} or null.
 async function fetchRouteThrough(waypoints) {
+    await sleep(requestDelay);
     try {
         const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
         const url = `${OSRM_BASE}/${coordStr}?overview=full&geometries=geojson`;
