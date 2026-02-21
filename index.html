@@ -22,24 +22,10 @@
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg>
                 </button>
                 <div class="overflow-menu" id="overflowMenu">
-                    <button type="button" id="markVisitedBtn" class="btn-visited-menu" onclick="markAsVisited()" disabled>Mark as visited</button>
-                    <div class="overflow-divider"></div>
-                    <div class="overflow-section-label">Recent walks</div>
-                    <div id="overflowHistoryList"></div>
-                    <div class="overflow-divider"></div>
                     <button type="button" id="toggleVisitedBtn" onclick="toggleVisitedLayer()">Show visited routes</button>
                     <button type="button" onclick="exportVisits()">Export visits</button>
                     <button type="button" onclick="document.getElementById('importInput').click()">Import visits</button>
                     <input type="file" id="importInput" accept=".json" style="display:none" onchange="importVisits(event)">
-                    <div class="overflow-divider"></div>
-                    <div class="overflow-delay-row">
-                        <span class="overflow-delay-label">Request delay</span>
-                        <div class="overflow-delay-ctrl">
-                            <button type="button" onclick="adjustRequestDelay(-100)">&minus;</button>
-                            <span id="requestDelayLabel">300ms</span>
-                            <button type="button" onclick="adjustRequestDelay(100)">+</button>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -119,11 +105,6 @@
                         </div>
                     </div>
 
-                    <div class="backtrack-row">
-                        <input type="checkbox" id="backtrackToggle">
-                        <label for="backtrackToggle" class="backtrack-label">Reduce backtracking</label>
-                    </div>
-
                     <button type="button" class="btn-primary btn-full" id="pickDestBtn" onclick="togglePickMode()">Pick on map</button>
 
                     <div class="loading" id="loading">
@@ -148,6 +129,7 @@
                             <a href="#" id="mapsLink" target="_blank">Google Maps</a>
                             <a href="#" id="streetViewLink" target="_blank">Street View</a>
                         </div>
+                        <button type="button" class="btn-visited" id="markVisitedBtn" onclick="markAsVisited()">Mark as visited</button>
                     </div>
 
                     <!-- History section -->

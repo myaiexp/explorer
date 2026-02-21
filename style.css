@@ -127,9 +127,7 @@ html, body {
     border-radius: var(--radius);
     padding: 4px;
     z-index: 200;
-    min-width: 230px;
-    max-height: 70vh;
-    overflow-y: auto;
+    min-width: 160px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
@@ -156,135 +154,6 @@ html, body {
 
 .overflow-menu button:hover {
     background: rgba(255, 255, 255, 0.06);
-}
-
-.overflow-menu button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-.overflow-menu button:disabled:hover {
-    background: none;
-}
-
-.overflow-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 0;
-}
-
-.overflow-section-label {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-secondary);
-    padding: 6px 12px 2px;
-}
-
-.overflow-no-history {
-    font-size: 12px;
-    color: var(--text-secondary);
-    padding: 6px 12px;
-    font-style: italic;
-}
-
-.overflow-history-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
-    text-align: left;
-    padding: 6px 12px;
-    background: none;
-    border: none;
-    color: var(--text);
-    font-size: 13px;
-    font-family: var(--font);
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.1s;
-    gap: 8px;
-}
-
-.overflow-history-item:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.overflow-history-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-}
-
-.overflow-history-meta {
-    font-size: 11px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.btn-visited-menu {
-    width: 100%;
-    text-align: left;
-    padding: 8px 12px;
-    background: none;
-    border: none;
-    color: var(--success);
-    font-size: 13px;
-    font-weight: 600;
-    font-family: var(--font);
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.1s;
-}
-
-.btn-visited-menu:hover:not(:disabled) {
-    background: rgba(34, 197, 94, 0.1);
-}
-
-.btn-visited-menu.marked {
-    color: var(--success);
-    opacity: 0.6;
-}
-
-.overflow-delay-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 12px;
-    gap: 8px;
-}
-
-.overflow-delay-label {
-    font-size: 13px;
-    color: var(--text-secondary);
-}
-
-.overflow-delay-ctrl {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.overflow-delay-ctrl button {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    line-height: 1;
-}
-
-.overflow-delay-ctrl span {
-    font-size: 12px;
-    font-family: var(--mono);
-    color: var(--text);
-    min-width: 40px;
-    text-align: center;
 }
 
 /* ── Main layout ───────────────────────────────────────────────────────── */
@@ -961,36 +830,39 @@ input[type="range"]::-moz-range-thumb {
     text-decoration: underline;
 }
 
+.btn-visited {
+    width: 100%;
+    padding: 8px;
+    background: none;
+    color: var(--success);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-visited:hover:not(:disabled) {
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.btn-visited.marked {
+    background: var(--success);
+    color: #fff;
+    border-color: var(--success);
+}
+
+.btn-visited:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 .explored-count {
     font-size: 12px;
     color: var(--text-secondary);
     text-align: center;
-}
-
-/* Backtracking toggle */
-.backtrack-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.backtrack-row input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--accent);
-    cursor: pointer;
-    flex-shrink: 0;
-}
-
-.backtrack-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    text-transform: none;
-    letter-spacing: 0;
-    cursor: pointer;
-    user-select: none;
 }
 
 /* ── Desktop layout (>= 768px) ─────────────────────────────────────────── */
