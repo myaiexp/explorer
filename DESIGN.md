@@ -39,6 +39,7 @@ Load from Google Fonts:
 ```
 
 Tinted backgrounds for status indicators use low-opacity versions of semantic colors:
+
 - Error bg: `rgba(239, 68, 68, 0.15)` with `rgba(239, 68, 68, 0.3)` border
 - Badge backgrounds: `rgba(59, 130, 246, 0.15)`, `rgba(34, 197, 94, 0.15)`
 
@@ -47,6 +48,7 @@ Tinted backgrounds for status indicators use low-opacity versions of semantic co
 ## Layout
 
 ### App Shell
+
 Full-viewport column layout with a fixed top bar and a flex content area below:
 
 ```
@@ -74,6 +76,7 @@ On desktop (`≥ 768px`): panel is a left sidebar, `360px` wide, full height.
 ```
 
 ### Top Bar
+
 Height `40px`, `padding: 0 12px`. Brand name on the left, actions on the right.
 Background: `--bg-deep`. Always use `flex-shrink: 0` and `z-index: 100`.
 
@@ -81,15 +84,15 @@ Background: `--bg-deep`. Always use `flex-shrink: 0` and `z-index: 100`.
 
 ## Typography
 
-| Use | Size | Weight | Color | Notes |
-|-----|------|--------|-------|-------|
-| Brand name | 15px | 600 | `--text` | `letter-spacing: -0.01em` |
-| Body / inputs | 14px | 400 | `--text` | |
-| Buttons | 14px | 600 (primary), 500 (ghost) | — | |
-| Form labels | 12px | 500 | `--text-secondary` | `text-transform: uppercase`, `letter-spacing: 0.04em` |
-| Section headers | 11px | 600 | `--text-secondary` | `text-transform: uppercase`, `letter-spacing: 0.06em` |
-| Small/secondary | 12–13px | 500 | `--text-secondary` | |
-| Monospace data | 13px | 400 | `--text` | JetBrains Mono |
+| Use             | Size    | Weight                     | Color              | Notes                                                 |
+| --------------- | ------- | -------------------------- | ------------------ | ----------------------------------------------------- |
+| Brand name      | 15px    | 600                        | `--text`           | `letter-spacing: -0.01em`                             |
+| Body / inputs   | 14px    | 400                        | `--text`           |                                                       |
+| Buttons         | 14px    | 600 (primary), 500 (ghost) | —                  |                                                       |
+| Form labels     | 12px    | 500                        | `--text-secondary` | `text-transform: uppercase`, `letter-spacing: 0.04em` |
+| Section headers | 11px    | 600                        | `--text-secondary` | `text-transform: uppercase`, `letter-spacing: 0.06em` |
+| Small/secondary | 12–13px | 500                        | `--text-secondary` |                                                       |
+| Monospace data  | 13px    | 400                        | `--text`           | JetBrains Mono                                        |
 
 ---
 
@@ -119,6 +122,7 @@ Inputs sit inside `.input-group` (flex column, `gap: 6px`) with a `<label>` abov
 ### Buttons
 
 **Primary** — filled blue, full-width in action rows:
+
 ```css
 .btn-primary {
     padding: 10px 16px;
@@ -137,6 +141,7 @@ Inputs sit inside `.input-group` (flex column, `gap: 6px`) with a `<label>` abov
 ```
 
 **Ghost** — transparent with border:
+
 ```css
 .btn-ghost {
     padding: 10px 16px;
@@ -152,6 +157,7 @@ Inputs sit inside `.input-group` (flex column, `gap: 6px`) with a `<label>` abov
 ```
 
 **Icon button** — square, 28–36px, no fill:
+
 ```css
 .icon-btn {
     display: flex; align-items: center; justify-content: center;
@@ -166,6 +172,7 @@ Inputs sit inside `.input-group` (flex column, `gap: 6px`) with a `<label>` abov
 ```
 
 **Action row** — primary + ghost side by side:
+
 ```html
 <div class="action-row"> <!-- display:flex; gap:8px -->
     <button class="btn-primary" style="flex:1">Primary</button>
@@ -230,6 +237,7 @@ Wrap in a `.slider-row` (flex, `gap: 6px`) with small text labels on each end.
 ```
 
 Section header inside card:
+
 ```css
 .result-header {
     font-size: 11px; font-weight: 600;
@@ -240,6 +248,7 @@ Section header inside card:
 ```
 
 Monospace data block inside card:
+
 ```css
 .coordinates {
     font-family: var(--mono); font-size: 13px;
@@ -252,6 +261,7 @@ Monospace data block inside card:
 ### Badges
 
 Small inline pill indicators:
+
 ```css
 .badge {
     font-size: 12px; font-weight: 500;
@@ -286,6 +296,7 @@ Toggle with a `.open` class (or `display: none` / `display: block`).
 ### Loading State
 
 Pulsing dot + message:
+
 ```css
 .loading-pulse {
     width: 8px; height: 8px; border-radius: 50%;
@@ -312,6 +323,7 @@ Pulsing dot + message:
 ### Scrollbar
 
 Thin, unobtrusive:
+
 ```css
 .scrollable::-webkit-scrollbar       { width: 4px; }
 .scrollable::-webkit-scrollbar-track { background: transparent; }
@@ -322,15 +334,15 @@ Thin, unobtrusive:
 
 ## Spacing & Sizing Reference
 
-| Token | Value |
-|-------|-------|
-| Panel padding | `14–16px` |
-| Gap between form sections | `12–14px` |
-| Gap within input group | `6px` |
-| Gap in action rows | `8px` |
-| Border radius | `6px` (components), `4px` (inner elements like badges, mono blocks) |
-| Top bar height | `40px` |
-| Transition duration | `0.15s` (most), `0.1s` (hover bg fills) |
+| Token                     | Value                                                               |
+| ------------------------- | ------------------------------------------------------------------- |
+| Panel padding             | `14–16px`                                                           |
+| Gap between form sections | `12–14px`                                                           |
+| Gap within input group    | `6px`                                                               |
+| Gap in action rows        | `8px`                                                               |
+| Border radius             | `6px` (components), `4px` (inner elements like badges, mono blocks) |
+| Top bar height            | `40px`                                                              |
+| Transition duration       | `0.15s` (most), `0.1s` (hover bg fills)                             |
 
 ---
 
