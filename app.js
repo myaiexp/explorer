@@ -190,20 +190,6 @@ function getAllExistingDestinations() {
     return getVisits().map(v => [v.destLat, v.destLng]);
 }
 
-function getAllExistingRoutePoints() {
-    const visits = getVisits();
-    const points = [];
-    for (const visit of visits) {
-        for (const key of ['routeCoords', 'returnRouteCoords']) {
-            const coords = visit[key];
-            if (!coords) continue;
-            const step = Math.max(1, Math.floor(coords.length / 15));
-            for (let i = 0; i < coords.length; i += step) points.push(coords[i]);
-        }
-    }
-    return points;
-}
-
 function pickMostNovelDestination(candidates, existingDests) {
     if (!existingDests || existingDests.length === 0) {
         return candidates[Math.floor(Math.random() * candidates.length)];
@@ -216,20 +202,6 @@ function pickMostNovelDestination(candidates, existingDests) {
     scored.sort((a, b) => b.minDist - a.minDist);
     const pool = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
     return pool[Math.floor(Math.random() * pool.length)];
-}
-
-function scoreRouteOverlap(routeCoords, existingPoints) {
-    if (!existingPoints || existingPoints.length === 0) return 0;
-    const THRESHOLD = 0.03;
-    const step = Math.max(1, Math.floor(routeCoords.length / 50));
-    const sample = routeCoords.filter((_, i) => i % step === 0);
-    let overlapping = 0;
-    for (const [lat, lng] of sample) {
-        for (const [eLat, eLng] of existingPoints) {
-            if (calculateDistance(lat, lng, eLat, eLng) < THRESHOLD) { overlapping++; break; }
-        }
-    }
-    return overlapping / sample.length;
 }
 
 // ─── POIs (Overpass) ─────────────────────────────────────────────────────────
@@ -348,7 +320,7 @@ function getSpreadParams() {
     return { offsetMult, viaTs: [0.25, 0.5, 0.75] };
 }
 
-async function buildLoop(startLat, startLng, destLat, destLng, existingPoints) {
+async function buildLoop(startLat, startLng, destLat, destLng) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
     const offsetKm = Math.max(0.1, straightDist * offsetMult);
@@ -361,32 +333,9 @@ async function buildLoop(startLat, startLng, destLat, destLng, existingPoints) {
     const viasLeftReturn = viaTs.slice().reverse().map(t =>
         envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
 
-    // Chirality 1: outbound right, return left
-    const outbound1 = await fetchRouteThrough([A, ...viasRight, B]);
-    const return1   = await fetchRouteThrough([B, ...viasLeftReturn, A]);
-
-    if (!existingPoints || existingPoints.length === 0) {
-        return { outbound: outbound1, return: return1 };
-    }
-
-    // Chirality 2: outbound left, return right
-    const viasLeftOutbound = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-    const viasRightReturn = viaTs.slice().reverse().map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-
-    const outbound2 = await fetchRouteThrough([A, ...viasLeftOutbound, B]);
-    const return2   = await fetchRouteThrough([B, ...viasRightReturn,  A]);
-
-    const score1 = (outbound1 ? scoreRouteOverlap(outbound1.coords, existingPoints) : 1) +
-                   (return1   ? scoreRouteOverlap(return1.coords,   existingPoints) : 1);
-    const score2 = (outbound2 ? scoreRouteOverlap(outbound2.coords, existingPoints) : 1) +
-                   (return2   ? scoreRouteOverlap(return2.coords,   existingPoints) : 1);
-
-    if (score2 < score1 && outbound2 && return2) {
-        return { outbound: outbound2, return: return2 };
-    }
-    return { outbound: outbound1, return: return1 };
+    const outbound = await fetchRouteThrough([A, ...viasRight, B]);
+    const ret      = await fetchRouteThrough([B, ...viasLeftReturn, A]);
+    return { outbound, return: ret };
 }
 
 // Build a single routed leg A → B. Returns {coords, duration, distance} or null.
@@ -595,7 +544,6 @@ async function generateDestination() {
         clearMap();
 
         const existingDests = getAllExistingDestinations();
-        const existingPoints = getAllExistingRoutePoints();
 
         const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
         const locationTypeVal = document.getElementById('locationTypeSelect').value;
@@ -635,7 +583,7 @@ async function generateDestination() {
             returnRoute = null;
         } else {
             loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng, existingPoints);
+            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
         }
@@ -696,9 +644,8 @@ function togglePickMode() {
                 outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
                 returnRoute = null;
             } else {
-                const existingPoints = getAllExistingRoutePoints();
                 loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-                const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+                const loop = await buildLoop(startLat, startLng, destLat, destLng);
                 outboundRoute = loop.outbound;
                 returnRoute = loop.return;
             }
@@ -896,8 +843,7 @@ async function rerouteWithCurrentSpread() {
             outbound = await buildOneWay(startLat, startLng, destLat, destLng);
             ret = null;
         } else {
-            const existingPoints = getAllExistingRoutePoints();
-            const loop = await buildLoop(startLat, startLng, destLat, destLng, existingPoints);
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
             outbound = loop.outbound;
             ret = loop.return;
         }
