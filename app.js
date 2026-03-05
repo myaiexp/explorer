@@ -625,6 +625,8 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         `${destLat.toFixed(6)}, ${destLng.toFixed(6)}`;
     updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
+    document.getElementById('directionsLink').href =
+        `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${destLat},${destLng}&travelmode=walking`;
     document.getElementById('mapsLink').href =
         `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`;
     document.getElementById('streetViewLink').href =
