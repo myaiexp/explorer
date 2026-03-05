@@ -1,20 +1,31 @@
 // ─── POI types ────────────────────────────────────────────────────────────────
 
-const POI_TYPES = [
-    { label: 'park',           key: 'park',           filter: '["leisure"="park"]' },
-    { label: 'nature reserve', key: 'nature_reserve', filter: '["leisure"="nature_reserve"]' },
-    { label: 'forest',         key: 'forest',         filter: '["landuse"="forest"]' },
-    { label: 'beach',          key: 'beach',          filter: '["natural"="beach"]' },
-    { label: 'viewpoint',      key: 'viewpoint',      filter: '["tourism"="viewpoint"]' },
-    { label: 'playground',     key: 'playground',     filter: '["leisure"="playground"]' },
-    { label: 'sports pitch',   key: 'pitch',          filter: '["leisure"="pitch"]' },
-    { label: 'cafe',           key: 'cafe',           filter: '["amenity"="cafe"]' },
-    { label: 'restaurant',     key: 'restaurant',     filter: '["amenity"="restaurant"]' },
-    { label: 'pub or bar',     key: 'pub',            filter: '["amenity"~"pub|bar"]' },
-    { label: 'library',        key: 'library',        filter: '["amenity"="library"]' },
-    { label: 'museum',         key: 'museum',         filter: '["tourism"="museum"]' },
-    { label: 'historic site',  key: 'historic',       filter: '["historic"]' },
+const POI_CATEGORIES = [
+    { group: 'Nature & outdoors', pois: [
+        { label: 'park',           key: 'park',           filter: '["leisure"="park"]' },
+        { label: 'nature reserve', key: 'nature_reserve', filter: '["leisure"="nature_reserve"]' },
+        { label: 'forest',         key: 'forest',         filter: '["landuse"="forest"]' },
+        { label: 'beach',          key: 'beach',          filter: '["natural"="beach"]' },
+        { label: 'viewpoint',      key: 'viewpoint',      filter: '["tourism"="viewpoint"]' },
+    ]},
+    { group: 'Activity', pois: [
+        { label: 'playground',     key: 'playground',     filter: '["leisure"="playground"]' },
+        { label: 'sports pitch',   key: 'pitch',          filter: '["leisure"="pitch"]' },
+    ]},
+    { group: 'Food & drink', pois: [
+        { label: 'cafe',           key: 'cafe',           filter: '["amenity"="cafe"]' },
+        { label: 'restaurant',     key: 'restaurant',     filter: '["amenity"="restaurant"]' },
+        { label: 'pub or bar',     key: 'pub',            filter: '["amenity"~"pub|bar"]' },
+    ]},
+    { group: 'Culture', pois: [
+        { label: 'library',        key: 'library',        filter: '["amenity"="library"]' },
+        { label: 'museum',         key: 'museum',         filter: '["tourism"="museum"]' },
+        { label: 'historic site',  key: 'historic',       filter: '["historic"]' },
+    ]},
 ];
+
+// Flat lookup for POI definitions
+const POI_TYPES = POI_CATEGORIES.flatMap(c => c.pois);
 
 // ─── Map init ────────────────────────────────────────────────────────────────
 
@@ -54,6 +65,7 @@ let pickHandler = null;
 // ─── localStorage ─────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'walk_visits';
+const SETTINGS_KEY = 'walk_settings';
 
 function getVisits() {
     try {
@@ -61,6 +73,134 @@ function getVisits() {
     } catch {
         return [];
     }
+}
+
+// ─── Settings persistence ────────────────────────────────────────────────────
+
+function saveSettings() {
+    const settings = {
+        location: document.getElementById('location').value,
+        tripMode: document.querySelector('input[name="tripMode"]:checked').value,
+        minDistance: document.getElementById('minDistance').value,
+        maxDistance: document.getElementById('maxDistance').value,
+        poiType: document.getElementById('locationTypeSelect').value,
+        spread: document.getElementById('spreadSlider').value,
+        requestDelay: requestDelay
+    };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function restoreSettings() {
+    try {
+        const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+        if (!settings) return;
+        if (settings.location) document.getElementById('location').value = settings.location;
+        if (settings.tripMode === 'round' || settings.tripMode === 'one-way') {
+            document.getElementById(settings.tripMode === 'one-way' ? 'oneWay' : 'roundTrip').checked = true;
+        }
+        if (settings.minDistance != null) document.getElementById('minDistance').value = settings.minDistance;
+        if (settings.maxDistance != null) document.getElementById('maxDistance').value = settings.maxDistance;
+        if (settings.poiType) document.getElementById('locationTypeSelect').value = settings.poiType;
+        if (settings.spread != null) document.getElementById('spreadSlider').value = settings.spread;
+        if (settings.requestDelay != null) {
+            requestDelay = settings.requestDelay;
+            document.getElementById('delaySlider').value = requestDelay;
+            document.getElementById('delayValue').textContent = requestDelay + 'ms';
+        }
+        // Sync distance label with restored trip mode
+        const isOneWay = document.getElementById('oneWay').checked;
+        document.getElementById('distanceLabel').textContent =
+            isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
+    } catch {}
+}
+
+// Auto-save on input changes
+function initSettingsListeners() {
+    document.getElementById('location').addEventListener('change', saveSettings);
+    document.querySelectorAll('input[name="tripMode"]').forEach(r => r.addEventListener('change', saveSettings));
+    document.getElementById('minDistance').addEventListener('change', saveSettings);
+    document.getElementById('maxDistance').addEventListener('change', saveSettings);
+    document.getElementById('locationTypeSelect').addEventListener('change', saveSettings);
+    document.getElementById('spreadSlider').addEventListener('change', saveSettings);
+    document.getElementById('delaySlider').addEventListener('change', saveSettings);
+}
+
+// ─── Saved locations ─────────────────────────────────────────────────────────
+
+const SAVED_LOCATIONS_KEY = 'walk_saved_locations';
+
+function getSavedLocations() {
+    try { return JSON.parse(localStorage.getItem(SAVED_LOCATIONS_KEY) || '[]'); } catch { return []; }
+}
+
+function toggleSaveLocation() {
+    const input = document.getElementById('location').value.trim();
+    if (!input) { showError('Enter a location first.'); return; }
+    const saved = getSavedLocations();
+    const existing = saved.findIndex(s => s.value === input);
+    if (existing >= 0) {
+        saved.splice(existing, 1);
+        localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
+        showSuccess('Location removed from saved.');
+    } else {
+        const label = prompt('Name for this location:', input);
+        if (label === null) return;
+        saved.push({ label: label || input, value: input });
+        localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
+        showSuccess('Location saved.');
+    }
+    renderSavedLocations();
+    updateSaveLocationBtn();
+}
+
+function selectSavedLocation(value) {
+    document.getElementById('location').value = value;
+    updateSaveLocationBtn();
+    saveSettings();
+}
+
+function deleteSavedLocation(index, event) {
+    event.stopPropagation();
+    const saved = getSavedLocations();
+    saved.splice(index, 1);
+    localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
+    renderSavedLocations();
+    updateSaveLocationBtn();
+}
+
+function renderSavedLocations() {
+    const container = document.getElementById('savedLocations');
+    const saved = getSavedLocations();
+    container.replaceChildren();
+    for (let i = 0; i < saved.length; i++) {
+        const item = document.createElement('div');
+        item.className = 'saved-location-item';
+        item.addEventListener('click', () => selectSavedLocation(saved[i].value));
+
+        const label = document.createElement('span');
+        label.className = 'saved-location-label';
+        label.textContent = saved[i].label;
+        item.appendChild(label);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'history-delete';
+        del.title = 'Remove';
+        del.textContent = '\u00d7';
+        del.addEventListener('click', (e) => deleteSavedLocation(i, e));
+        item.appendChild(del);
+
+        container.appendChild(item);
+    }
+}
+
+function updateSaveLocationBtn() {
+    const btn = document.getElementById('saveLocationBtn');
+    const input = document.getElementById('location').value.trim();
+    const saved = getSavedLocations();
+    const isSaved = saved.some(s => s.value === input);
+    btn.style.color = isSaved ? '#fbbf24' : '';
+    btn.querySelector('svg').setAttribute('fill', isSaved ? '#fbbf24' : 'none');
 }
 
 // ─── Map helpers ─────────────────────────────────────────────────────────────
@@ -210,11 +350,12 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
     const latOffset = maxKm / 111;
     const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
     const bbox = `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
+    const filters = Array.isArray(filter) ? filter : [filter];
+    const unionBody = filters.map(f => `node${f}(${bbox});\nway${f}(${bbox});`).join('\n');
     const query = `
         [out:json][timeout:20];
         (
-          node${filter}(${bbox});
-          way${filter}(${bbox});
+          ${unionBody}
         );
         out center tags;
     `;
@@ -547,7 +688,8 @@ async function generateDestination() {
 
         const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
         const locationTypeVal = document.getElementById('locationTypeSelect').value;
-        const locationType = (locationTypeVal === 'any' || locationTypeVal === 'roads') ? locationTypeVal : 'poi';
+        const locationType = (locationTypeVal === 'any' || locationTypeVal === 'roads') ? locationTypeVal
+            : locationTypeVal === 'any_poi' ? 'any_poi' : 'poi';
 
         // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
         const scale = tripMode === 'one-way' ? 1.3 : 2.6;
@@ -561,6 +703,13 @@ async function generateDestination() {
             const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax);
             if (roads.length === 0) throw new Error('No roads found in this range. Try adjusting the distance.');
             dest = pickMostNovelDestination(roads, existingDests);
+        } else if (locationType === 'any_poi') {
+            loadingEl.querySelector('p').textContent = 'Searching for any POI…';
+            const allFilters = POI_TYPES.map(p => p.filter);
+            const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, allFilters);
+            if (pois.length === 0) throw new Error('No POIs found in this range. Try a larger distance.');
+            dest = pickMostNovelDestination(pois, existingDests);
+            destName = dest.name;
         } else if (locationType === 'poi') {
             const poiDef = POI_TYPES.find(p => p.key === locationTypeVal);
             if (!poiDef) throw new Error('Please select a place type.');
@@ -678,6 +827,19 @@ function exitPickMode() {
 
 function markAsVisited() {
     if (!currentSession) return;
+    const btn = document.getElementById('markVisitedBtn');
+
+    // Undo: remove visit if already marked
+    if (currentSession.visitId) {
+        const visits = getVisits().filter(v => v.id !== currentSession.visitId);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
+        currentSession.visitId = null;
+        btn.classList.remove('marked');
+        btn.textContent = 'Mark as visited';
+        updateVisitedCounter();
+        renderVisitedLayer();
+        return;
+    }
 
     const visit = {
         id: Date.now(),
@@ -697,11 +859,10 @@ function markAsVisited() {
     const visits = getVisits();
     visits.push(visit);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
+    currentSession.visitId = visit.id;
 
-    const btn = document.getElementById('markVisitedBtn');
     btn.classList.add('marked');
-    btn.disabled = true;
-    btn.textContent = 'Visited!';
+    btn.textContent = 'Visited! (undo)';
 
     updateVisitedCounter();
     renderVisitedLayer();
@@ -803,6 +964,114 @@ function importVisits(event) {
     reader.readAsText(file);
 }
 
+// ─── URL sharing ─────────────────────────────────────────────────────────────
+
+function encodeRouteHash() {
+    if (!currentSession) return;
+    const { startLat, startLng, destLat, destLng, tripMode, destName } = currentSession;
+    const params = new URLSearchParams({
+        s: `${startLat.toFixed(6)},${startLng.toFixed(6)}`,
+        d: `${destLat.toFixed(6)},${destLng.toFixed(6)}`,
+        m: tripMode
+    });
+    if (destName) params.set('n', destName);
+    return '#' + params.toString();
+}
+
+function copyRouteLink() {
+    const hash = encodeRouteHash();
+    if (!hash) return;
+    const url = location.origin + location.pathname + hash;
+    navigator.clipboard.writeText(url).then(
+        () => showSuccess('Link copied to clipboard.'),
+        () => showError('Failed to copy link.')
+    );
+}
+
+async function restoreFromHash() {
+    const hash = location.hash.slice(1);
+    if (!hash) return;
+    try {
+        const params = new URLSearchParams(hash);
+        const s = params.get('s');
+        const d = params.get('d');
+        const m = params.get('m') || 'round';
+        const n = params.get('n') || null;
+        if (!s || !d) return;
+
+        const [startLat, startLng] = s.split(',').map(Number);
+        const [destLat, destLng] = d.split(',').map(Number);
+        if ([startLat, startLng, destLat, destLng].some(isNaN)) return;
+
+        // Set UI state
+        document.getElementById('location').value = s;
+        if (m === 'one-way') document.getElementById('oneWay').checked = true;
+        else document.getElementById('roundTrip').checked = true;
+
+        const loadingEl = document.getElementById('loading');
+        const genBtn = document.getElementById('generateBtn');
+        loadingEl.classList.add('active');
+        loadingEl.querySelector('p').textContent = 'Loading shared route…';
+        genBtn.disabled = true;
+
+        clearMap();
+        let outboundRoute, returnRoute;
+        if (m === 'one-way') {
+            outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
+            returnRoute = null;
+        } else {
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            outboundRoute = loop.outbound;
+            returnRoute = loop.return;
+        }
+        displayRoute(startLat, startLng, destLat, destLng, 0, 0,
+                     outboundRoute, returnRoute, s, n, m);
+
+        loadingEl.classList.remove('active');
+        loadingEl.querySelector('p').textContent = 'Finding your random destination…';
+        genBtn.disabled = false;
+
+        // Clear hash after restoring so it doesn't re-trigger
+        history.replaceState(null, '', location.pathname);
+    } catch {}
+}
+
+// ─── GPX export ──────────────────────────────────────────────────────────────
+
+function exportGPX() {
+    if (!currentSession) return;
+    const { destName, routeCoords, returnRouteCoords } = currentSession;
+    const name = destName || 'Wander route';
+    const allCoords = [
+        ...(routeCoords || []),
+        ...(returnRouteCoords || [])
+    ];
+    if (allCoords.length === 0) { showError('No route data to export.'); return; }
+
+    const trkpts = allCoords.map(([lat, lng]) =>
+        `      <trkpt lat="${lat}" lon="${lng}"></trkpt>`
+    ).join('\n');
+
+    const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Wander"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${name.replace(/[<>&]/g, '')}</name>
+    <trkseg>
+${trkpts}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.gpx`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
 // ─── Keyboard shortcuts ───────────────────────────────────────────────────────
 
 document.getElementById('location').addEventListener('keypress', e => {
@@ -813,6 +1082,14 @@ document.getElementById('minDistance').addEventListener('keypress', e => {
 });
 document.getElementById('maxDistance').addEventListener('keypress', e => {
     if (e.key === 'Enter') generateDestination();
+});
+
+// Global Ctrl+Enter shortcut
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        generateDestination();
+    }
 });
 
 // ─── Spread slider: auto-regenerate on change ───────────────────────────────
@@ -972,6 +1249,13 @@ function saveToHistory(session) {
     renderHistorySection();
 }
 
+function deleteHistoryEntry(index) {
+    const history = getHistory();
+    history.splice(index, 1);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    renderHistorySection();
+}
+
 function restoreResult(entry) {
     clearMap();
     const outbound = entry.routeCoords
@@ -1001,17 +1285,38 @@ function renderHistorySection() {
 
     section.classList.add('visible');
     const shown = historyExpanded ? history : history.slice(0, HISTORY_VISIBLE);
-    list.innerHTML = shown.map((entry, i) => {
+    list.replaceChildren();
+    shown.forEach((entry, i) => {
         const label = entry.destName ||
             `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
         const date = new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
         const meta = [dist, date].filter(Boolean).join(' · ');
-        return `<div class="history-item" onclick="restoreResult(getHistory()[${i}])">
-            <div class="history-item-name">${label}</div>
-            <div class="history-item-meta">${meta}</div>
-        </div>`;
-    }).join('');
+
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.addEventListener('click', () => restoreResult(getHistory()[i]));
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'history-item-name';
+        nameEl.textContent = label;
+        item.appendChild(nameEl);
+
+        const metaEl = document.createElement('div');
+        metaEl.className = 'history-item-meta';
+        metaEl.textContent = meta;
+        item.appendChild(metaEl);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'history-delete';
+        del.title = 'Remove';
+        del.textContent = '\u00d7';
+        del.addEventListener('click', (e) => { e.stopPropagation(); deleteHistoryEntry(i); });
+        item.appendChild(del);
+
+        list.appendChild(item);
+    });
 
     const hidden = history.length - HISTORY_VISIBLE;
     if (history.length > HISTORY_VISIBLE) {
@@ -1034,8 +1339,14 @@ function toggleHistoryExpanded() {
     const sel = document.getElementById('locationTypeSelect');
     sel.add(new Option('location (anywhere)', 'any'));
     sel.add(new Option('road', 'roads'));
-    for (const poi of POI_TYPES) {
-        sel.add(new Option(poi.label, poi.key));
+    sel.add(new Option('any POI', 'any_poi'));
+    for (const cat of POI_CATEGORIES) {
+        const group = document.createElement('optgroup');
+        group.label = cat.group;
+        for (const poi of cat.pois) {
+            group.appendChild(new Option(poi.label, poi.key));
+        }
+        sel.appendChild(group);
     }
 })();
 
@@ -1048,6 +1359,14 @@ document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
     });
 });
 
+restoreSettings();
+initSettingsListeners();
+renderSavedLocations();
+updateSaveLocationBtn();
 renderVisitedLayer();
 updateVisitedCounter();
 renderHistorySection();
+restoreFromHash();
+
+// Update star button when location input changes
+document.getElementById('location').addEventListener('input', updateSaveLocationBtn);

@@ -45,11 +45,16 @@
                         <div class="location-row">
                             <input type="text" id="location"
                                 placeholder="Address or coordinates">
+                            <button type="button" class="icon-btn" id="saveLocationBtn"
+                                onclick="toggleSaveLocation()" title="Save this location">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            </button>
                             <button type="button" class="icon-btn" id="useLocationBtn"
                                 onclick="useMyLocation()" title="Use my location">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
                             </button>
                         </div>
+                        <div class="saved-locations" id="savedLocations"></div>
                     </div>
 
                     <div class="radio-group">
@@ -138,6 +143,8 @@
                         <div class="links-row">
                             <a href="#" id="mapsLink" target="_blank">Google Maps</a>
                             <a href="#" id="streetViewLink" target="_blank">Street View</a>
+                            <a href="#" onclick="exportGPX(); return false;">GPX</a>
+                            <a href="#" onclick="copyRouteLink(); return false;">Copy link</a>
                         </div>
                         <button type="button" class="btn-visited" id="markVisitedBtn" onclick="markAsVisited()">Mark as visited</button>
                     </div>
