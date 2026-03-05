@@ -546,6 +546,115 @@ function resetMarkVisitedBtn() {
     btn.disabled = false;
     btn.textContent = 'Mark as visited';
     document.getElementById('favoriteBtn').classList.remove('active');
+    document.getElementById('elevationContainer').classList.remove('active');
+}
+
+// ─── Elevation profile ───────────────────────────────────────────────────────
+
+async function fetchElevations(coords) {
+    // Sample up to 100 points evenly along the route
+    const maxPts = 100;
+    const step = Math.max(1, Math.floor(coords.length / maxPts));
+    const sampled = [];
+    for (let i = 0; i < coords.length; i += step) sampled.push(coords[i]);
+    if (sampled[sampled.length - 1] !== coords[coords.length - 1]) {
+        sampled.push(coords[coords.length - 1]);
+    }
+
+    const lats = sampled.map(c => c[0].toFixed(4)).join(',');
+    const lngs = sampled.map(c => c[1].toFixed(4)).join(',');
+    const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.elevation || null;
+}
+
+function renderElevationChart(elevations) {
+    const container = document.getElementById('elevationContainer');
+    container.replaceChildren();
+    if (!elevations || elevations.length < 2) {
+        container.classList.remove('active');
+        return;
+    }
+
+    const min = Math.min(...elevations);
+    const max = Math.max(...elevations);
+    const range = max - min || 1;
+    const w = 300;
+    const h = 64;
+    const pad = 1;
+
+    // Build SVG path for filled area
+    const pts = elevations.map((e, i) => {
+        const x = (i / (elevations.length - 1)) * w;
+        const y = h - pad - ((e - min) / range) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const linePath = pts.join(' L');
+    const areaPath = `M0,${h} L${pts[0]} L${linePath} L${w},${h} Z`;
+
+    // Gain/loss calculation
+    let gain = 0, loss = 0;
+    for (let i = 1; i < elevations.length; i++) {
+        const diff = elevations[i] - elevations[i - 1];
+        if (diff > 0) gain += diff;
+        else loss -= diff;
+    }
+
+    // Build SVG via DOM
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'elevation-chart');
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+
+    const defs = document.createElementNS(NS, 'defs');
+    const grad = document.createElementNS(NS, 'linearGradient');
+    grad.setAttribute('id', 'elevGrad');
+    grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+    grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
+    const stop1 = document.createElementNS(NS, 'stop');
+    stop1.setAttribute('offset', '0%');
+    stop1.setAttribute('stop-color', '#3b82f6');
+    stop1.setAttribute('stop-opacity', '0.4');
+    const stop2 = document.createElementNS(NS, 'stop');
+    stop2.setAttribute('offset', '100%');
+    stop2.setAttribute('stop-color', '#3b82f6');
+    stop2.setAttribute('stop-opacity', '0.05');
+    grad.appendChild(stop1);
+    grad.appendChild(stop2);
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+
+    const area = document.createElementNS(NS, 'path');
+    area.setAttribute('d', areaPath);
+    area.setAttribute('fill', 'url(#elevGrad)');
+    svg.appendChild(area);
+
+    const line = document.createElementNS(NS, 'polyline');
+    line.setAttribute('points', pts.join(' '));
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', '#3b82f6');
+    line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(line);
+
+    container.appendChild(svg);
+
+    const stats = document.createElement('div');
+    stats.className = 'elevation-stats';
+    const rangeStat = document.createElement('span');
+    rangeStat.textContent = `${Math.round(min)}–${Math.round(max)} m`;
+    const gainStat = document.createElement('span');
+    gainStat.textContent = `↑ ${Math.round(gain)} m`;
+    const lossStat = document.createElement('span');
+    lossStat.textContent = `↓ ${Math.round(loss)} m`;
+    stats.appendChild(rangeStat);
+    stats.appendChild(gainStat);
+    stats.appendChild(lossStat);
+    container.appendChild(stats);
+
+    container.classList.add('active');
 }
 
 // ─── Display route results on map ────────────────────────────────────────────
@@ -634,6 +743,18 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${destLat},${destLng}`;
 
     document.getElementById('resultPanel').classList.add('active');
+
+    // Fetch elevation profile (non-blocking)
+    const allRouteCoords = [
+        ...(outboundRoute ? outboundRoute.coords : []),
+        ...(returnRoute ? returnRoute.coords : [])
+    ];
+    if (allRouteCoords.length > 0) {
+        document.getElementById('elevationContainer').classList.remove('active');
+        fetchElevations(allRouteCoords)
+            .then(renderElevationChart)
+            .catch(() => {});
+    }
 
     currentSession = {
         startLat, startLng, startLabel: locationInput,
@@ -1300,6 +1421,17 @@ async function rerouteWithCurrentSpread() {
             returnRouteCoords:   ret      ? ret.coords         : null,
             returnRouteDuration: ret      ? ret.duration       : null
         };
+
+        // Re-fetch elevation for new route
+        const rerouteCoords = [
+            ...(outbound ? outbound.coords : []),
+            ...(ret ? ret.coords : [])
+        ];
+        if (rerouteCoords.length > 0) {
+            fetchElevations(rerouteCoords)
+                .then(renderElevationChart)
+                .catch(() => {});
+        }
     } catch (error) {
         showError(error.message || 'Failed to adjust route.');
     } finally {
