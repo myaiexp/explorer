@@ -751,6 +751,27 @@ async function generateDestination() {
     }
 }
 
+// ─── Surprise me ─────────────────────────────────────────────────────────────
+
+function surpriseMe() {
+    // Random POI type (skip 'any' and 'roads', pick from actual POIs + any_poi)
+    const choices = ['any_poi', ...POI_TYPES.map(p => p.key)];
+    const pick = choices[Math.floor(Math.random() * choices.length)];
+    document.getElementById('locationTypeSelect').value = pick;
+
+    // Random distance: 1-8km range with random min/max
+    const min = +(Math.random() * 3).toFixed(1);          // 0–3 km
+    const max = +(min + 1 + Math.random() * 5).toFixed(1); // min+1 to min+6 km
+    document.getElementById('minDistance').value = min;
+    document.getElementById('maxDistance').value = max;
+
+    // Random spread
+    document.getElementById('spreadSlider').value = Math.round(Math.random() * 100);
+
+    saveSettings();
+    generateDestination();
+}
+
 // ─── Pick destination mode ───────────────────────────────────────────────────
 
 function togglePickMode() {
