@@ -657,6 +657,32 @@ function renderElevationChart(elevations) {
     container.classList.add('active');
 }
 
+// ─── Google Maps directions URL ──────────────────────────────────────────────
+
+function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
+    const base = 'https://www.google.com/maps/dir/?api=1&travelmode=walking';
+    if (tripMode === 'one-way') {
+        return `${base}&origin=${startLat},${startLng}&destination=${destLat},${destLng}`;
+    }
+    // Round trip: start → outbound vias → dest → return vias → start
+    const { offsetMult, viaTs } = getSpreadParams();
+    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+    const offsetKm = Math.max(0.1, straightDist * offsetMult);
+
+    const outVias = viaTs.map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+    const retVias = viaTs.slice().reverse().map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+
+    const waypoints = [
+        ...outVias.map(p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`),
+        `${destLat.toFixed(6)},${destLng.toFixed(6)}`,
+        ...retVias.map(p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`)
+    ].join('|');
+
+    return `${base}&origin=${startLat},${startLng}&destination=${startLat},${startLng}&waypoints=${waypoints}`;
+}
+
 // ─── Display route results on map ────────────────────────────────────────────
 
 function displayRoute(startLat, startLng, destLat, destLng, straightMax, straightMin,
@@ -736,7 +762,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
     updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
     document.getElementById('directionsLink').href =
-        `https://www.google.com/maps/dir/?api=1&origin=${startLat},${startLng}&destination=${destLat},${destLng}&travelmode=walking`;
+        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
     document.getElementById('mapsLink').href =
         `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`;
     document.getElementById('streetViewLink').href =
@@ -1411,6 +1437,10 @@ async function rerouteWithCurrentSpread() {
         const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
 
         updateDurationBadges(totalWalkKm, totalDuration, tripMode);
+
+        // Update directions link with new spread
+        document.getElementById('directionsLink').href =
+            buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
 
         // Update session
         currentSession = {
