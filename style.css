@@ -901,8 +901,43 @@ input[type="range"]::-moz-range-thumb {
     text-decoration: underline;
 }
 
+.result-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-favorite {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.btn-favorite:hover {
+    color: #fbbf24;
+    border-color: #fbbf24;
+}
+
+.btn-favorite.active {
+    color: #fbbf24;
+    border-color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+}
+
+.btn-favorite.active svg {
+    fill: #fbbf24;
+}
+
 .btn-visited {
-    width: 100%;
+    flex: 1;
     padding: 8px;
     background: none;
     color: var(--success);

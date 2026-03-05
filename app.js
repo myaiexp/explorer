@@ -545,6 +545,7 @@ function resetMarkVisitedBtn() {
     btn.classList.remove('marked');
     btn.disabled = false;
     btn.textContent = 'Mark as visited';
+    document.getElementById('favoriteBtn').classList.remove('active');
 }
 
 // ─── Display route results on map ────────────────────────────────────────────
@@ -645,6 +646,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         returnRouteDuration: returnRoute   ? returnRoute.duration    : null
     };
 
+    updateFavoriteBtn();
     saveToHistory(currentSession);
 }
 
@@ -947,6 +949,118 @@ function updateVisitedCounter() {
     } else {
         exploredEl.style.display = 'none';
     }
+}
+
+// ─── Favorites ───────────────────────────────────────────────────────────────
+
+const FAVORITES_KEY = 'walk_favorites';
+
+function getFavorites() {
+    try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); } catch { return []; }
+}
+
+function toggleFavorite() {
+    if (!currentSession) return;
+    const btn = document.getElementById('favoriteBtn');
+    const favs = getFavorites();
+
+    // Check if already favorited (match by dest coords)
+    const idx = favs.findIndex(f =>
+        f.destLat.toFixed(6) === currentSession.destLat.toFixed(6) &&
+        f.destLng.toFixed(6) === currentSession.destLng.toFixed(6)
+    );
+
+    if (idx >= 0) {
+        favs.splice(idx, 1);
+        btn.classList.remove('active');
+    } else {
+        favs.unshift({
+            id: Date.now(),
+            date: new Date().toISOString(),
+            startLat:            currentSession.startLat,
+            startLng:            currentSession.startLng,
+            startLabel:          currentSession.startLabel,
+            destLat:             currentSession.destLat,
+            destLng:             currentSession.destLng,
+            destName:            currentSession.destName || null,
+            tripMode:            currentSession.tripMode,
+            distance:            currentSession.distance,
+            routeCoords:         currentSession.routeCoords         || null,
+            routeDuration:       currentSession.routeDuration       || null,
+            returnRouteCoords:   currentSession.returnRouteCoords   || null,
+            returnRouteDuration: currentSession.returnRouteDuration || null,
+        });
+        btn.classList.add('active');
+    }
+
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+    renderFavoritesSection();
+}
+
+function updateFavoriteBtn() {
+    const btn = document.getElementById('favoriteBtn');
+    if (!currentSession) { btn.classList.remove('active'); return; }
+    const favs = getFavorites();
+    const isFav = favs.some(f =>
+        f.destLat.toFixed(6) === currentSession.destLat.toFixed(6) &&
+        f.destLng.toFixed(6) === currentSession.destLng.toFixed(6)
+    );
+    btn.classList.toggle('active', isFav);
+}
+
+function deleteFavorite(index, event) {
+    event.stopPropagation();
+    const favs = getFavorites();
+    favs.splice(index, 1);
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+    renderFavoritesSection();
+    updateFavoriteBtn();
+}
+
+function renderFavoritesSection() {
+    const favs = getFavorites();
+    const section = document.getElementById('favoritesSection');
+    const list = document.getElementById('favoritesList');
+
+    if (favs.length === 0) {
+        section.classList.remove('visible');
+        return;
+    }
+
+    section.classList.add('visible');
+    list.replaceChildren();
+    favs.forEach((entry, i) => {
+        const label = entry.destName ||
+            `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
+        const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
+
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.addEventListener('click', () => {
+            restoreResult(getFavorites()[i]);
+            updateFavoriteBtn();
+        });
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'history-item-name';
+        nameEl.textContent = label;
+        item.appendChild(nameEl);
+
+        const metaEl = document.createElement('div');
+        metaEl.className = 'history-item-meta';
+        metaEl.textContent = dist;
+        item.appendChild(metaEl);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'history-delete';
+        del.title = 'Remove';
+        del.textContent = '\u00d7';
+        del.addEventListener('click', (e) => deleteFavorite(i, e));
+        item.appendChild(del);
+
+        list.appendChild(item);
+    });
 }
 
 // ─── Export / Import ──────────────────────────────────────────────────────────
@@ -1388,6 +1502,7 @@ renderSavedLocations();
 updateSaveLocationBtn();
 renderVisitedLayer();
 updateVisitedCounter();
+renderFavoritesSection();
 renderHistorySection();
 restoreFromHash();
 

@@ -148,7 +148,18 @@
                             <a href="#" onclick="exportGPX(); return false;">GPX</a>
                             <a href="#" onclick="copyRouteLink(); return false;">Copy link</a>
                         </div>
-                        <button type="button" class="btn-visited" id="markVisitedBtn" onclick="markAsVisited()">Mark as visited</button>
+                        <div class="result-actions">
+                            <button type="button" class="btn-visited" id="markVisitedBtn" onclick="markAsVisited()">Mark as visited</button>
+                            <button type="button" class="btn-favorite" id="favoriteBtn" onclick="toggleFavorite()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Favorites section -->
+                    <div class="history-section" id="favoritesSection">
+                        <div class="history-header">Favorites</div>
+                        <div class="history-list" id="favoritesList"></div>
                     </div>
 
                     <!-- History section -->
