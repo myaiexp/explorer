@@ -24,6 +24,7 @@
                 <div class="overflow-menu" id="overflowMenu">
                     <button type="button" id="toggleVisitedBtn" onclick="toggleVisitedLayer()">Show visited routes</button>
                     <button type="button" onclick="exportVisits()">Export visits</button>
+                    <button type="button" onclick="exportGPX()">Export GPX</button>
                     <button type="button" onclick="document.getElementById('importInput').click()">Import visits</button>
                     <input type="file" id="importInput" accept=".json" style="display:none" onchange="importVisits(event)">
                 </div>
@@ -135,18 +136,21 @@
                         <div class="result-header">Destination</div>
                         <div class="dest-name" id="destName"></div>
                         <div class="coordinates" id="destCoords"></div>
+                        <span class="badge badge-dist" id="distanceBadge"></span>
                         <div class="badges-row">
-                            <span class="badge badge-dist" id="distanceBadge"></span>
                             <span class="badge badge-time" id="walkBadge" style="display:none"></span>
                             <span class="badge badge-bike" id="bikeBadge" style="display:none"></span>
                             <span class="badge badge-car" id="carBadge" style="display:none"></span>
                         </div>
                         <div class="links-row">
-                            <a href="#" id="directionsLink" target="_blank">Directions</a>
-                            <a href="#" id="mapsLink" target="_blank">Google Maps</a>
+                            <a href="#" id="directionsLink" class="btn-directions" target="_blank">
+                                Directions
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
+                            </a>
                             <a href="#" id="streetViewLink" target="_blank">Street View</a>
-                            <a href="#" onclick="exportGPX(); return false;">GPX</a>
-                            <a href="#" onclick="copyRouteLink(); return false;">Copy link</a>
+                            <button type="button" class="link-icon-btn" onclick="copyRouteLink()" title="Copy link">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                            </button>
                         </div>
                         <div class="elevation-container" id="elevationContainer"></div>
                         <div class="result-actions">

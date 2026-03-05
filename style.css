@@ -854,7 +854,7 @@ input[type="range"]::-moz-range-thumb {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 
 .badge {
@@ -865,6 +865,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .badge-dist {
+    display: inline-block;
+    margin-bottom: 6px;
     background: rgba(59, 130, 246, 0.15);
     color: var(--accent);
 }
@@ -886,19 +888,60 @@ input[type="range"]::-moz-range-thumb {
 
 .links-row {
     display: flex;
+    align-items: center;
     gap: 12px;
     margin-bottom: 10px;
 }
 
-.links-row a {
+.btn-directions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font);
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.btn-directions:hover {
+    background: var(--accent-hover);
+    text-decoration: none;
+}
+
+.links-row a:not(.btn-directions) {
     font-size: 13px;
     color: var(--accent);
     text-decoration: none;
     font-weight: 500;
 }
 
-.links-row a:hover {
+.links-row a:not(.btn-directions):hover {
     text-decoration: underline;
+}
+
+.link-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.link-icon-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
 }
 
 /* Elevation profile */

@@ -763,8 +763,6 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
 
     document.getElementById('directionsLink').href =
         buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
-    document.getElementById('mapsLink').href =
-        `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`;
     document.getElementById('streetViewLink').href =
         `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${destLat},${destLng}`;
 
