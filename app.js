@@ -386,6 +386,23 @@ function pickMostNovelDestination(candidates, existingDests) {
     return pool[Math.floor(Math.random() * pool.length)];
 }
 
+// ─── Overpass helpers ────────────────────────────────────────────────────────
+
+async function queryOverpass(query, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        if (attempt > 0) await sleep(1500 * attempt);
+        const response = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'data=' + encodeURIComponent(query)
+        });
+        if (response.ok) return response.json();
+        if (response.status === 429 || response.status === 504) continue;
+        throw new Error('Failed to fetch data from OpenStreetMap. Please try again.');
+    }
+    throw new Error('OpenStreetMap is busy. Please wait a moment and try again.');
+}
+
 // ─── POIs (Overpass) ─────────────────────────────────────────────────────────
 
 async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
@@ -401,13 +418,7 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
         );
         out center tags;
     `;
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(query)
-    });
-    if (!response.ok) throw new Error('Failed to fetch places. Please try again.');
-    const data = await response.json();
+    const data = await queryOverpass(query);
     const pois = [];
     for (const el of data.elements) {
         let lat, lng;
@@ -436,13 +447,7 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
         way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
         out center;
     `;
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(query)
-    });
-    if (!response.ok) throw new Error('Failed to fetch roads. Please try again.');
-    const data = await response.json();
+    const data = await queryOverpass(query);
     const points = [];
     for (const el of data.elements) {
         if (el.type === 'way' && el.center) {
@@ -470,13 +475,7 @@ async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offset
         way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${minLat},${minLng},${maxLat},${maxLng});
         out center;
     `;
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(query)
-    });
-    if (!response.ok) throw new Error('Failed to fetch roads. Please try again.');
-    const data = await response.json();
+    const data = await queryOverpass(query);
     const points = [];
     for (const el of data.elements) {
         if (el.type === 'way' && el.center) {
@@ -599,6 +598,7 @@ async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, 
     if (!roads) {
         try {
             onProgress('Searching for roads…');
+            await sleep(1000); // Delay between Overpass calls to avoid rate limiting
             roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm);
         } catch {
             // Fall back to geometric vias on road fetch failure
