@@ -388,9 +388,21 @@ function pickMostNovelDestination(candidates, existingDests) {
 
 // ─── Overpass helpers ────────────────────────────────────────────────────────
 
-async function queryOverpass(query, retries = 2) {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-        if (attempt > 0) await sleep(1500 * attempt);
+async function queryOverpass(query, onProgress) {
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) {
+            // Check status endpoint for actual wait time
+            try {
+                const status = await fetch('https://overpass-api.de/api/status').then(r => r.text());
+                const match = status.match(/Slot available after: .+, in (\d+) seconds/);
+                const waitSec = match ? Math.min(parseInt(match[1]) + 2, 60) : 15;
+                if (onProgress) onProgress(`OpenStreetMap is busy, retrying in ${waitSec}s…`);
+                await sleep(waitSec * 1000);
+            } catch {
+                await sleep(15000);
+            }
+        }
         const response = await fetch('https://overpass-api.de/api/interpreter', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -405,7 +417,7 @@ async function queryOverpass(query, retries = 2) {
 
 // ─── POIs (Overpass) ─────────────────────────────────────────────────────────
 
-async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
+async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter, onProgress) {
     const latOffset = maxKm / 111;
     const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
     const bbox = `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
@@ -418,7 +430,7 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
         );
         out center tags;
     `;
-    const data = await queryOverpass(query);
+    const data = await queryOverpass(query, onProgress);
     const pois = [];
     for (const el of data.elements) {
         let lat, lng;
@@ -439,7 +451,7 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter) {
 
 // ─── Roads (Overpass) ────────────────────────────────────────────────────────
 
-async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
+async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress) {
     const latOffset = maxKm / 111;
     const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
     const query = `
@@ -447,7 +459,7 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
         way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
         out center;
     `;
-    const data = await queryOverpass(query);
+    const data = await queryOverpass(query, onProgress);
     const points = [];
     for (const el of data.elements) {
         if (el.type === 'way' && el.center) {
@@ -462,7 +474,7 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
 
 // Fetch roads in the corridor between start and dest, expanded by offsetKm on each side.
 // Returns array of {lat, lng} road center points.
-async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm) {
+async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress) {
     const cosLat = Math.cos(((startLat + destLat) / 2) * Math.PI / 180);
     const latPad = offsetKm / 111;
     const lngPad = offsetKm / (111 * cosLat);
@@ -475,7 +487,7 @@ async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offset
         way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${minLat},${minLng},${maxLat},${maxLng});
         out center;
     `;
-    const data = await queryOverpass(query);
+    const data = await queryOverpass(query, onProgress);
     const points = [];
     for (const el of data.elements) {
         if (el.type === 'way' && el.center) {
@@ -599,7 +611,7 @@ async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, 
         try {
             onProgress('Searching for roads…');
             await sleep(1000); // Delay between Overpass calls to avoid rate limiting
-            roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm);
+            roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress);
         } catch {
             // Fall back to geometric vias on road fetch failure
             onProgress('Building round-trip loop…');
@@ -1064,6 +1076,7 @@ async function generateDestination() {
     document.getElementById('error').classList.remove('active');
     currentSession = null;
     resetMarkVisitedBtn();
+    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
 
     try {
         const { startLat, startLng, locationInput } = await resolveStart();
@@ -1082,27 +1095,41 @@ async function generateDestination() {
         const straightMax = maxKm / scale;
         let dest;
         let destName = null;
+        let usedFallback = false;
 
         if (locationType === 'roads') {
-            loadingEl.querySelector('p').textContent = 'Searching for roads in the area…';
-            const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax);
-            if (roads.length === 0) throw new Error('No roads found in this range. Try adjusting the distance.');
-            dest = pickMostNovelDestination(roads, existingDests);
-        } else if (locationType === 'any_poi') {
-            loadingEl.querySelector('p').textContent = 'Searching for any POI…';
-            const allFilters = POI_TYPES.map(p => p.filter);
-            const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, allFilters);
-            if (pois.length === 0) throw new Error('No POIs found in this range. Try a larger distance.');
-            dest = pickMostNovelDestination(pois, existingDests);
-            destName = dest.name;
-        } else if (locationType === 'poi') {
-            const poiDef = POI_TYPES.find(p => p.key === locationTypeVal);
-            if (!poiDef) throw new Error('Please select a place type.');
-            loadingEl.querySelector('p').textContent = `Searching for ${poiDef.label}s…`;
-            const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, poiDef.filter);
-            if (pois.length === 0) throw new Error(`No ${poiDef.label} found in this range. Try a larger distance.`);
-            dest = pickMostNovelDestination(pois, existingDests);
-            destName = dest.name;
+            onProgress('Searching for roads in the area…');
+            try {
+                const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress);
+                if (roads.length === 0) throw new Error('empty');
+                dest = pickMostNovelDestination(roads, existingDests);
+            } catch {
+                onProgress('Overpass unavailable, using random point…');
+                const candidates = Array.from({ length: 5 }, () =>
+                    generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+                dest = pickMostNovelDestination(candidates, existingDests);
+                usedFallback = true;
+            }
+        } else if (locationType === 'any_poi' || locationType === 'poi') {
+            const filters = locationType === 'any_poi'
+                ? POI_TYPES.map(p => p.filter)
+                : [POI_TYPES.find(p => p.key === locationTypeVal)?.filter].filter(Boolean);
+            const label = locationType === 'any_poi'
+                ? 'any POI'
+                : POI_TYPES.find(p => p.key === locationTypeVal)?.label || 'places';
+            onProgress(`Searching for ${label}…`);
+            try {
+                const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
+                if (pois.length === 0) throw new Error('empty');
+                dest = pickMostNovelDestination(pois, existingDests);
+                destName = dest.name;
+            } catch {
+                onProgress('Overpass unavailable, using random point…');
+                const candidates = Array.from({ length: 5 }, () =>
+                    generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+                dest = pickMostNovelDestination(candidates, existingDests);
+                usedFallback = true;
+            }
         } else {
             const candidates = Array.from({ length: 5 }, () =>
                 generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
@@ -1112,11 +1139,10 @@ async function generateDestination() {
         // Build route
         let outboundRoute, returnRoute, smartLoopData = null;
         if (tripMode === 'one-way') {
-            loadingEl.querySelector('p').textContent = 'Building route…';
+            onProgress('Building route…');
             outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
             returnRoute = null;
         } else {
-            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
             const loop = await buildSmartLoop(startLat, startLng, dest.lat, dest.lng, onProgress);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
