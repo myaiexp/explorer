@@ -324,6 +324,48 @@ function envelopeOffsetPoint(aLat, aLng, bLat, bLng, t, maxOffsetKm, side) {
     return { lat, lng };
 }
 
+// ─── Road-side classification & via matching ─────────────────────────────────
+
+// Cross-product sign: which side of line A→B does point P fall on?
+// Returns 1 (left), -1 (right), or 0 (on line)
+function classifyPointSide(aLat, aLng, bLat, bLng, pLat, pLng) {
+    const cross = (bLng - aLng) * (pLat - aLat) - (bLat - aLat) * (pLng - aLng);
+    if (cross > 0) return 1;
+    if (cross < 0) return -1;
+    return 0;
+}
+
+// Split road points into left/right arrays relative to start→dest line
+function classifyRoads(roads, startLat, startLng, destLat, destLng) {
+    const left = [], right = [];
+    for (const road of roads) {
+        const side = classifyPointSide(startLat, startLng, destLat, destLng, road.lat, road.lng);
+        if (side > 0) left.push(road);
+        else if (side < 0) right.push(road);
+        // on-line points are dropped (ambiguous)
+    }
+    return { left, right };
+}
+
+// From roads on one side, pick the 3 closest to the geometric ideal via positions.
+// geometricVias = array of {lat, lng} (the envelope-offset targets).
+// Returns 3 {lat, lng} from roads, or geometric fallback if insufficient roads.
+function selectRoadVias(roads, geometricVias) {
+    if (roads.length < 3) return geometricVias;
+    const candidates = [...roads];
+    const picked = [];
+    for (const gv of geometricVias) {
+        let bestIdx = -1, bestDist = Infinity;
+        for (let i = 0; i < candidates.length; i++) {
+            const d = calculateDistance(gv.lat, gv.lng, candidates[i].lat, candidates[i].lng);
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        picked.push(candidates[bestIdx]);
+        candidates.splice(bestIdx, 1); // don't reuse
+    }
+    return picked;
+}
+
 // ─── Novelty helpers ──────────────────────────────────────────────────────────
 
 function getAllExistingDestinations() {
@@ -413,6 +455,37 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm) {
     return points;
 }
 
+// Fetch roads in the corridor between start and dest, expanded by offsetKm on each side.
+// Returns array of {lat, lng} road center points.
+async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm) {
+    const cosLat = Math.cos(((startLat + destLat) / 2) * Math.PI / 180);
+    const latPad = offsetKm / 111;
+    const lngPad = offsetKm / (111 * cosLat);
+    const minLat = Math.min(startLat, destLat) - latPad;
+    const maxLat = Math.max(startLat, destLat) + latPad;
+    const minLng = Math.min(startLng, destLng) - lngPad;
+    const maxLng = Math.max(startLng, destLng) + lngPad;
+    const query = `
+        [out:json][timeout:15];
+        way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${minLat},${minLng},${maxLat},${maxLng});
+        out center;
+    `;
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(query)
+    });
+    if (!response.ok) throw new Error('Failed to fetch roads. Please try again.');
+    const data = await response.json();
+    const points = [];
+    for (const el of data.elements) {
+        if (el.type === 'way' && el.center) {
+            points.push({ lat: el.center.lat, lng: el.center.lon });
+        }
+    }
+    return points;
+}
+
 // ─── OSRM routing ─────────────────────────────────────────────────────────────
 
 const OSRM_BASE = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
@@ -425,23 +498,48 @@ function adjustRequestDelay(delta) {
     document.getElementById('delayValue').textContent = requestDelay + 'ms';
 }
 
-// Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance} or null.
+// Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance, steps} or null.
 async function fetchRouteThrough(waypoints) {
     await sleep(requestDelay);
     try {
         const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
-        const url = `${OSRM_BASE}/${coordStr}?overview=full&geometries=geojson`;
+        const url = `${OSRM_BASE}/${coordStr}?overview=full&geometries=geojson&steps=true&continue_straight=true`;
         const res = await fetch(url);
         if (!res.ok) return null;
         const data = await res.json();
         if (!data.routes || data.routes.length === 0) return null;
         const r = data.routes[0];
+        // Flatten steps from all legs
+        const steps = r.legs ? r.legs.flatMap(leg => leg.steps || []) : null;
         return {
             coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
             duration: r.duration,
-            distance: r.distance
+            distance: r.distance,
+            steps: steps
         };
     } catch { return null; }
+}
+
+// Count u-turns in a route's step data.
+// Returns number of steps where maneuver modifier === "uturn".
+function countUTurns(steps) {
+    if (!steps) return 0;
+    return steps.filter(s => s.maneuver && s.maneuver.modifier === 'uturn').length;
+}
+
+// Fetch up to `count` nearest road snap points from OSRM nearest service.
+// Returns array of {lat, lng} sorted by distance, or empty array on failure.
+async function fetchNearestRoadSnaps(lat, lng, count = 5) {
+    await sleep(requestDelay);
+    try {
+        const nearestBase = OSRM_BASE.replace('/route/', '/nearest/');
+        const url = `${nearestBase}/${lng},${lat}?number=${count}`;
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (!data.waypoints) return [];
+        return data.waypoints.map(wp => ({ lat: wp.location[1], lng: wp.location[0] }));
+    } catch { return []; }
 }
 
 // Build a full oval loop: A → (right vias) → B → (left vias) → A
@@ -477,6 +575,134 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
     const outbound = await fetchRouteThrough([A, ...viasRight, B]);
     const ret      = await fetchRouteThrough([B, ...viasLeftReturn, A]);
     return { outbound, return: ret };
+}
+
+// Build a round-trip loop using road-sourced vias with u-turn mitigation.
+// onProgress(message) callback updates loading text.
+// cachedRoads: optional previously-fetched roads (for spread slider re-routes).
+// Returns { outbound, return, outboundVias, returnVias, roads }
+async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, cachedRoads = null) {
+    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+    const { offsetMult, viaTs } = getSpreadParams();
+    const offsetKm = Math.max(0.1, straightDist * offsetMult);
+    const A = { lat: startLat, lng: startLng };
+    const B = { lat: destLat,  lng: destLng };
+
+    // 1. Compute geometric via targets (same as buildLoop)
+    const geoViasRight = viaTs.map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+    const geoViasLeft = viaTs.slice().reverse().map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+
+    // 2. Fetch roads in corridor
+    let roads = cachedRoads;
+    if (!roads) {
+        try {
+            onProgress('Searching for roads…');
+            roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm);
+        } catch {
+            // Fall back to geometric vias on road fetch failure
+            onProgress('Building round-trip loop…');
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            return { outbound: loop.outbound, return: loop.return, outboundVias: geoViasRight, returnVias: geoViasLeft, roads: null };
+        }
+    }
+
+    // 3. Classify roads into left/right
+    const { left, right } = classifyRoads(roads, startLat, startLng, destLat, destLng);
+
+    // 4. Match to road vias (right for outbound, left for return)
+    let outboundVias = selectRoadVias(right, geoViasRight);
+    let returnVias   = selectRoadVias(left,  geoViasLeft);
+
+    // 5. Build outbound route: A → rightVias → B
+    onProgress('Building outbound route…');
+    let outbound = await fetchRouteThrough([A, ...outboundVias, B]);
+
+    // 6. Build return route: B → leftVias → A
+    onProgress('Building return route…');
+    let ret = await fetchRouteThrough([B, ...returnVias, A]);
+
+    // If either route failed, fall back to geometric
+    if (!outbound || !ret) {
+        const loop = await buildLoop(startLat, startLng, destLat, destLng);
+        return { outbound: loop.outbound, return: loop.return, outboundVias: geoViasRight, returnVias: geoViasLeft, roads };
+    }
+
+    // 7. Count u-turns and attempt mitigation (up to 2 rounds)
+    let outUTurns = countUTurns(outbound.steps);
+    let retUTurns = countUTurns(ret.steps);
+
+    for (let round = 0; round < 2 && (outUTurns + retUTurns) > 0; round++) {
+        onProgress('Optimizing route…');
+
+        // Try fixing outbound u-turns
+        if (outUTurns > 0 && outbound.steps) {
+            const uturnSteps = outbound.steps.filter(s => s.maneuver && s.maneuver.modifier === 'uturn');
+            for (const utStep of uturnSteps) {
+                const loc = utStep.maneuver.location; // [lng, lat]
+                const uLat = loc[1], uLng = loc[0];
+
+                // Find which via is closest to the u-turn
+                let closestIdx = -1, closestDist = Infinity;
+                for (let i = 0; i < outboundVias.length; i++) {
+                    const d = calculateDistance(uLat, uLng, outboundVias[i].lat, outboundVias[i].lng);
+                    if (d < closestDist) { closestDist = d; closestIdx = i; }
+                }
+                if (closestIdx < 0) continue;
+
+                // Get alternative snaps
+                const snaps = await fetchNearestRoadSnaps(outboundVias[closestIdx].lat, outboundVias[closestIdx].lng, 5);
+                if (snaps.length === 0) continue;
+
+                // Try each snap, keep the one with fewer u-turns
+                for (const snap of snaps) {
+                    const testVias = [...outboundVias];
+                    testVias[closestIdx] = snap;
+                    const testRoute = await fetchRouteThrough([A, ...testVias, B]);
+                    if (testRoute && countUTurns(testRoute.steps) < outUTurns) {
+                        outboundVias = testVias;
+                        outbound = testRoute;
+                        outUTurns = countUTurns(testRoute.steps);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Try fixing return u-turns
+        if (retUTurns > 0 && ret.steps) {
+            const uturnSteps = ret.steps.filter(s => s.maneuver && s.maneuver.modifier === 'uturn');
+            for (const utStep of uturnSteps) {
+                const loc = utStep.maneuver.location;
+                const uLat = loc[1], uLng = loc[0];
+
+                let closestIdx = -1, closestDist = Infinity;
+                for (let i = 0; i < returnVias.length; i++) {
+                    const d = calculateDistance(uLat, uLng, returnVias[i].lat, returnVias[i].lng);
+                    if (d < closestDist) { closestDist = d; closestIdx = i; }
+                }
+                if (closestIdx < 0) continue;
+
+                const snaps = await fetchNearestRoadSnaps(returnVias[closestIdx].lat, returnVias[closestIdx].lng, 5);
+                if (snaps.length === 0) continue;
+
+                for (const snap of snaps) {
+                    const testVias = [...returnVias];
+                    testVias[closestIdx] = snap;
+                    const testRoute = await fetchRouteThrough([B, ...testVias, A]);
+                    if (testRoute && countUTurns(testRoute.steps) < retUTurns) {
+                        returnVias = testVias;
+                        ret = testRoute;
+                        retUTurns = countUTurns(testRoute.steps);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return { outbound, return: ret, outboundVias, returnVias, roads };
 }
 
 // Build a single routed leg A → B. Returns {coords, duration, distance} or null.
@@ -659,20 +885,26 @@ function renderElevationChart(elevations) {
 
 // ─── Google Maps directions URL ──────────────────────────────────────────────
 
-function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
+function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, outboundVias, returnVias) {
     const base = 'https://www.google.com/maps/dir/?api=1&travelmode=walking';
     if (tripMode === 'one-way') {
         return `${base}&origin=${startLat},${startLng}&destination=${destLat},${destLng}`;
     }
-    // Round trip: start → outbound vias → dest → return vias → start
-    const { offsetMult, viaTs } = getSpreadParams();
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
 
-    const outVias = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const retVias = viaTs.slice().reverse().map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+    // Use provided vias if available, otherwise fall back to geometric computation
+    let outVias, retVias;
+    if (outboundVias && returnVias) {
+        outVias = outboundVias;
+        retVias = returnVias;
+    } else {
+        const { offsetMult, viaTs } = getSpreadParams();
+        const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+        const offsetKm = Math.max(0.1, straightDist * offsetMult);
+        outVias = viaTs.map(t =>
+            envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+        retVias = viaTs.slice().reverse().map(t =>
+            envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+    }
 
     const waypoints = [
         ...outVias.map(p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`),
@@ -686,7 +918,8 @@ function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
 // ─── Display route results on map ────────────────────────────────────────────
 
 function displayRoute(startLat, startLng, destLat, destLng, straightMax, straightMin,
-                      outboundRoute, returnRoute, locationInput, destName, tripMode) {
+                      outboundRoute, returnRoute, locationInput, destName, tripMode,
+                      outboundVias, returnVias, cachedRoads) {
     // Markers
     const startMarker = L.marker([startLat, startLng], { icon: createPinIcon('#3b82f6') })
         .addTo(map).bindPopup('<b>Start</b><br>' + locationInput);
@@ -762,7 +995,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
     updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
     document.getElementById('directionsLink').href =
-        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
+        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, outboundVias, returnVias);
     document.getElementById('streetViewLink').href =
         `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${destLat},${destLng}`;
 
@@ -788,7 +1021,10 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         routeCoords:         outboundRoute ? outboundRoute.coords   : null,
         routeDuration:       outboundRoute ? outboundRoute.duration  : null,
         returnRouteCoords:   returnRoute   ? returnRoute.coords      : null,
-        returnRouteDuration: returnRoute   ? returnRoute.duration    : null
+        returnRouteDuration: returnRoute   ? returnRoute.duration    : null,
+        outboundVias:        outboundVias  || null,
+        returnVias:          returnVias    || null,
+        cachedRoads:         cachedRoads   || null
     };
 
     updateFavoriteBtn();
@@ -874,20 +1110,22 @@ async function generateDestination() {
         }
 
         // Build route
-        let outboundRoute, returnRoute;
+        let outboundRoute, returnRoute, smartLoopData = null;
         if (tripMode === 'one-way') {
             loadingEl.querySelector('p').textContent = 'Building route…';
             outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
             returnRoute = null;
         } else {
-            loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
+            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+            const loop = await buildSmartLoop(startLat, startLng, dest.lat, dest.lng, onProgress);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
+            smartLoopData = loop;
         }
 
         displayRoute(startLat, startLng, dest.lat, dest.lng,
-                     straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode);
+                     straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode,
+                     smartLoopData?.outboundVias, smartLoopData?.returnVias, smartLoopData?.roads);
 
     } catch (error) {
         showError(error.message || 'An error occurred. Please try again.');
@@ -957,19 +1195,21 @@ function togglePickMode() {
             const { startLat, startLng, locationInput: locInput } = await resolveStart();
             clearMap();
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
-            let outboundRoute, returnRoute;
+            let outboundRoute, returnRoute, smartLoopData = null;
             if (tripMode === 'one-way') {
                 loadingEl.querySelector('p').textContent = 'Building route…';
                 outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
                 returnRoute = null;
             } else {
-                loadingEl.querySelector('p').textContent = 'Building round-trip loop…';
-                const loop = await buildLoop(startLat, startLng, destLat, destLng);
+                const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+                const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress);
                 outboundRoute = loop.outbound;
                 returnRoute = loop.return;
+                smartLoopData = loop;
             }
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                         outboundRoute, returnRoute, locInput, null, tripMode);
+                         outboundRoute, returnRoute, locInput, null, tripMode,
+                         smartLoopData?.outboundVias, smartLoopData?.returnVias, smartLoopData?.roads);
         } catch (error) {
             showError(error.message || 'An error occurred. Please try again.');
         } finally {
@@ -1297,17 +1537,20 @@ async function restoreFromHash() {
         genBtn.disabled = true;
 
         clearMap();
-        let outboundRoute, returnRoute;
+        let outboundRoute, returnRoute, smartLoopData = null;
         if (m === 'one-way') {
             outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
             returnRoute = null;
         } else {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+            const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
+            smartLoopData = loop;
         }
         displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                     outboundRoute, returnRoute, s, n, m);
+                     outboundRoute, returnRoute, s, n, m,
+                     smartLoopData?.outboundVias, smartLoopData?.returnVias, smartLoopData?.roads);
 
         loadingEl.classList.remove('active');
         loadingEl.querySelector('p').textContent = 'Finding your random destination…';
@@ -1397,14 +1640,16 @@ async function rerouteWithCurrentSpread() {
         routeLines = [];
 
         const { tripMode } = currentSession;
-        let outbound, ret;
+        let outbound, ret, smartLoopData = null;
         if (tripMode === 'one-way') {
             outbound = await buildOneWay(startLat, startLng, destLat, destLng);
             ret = null;
         } else {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+            const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, currentSession.cachedRoads || null);
             outbound = loop.outbound;
             ret = loop.return;
+            smartLoopData = loop;
         }
 
         // Redraw routes
@@ -1436,9 +1681,11 @@ async function rerouteWithCurrentSpread() {
 
         updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
-        // Update directions link with new spread
+        // Update directions link with new vias
+        const newOutVias = smartLoopData?.outboundVias || null;
+        const newRetVias = smartLoopData?.returnVias || null;
         document.getElementById('directionsLink').href =
-            buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
+            buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, newOutVias, newRetVias);
 
         // Update session
         currentSession = {
@@ -1447,7 +1694,10 @@ async function rerouteWithCurrentSpread() {
             routeCoords:         outbound ? outbound.coords   : null,
             routeDuration:       outbound ? outbound.duration  : null,
             returnRouteCoords:   ret      ? ret.coords         : null,
-            returnRouteDuration: ret      ? ret.duration       : null
+            returnRouteDuration: ret      ? ret.duration       : null,
+            outboundVias:        newOutVias,
+            returnVias:          newRetVias,
+            cachedRoads:         smartLoopData?.roads || currentSession.cachedRoads || null
         };
 
         // Re-fetch elevation for new route
