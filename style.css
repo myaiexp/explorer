@@ -477,6 +477,27 @@ input[type="number"]::-webkit-outer-spin-button {
     color: var(--text);
 }
 
+.checkbox-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.checkbox-option input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+.checkbox-option .hint {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
 /* Full-width ghost button */
 .btn-ghost.btn-full {
     width: 100%;

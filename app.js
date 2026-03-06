@@ -610,7 +610,6 @@ async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, 
     if (!roads) {
         try {
             onProgress('Searching for roads…');
-            await sleep(1000); // Delay between Overpass calls to avoid rate limiting
             roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress);
         } catch {
             // Fall back to geometric vias on road fetch failure
@@ -1138,15 +1137,21 @@ async function generateDestination() {
 
         // Build route
         let outboundRoute, returnRoute, smartLoopData = null;
+        const useSmartRouting = document.getElementById('smartRouting').checked;
         if (tripMode === 'one-way') {
             onProgress('Building route…');
             outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
             returnRoute = null;
-        } else {
+        } else if (useSmartRouting) {
             const loop = await buildSmartLoop(startLat, startLng, dest.lat, dest.lng, onProgress);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
             smartLoopData = loop;
+        } else {
+            onProgress('Building route…');
+            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
+            outboundRoute = loop.outbound;
+            returnRoute = loop.return;
         }
 
         displayRoute(startLat, startLng, dest.lat, dest.lng,
@@ -1222,16 +1227,22 @@ function togglePickMode() {
             clearMap();
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
             let outboundRoute, returnRoute, smartLoopData = null;
+            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+            const useSmartRouting = document.getElementById('smartRouting').checked;
             if (tripMode === 'one-way') {
-                loadingEl.querySelector('p').textContent = 'Building route…';
+                onProgress('Building route…');
                 outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
                 returnRoute = null;
-            } else {
-                const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+            } else if (useSmartRouting) {
                 const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress);
                 outboundRoute = loop.outbound;
                 returnRoute = loop.return;
                 smartLoopData = loop;
+            } else {
+                onProgress('Building route…');
+                const loop = await buildLoop(startLat, startLng, destLat, destLng);
+                outboundRoute = loop.outbound;
+                returnRoute = loop.return;
             }
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                          outboundRoute, returnRoute, locInput, null, tripMode,
@@ -1564,15 +1575,21 @@ async function restoreFromHash() {
 
         clearMap();
         let outboundRoute, returnRoute, smartLoopData = null;
+        const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+        const useSmartRouting = document.getElementById('smartRouting').checked;
         if (m === 'one-way') {
             outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
             returnRoute = null;
-        } else {
-            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+        } else if (useSmartRouting) {
             const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
             smartLoopData = loop;
+        } else {
+            onProgress('Loading shared route…');
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            outboundRoute = loop.outbound;
+            returnRoute = loop.return;
         }
         displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                      outboundRoute, returnRoute, s, n, m,
@@ -1667,15 +1684,20 @@ async function rerouteWithCurrentSpread() {
 
         const { tripMode } = currentSession;
         let outbound, ret, smartLoopData = null;
+        const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+        const useSmartRouting = document.getElementById('smartRouting').checked;
         if (tripMode === 'one-way') {
             outbound = await buildOneWay(startLat, startLng, destLat, destLng);
             ret = null;
-        } else {
-            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+        } else if (useSmartRouting) {
             const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, currentSession.cachedRoads || null);
             outbound = loop.outbound;
             ret = loop.return;
             smartLoopData = loop;
+        } else {
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            outbound = loop.outbound;
+            ret = loop.return;
         }
 
         // Redraw routes
