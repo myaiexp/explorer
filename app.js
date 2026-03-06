@@ -570,6 +570,21 @@ function getSpreadParams() {
     return { offsetMult, viaTs: [0.25, 0.5, 0.75] };
 }
 
+// Snap a geometric via to the nearest road point within maxKm.
+// Returns the snapped point, or the original if snapping fails or is too far.
+async function snapToRoad(via, maxKm = 0.5) {
+    try {
+        const nearestBase = OSRM_BASE.replace('/route/', '/nearest/');
+        const res = await fetch(`${nearestBase}/${via.lng},${via.lat}?number=1`);
+        if (!res.ok) return via;
+        const data = await res.json();
+        if (!data.waypoints || !data.waypoints.length) return via;
+        const snap = { lat: data.waypoints[0].location[1], lng: data.waypoints[0].location[0] };
+        const dist = calculateDistance(via.lat, via.lng, snap.lat, snap.lng);
+        return dist <= maxKm ? snap : via;
+    } catch { return via; }
+}
+
 async function buildLoop(startLat, startLng, destLat, destLng) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
@@ -583,8 +598,15 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
     const viasLeftReturn = viaTs.slice().reverse().map(t =>
         envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
 
-    const outbound = await fetchRouteThrough([A, ...viasRight, B]);
-    const ret      = await fetchRouteThrough([B, ...viasLeftReturn, A]);
+    // Snap all 6 vias to nearest roads in parallel (threshold: half the offset distance)
+    const snapRadius = Math.max(0.3, offsetKm * 0.5);
+    const allVias = [...viasRight, ...viasLeftReturn];
+    const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
+    const snappedRight = snapped.slice(0, 3);
+    const snappedLeft = snapped.slice(3);
+
+    const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
+    const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
     return { outbound, return: ret };
 }
 
