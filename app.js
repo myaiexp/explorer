@@ -48,6 +48,14 @@ L.control.layers({ 'OpenStreetMap': osmLayer, 'Satellite': satelliteLayer }).add
 const visitedLayerGroup = L.layerGroup().addTo(map);
 let visitedLayerVisible = true;
 
+// ─── Utilities ───────────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+    const el = document.createElement('span');
+    el.textContent = str;
+    return el.innerHTML;
+}
+
 // ─── Mutable map state ────────────────────────────────────────────────────────
 
 let markers = [];
@@ -955,7 +963,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
                       outboundVias, returnVias, cachedRoads) {
     // Markers
     const startMarker = L.marker([startLat, startLng], { icon: createPinIcon('#3b82f6') })
-        .addTo(map).bindPopup('<b>Start</b><br>' + locationInput);
+        .addTo(map).bindPopup(`<b>Start</b><br>${escapeHtml(locationInput)}`);
     markers.push(startMarker);
 
     const destMarker = L.marker([destLat, destLng], { icon: createPinIcon('#f59e0b') })
@@ -1016,10 +1024,14 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
     const nameEl = document.getElementById('destName');
     if (destName) {
         const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(destName)}/@${destLat},${destLng},17z`;
-        nameEl.innerHTML = `<a href="${mapsUrl}" target="_blank">${destName}</a>`;
+        const a = document.createElement('a');
+        a.href = mapsUrl;
+        a.target = '_blank';
+        a.textContent = destName;
+        nameEl.replaceChildren(a);
         nameEl.style.display = 'block';
     } else {
-        nameEl.innerHTML = '';
+        nameEl.replaceChildren();
         nameEl.style.display = 'none';
     }
 
@@ -1355,7 +1367,7 @@ function renderVisitedLayer() {
         L.circleMarker([visit.startLat, visit.startLng], {
             radius: 5, color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.8, weight: 1
         })
-        .bindPopup(`<b>${visit.startLabel}</b><br>${new Date(visit.date).toLocaleDateString()}`)
+        .bindPopup(`<b>${escapeHtml(visit.startLabel)}</b><br>${new Date(visit.date).toLocaleDateString()}`)
         .addTo(visitedLayerGroup);
 
         L.circleMarker([visit.destLat, visit.destLng], {
