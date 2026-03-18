@@ -13,6 +13,7 @@ Three source files, no build step, no bundler, no framework:
 - `app.js` — all application logic (~85KB, single file)
 
 **External dependencies (CDN-loaded with SRI):**
+
 - [Leaflet 1.9.4](https://leafletjs.com/) — interactive map rendering
 - OpenStreetMap + Esri satellite tiles — map layers (user-switchable)
 - [Nominatim API](https://nominatim.org/) — geocoding (address → coordinates)
@@ -22,6 +23,7 @@ Three source files, no build step, no bundler, no framework:
 - Google Fonts (DM Sans, JetBrains Mono)
 
 **Core logic flow:**
+
 1. User enters a starting location (address or lat/lng) and a max distance in km
 2. Address inputs are geocoded via Nominatim
 3. A destination is picked: random POI from Overpass (categorized: nature, food, activity, culture, or "any"), random road point, or fully random point
@@ -33,12 +35,13 @@ Three source files, no build step, no bundler, no framework:
 ## Project Files
 
 - `DESIGN.md` — complete design system (colors, typography, components, spacing)
-- `docs/plans/` — implementation plans for past features
-- `.claude/feature-ideas.md` — feature backlog with implemented/open items
+- `.claude/plans/` — implementation plans for past features
+- `.claude/ideas.md` — feature backlog with implemented/open items
 
 ## Development
 
 No build step. To serve locally:
+
 ```bash
 python3 -m http.server 8080
 # or
