@@ -23,7 +23,7 @@ Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgre
 1. User enters a starting location (address or lat/lng) and a max distance in km
 2. Address inputs are geocoded via Nominatim
 3. A destination is picked: random POI from Overpass (categorized: nature, food, activity, culture, or "any"), random road point, or fully random point
-4. OSRM calculates a walking route; round-trip mode builds a loop with geometric via points (spread slider controls loop width), smart routing optionally snaps vias to nearby roads
+4. OSRM calculates a walking route; round-trip mode builds a loop by generating 3 geometric envelope vias per side, snapping each independently to the nearest road via OSRM nearest within `max(0.3 km, offsetKm·0.5)`, then routing through them (spread slider controls loop width)
 5. Result shown on Leaflet map with markers, route polylines, elevation profile chart, distance/duration badges, Google Maps directions link
 
 **Key features:** saved locations, favorites/bookmarks, visit history with map overlay, GPX export, Garmin FIT export (course file with turn cues from OSRM steps), route sharing via URL, "Surprise me" button, Overpass rate-limit handling with retry logic, XSS protection on URL parameters, localStorage persistence of all settings.
