@@ -6,14 +6,17 @@
 
 ## Architecture
 
-No build step, no bundler, no framework. Source files served as-is:
+Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`:
 
 - `index.html` — structure
 - `style.css` — styles
-- `app.js` — all application logic (~85KB single file)
+- `app.js` — all application logic (~95KB single file)
+- `sync.js` — cloud-backup sync engine (outbox + per-row upserts to `/explorer/api`)
 - `fit-encoder.js` — Garmin FIT course-file encoder (used by `exportFIT()` in app.js)
 
-`tools/` holds dev-only tooling (FIT round-trip validators using `@garmin/fitsdk`, browser smoke-test page). Has its own `package.json` and `node_modules`; not referenced by `index.html` and not part of the deployed site.
+Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom (`pnpm vitest run tests/sync.test.js`); backend tests run with `cd server && pnpm test`.
+
+`tools/` holds dev-only tooling (FIT round-trip validators, browser smoke-test page). Has its own `package.json` and `node_modules`; not referenced by `index.html` and not part of the deployed site.
 
 **Core logic flow:**
 
@@ -27,12 +30,20 @@ No build step, no bundler, no framework. Source files served as-is:
 
 ## Development
 
-No build step. To serve locally:
+Frontend (no build step):
 
 ```bash
 python3 -m http.server 8080
-# or
-npx serve .
 ```
 
-Deploy by pushing to the `production` git remote.
+Backend:
+
+```bash
+cd server
+pnpm install
+pnpm dev               # tsx watch
+pnpm test              # vitest
+pnpm build             # tsc → dist/
+```
+
+Deploy with `deploy` — pushes to Forgejo, which triggers `forgejo-deploy` to: check out into `~/Projects/explorer`, build the server, run migrations, and rsync frontend assets to `/var/www/html/explorer`. The local `deploy` script then restarts `explorer-api.service`.

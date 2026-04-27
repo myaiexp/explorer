@@ -1,0 +1,15 @@
+[Unit]
+Description=Explorer API (Wander cloud backup)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=mase
+WorkingDirectory=/home/mase/Projects/explorer/server
+EnvironmentFile=/home/mase/Projects/explorer/server/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

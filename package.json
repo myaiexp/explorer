@@ -1,0 +1,14 @@
+{
+  "name": "wander",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.5",
+    "@vitest/coverage-v8": "^3.0.5",
+    "jsdom": "^26.0.0"
+  }
+}

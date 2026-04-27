@@ -70,6 +70,14 @@ let currentSession = null;
 let pickMode = false;
 let pickHandler = null;
 
+// ─── Sync helpers ────────────────────────────────────────────────────────────
+
+function maybeRequestConsent() {
+    if (typeof ExplorerSync !== 'undefined' && ExplorerSync.getState().state === 'anonymous') {
+        ExplorerSync.requestConsent();
+    }
+}
+
 // ─── localStorage ─────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'walk_visits';
@@ -150,14 +158,19 @@ function toggleSaveLocation() {
     const saved = getSavedLocations();
     const existing = saved.findIndex(s => s.value === input);
     if (existing >= 0) {
+        const removed = saved[existing];
         saved.splice(existing, 1);
         localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
+        ExplorerSync.mutate('savedLocations', 'delete', removed.id || String(removed.value));
         showSuccess('Location removed from saved.');
     } else {
         const label = prompt('Name for this location:', input);
         if (label === null) return;
-        saved.push({ label: label || input, value: input });
+        const newLoc = { id: crypto.randomUUID(), label: label || input, value: input };
+        saved.push(newLoc);
         localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
+        ExplorerSync.mutate('savedLocations', 'put', newLoc.id, newLoc);
+        maybeRequestConsent();
         showSuccess('Location saved.');
     }
     renderSavedLocations();
@@ -173,8 +186,10 @@ function selectSavedLocation(value) {
 function deleteSavedLocation(index, event) {
     event.stopPropagation();
     const saved = getSavedLocations();
+    const removed = saved[index];
     saved.splice(index, 1);
     localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
+    ExplorerSync.mutate('savedLocations', 'delete', removed.id || String(removed.value));
     renderSavedLocations();
     updateSaveLocationBtn();
 }
@@ -815,6 +830,126 @@ function showSuccess(message) {
     }, 4000);
 }
 
+// ─── Cloud-backup UI ──────────────────────────────────────────────────────────
+
+function showConsentToast() {
+    return new Promise((resolve) => {
+        if (document.getElementById('cloudConsentToast')) {
+            resolve('declined');
+            return;
+        }
+
+        const toast = document.createElement('div');
+        toast.className = 'toast-consent';
+        toast.id = 'cloudConsentToast';
+
+        const msg = document.createElement('div');
+        msg.className = 'toast-consent-message';
+        msg.textContent =
+            'Wander can save your visits, saved locations, and favorites ' +
+            'to a database on mase.fi so they survive clearing your browser.';
+        toast.appendChild(msg);
+
+        const buttons = document.createElement('div');
+        buttons.className = 'toast-consent-buttons';
+
+        const declineBtn = document.createElement('button');
+        declineBtn.type = 'button';
+        declineBtn.textContent = 'Decline';
+
+        const acceptBtn = document.createElement('button');
+        acceptBtn.type = 'button';
+        acceptBtn.className = 'primary';
+        acceptBtn.textContent = 'Accept';
+
+        let settled = false;
+        const settle = (choice) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(autoTimer);
+            toast.remove();
+            resolve(choice);
+        };
+
+        declineBtn.addEventListener('click', () => {
+            ExplorerSync.decline();
+            settle('declined');
+        });
+        acceptBtn.addEventListener('click', () => {
+            acceptBtn.disabled = true;
+            declineBtn.disabled = true;
+            acceptBtn.textContent = 'Saving…';
+            ExplorerSync.accept().then(() => {
+                showSuccess('Cloud backup enabled.');
+                settle('accepted');
+            }).catch((err) => {
+                console.warn('Cloud backup enable failed', err);
+                showError('Could not enable cloud backup. Try again later.');
+                settle('declined');
+            });
+        });
+
+        buttons.appendChild(declineBtn);
+        buttons.appendChild(acceptBtn);
+        toast.appendChild(buttons);
+        document.body.appendChild(toast);
+
+        const autoTimer = setTimeout(() => {
+            if (!settled) {
+                ExplorerSync.decline();
+                settle('declined');
+            }
+        }, 30000);
+    });
+}
+
+window.ExplorerSyncUI = { showConsentToast };
+
+function enableCloudBackup() {
+    if (typeof ExplorerSync === 'undefined') return;
+    closeOverflowMenuIfOpen();
+    ExplorerSync.requestConsent();
+}
+
+function confirmDeleteCloudData() {
+    closeOverflowMenuIfOpen();
+    if (!confirm('Delete your cloud data permanently? Your local data will be kept.')) return;
+    ExplorerSync.deleteAccount().then(() => {
+        showSuccess('Cloud data deleted.');
+    }).catch((err) => {
+        console.warn('Delete cloud data failed', err);
+        showError('Could not delete cloud data. Try again later.');
+    });
+}
+
+function closeOverflowMenuIfOpen() {
+    const menu = document.getElementById('overflowMenu');
+    if (menu) menu.classList.remove('open');
+}
+
+function updateSyncMenu() {
+    if (typeof ExplorerSync === 'undefined') return;
+    const s = ExplorerSync.getState();
+    const status = document.getElementById('syncStatus');
+    const usernameEl = document.getElementById('syncUsername');
+    const enableBtn = document.getElementById('enableCloudBackupBtn');
+    const deleteBtn = document.getElementById('deleteCloudDataBtn');
+    if (!status || !enableBtn || !deleteBtn) return;
+    if (s.state === 'accepted') {
+        status.style.display = '';
+        if (usernameEl) usernameEl.textContent = s.username || '';
+        enableBtn.style.display = 'none';
+        deleteBtn.style.display = '';
+    } else {
+        status.style.display = 'none';
+        if (usernameEl) usernameEl.textContent = '';
+        enableBtn.style.display = '';
+        deleteBtn.style.display = 'none';
+    }
+}
+
+window.addEventListener('explorer-sync-state-change', updateSyncMenu);
+
 function resetMarkVisitedBtn() {
     const btn = document.getElementById('markVisitedBtn');
     btn.classList.remove('marked');
@@ -1070,6 +1205,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         startLat, startLng, startLabel: locationInput,
         destLat, destLng, destName: destName || null,
         tripMode: tripMode || 'round',
+        poiCategory: document.getElementById('locationTypeSelect')?.value || null,
         distance: totalWalkKm,
         routeCoords:         outboundRoute ? outboundRoute.coords   : null,
         routeDuration:       outboundRoute ? outboundRoute.duration  : null,
@@ -1325,8 +1461,10 @@ function markAsVisited() {
 
     // Undo: remove visit if already marked
     if (currentSession.visitId) {
-        const visits = getVisits().filter(v => v.id !== currentSession.visitId);
+        const undoneId = currentSession.visitId;
+        const visits = getVisits().filter(v => v.id !== undoneId);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
+        ExplorerSync.mutate('visits', 'delete', String(undoneId));
         currentSession.visitId = null;
         btn.classList.remove('marked');
         btn.textContent = 'Mark as visited';
@@ -1336,7 +1474,7 @@ function markAsVisited() {
     }
 
     const visit = {
-        id: Date.now(),
+        id: crypto.randomUUID(),
         date: new Date().toISOString(),
         startLat:            currentSession.startLat,
         startLng:            currentSession.startLng,
@@ -1347,12 +1485,17 @@ function markAsVisited() {
         routeCoords:         currentSession.routeCoords         || null,
         routeDuration:       currentSession.routeDuration       || null,
         returnRouteCoords:   currentSession.returnRouteCoords   || null,
-        returnRouteDuration: currentSession.returnRouteDuration || null
+        returnRouteDuration: currentSession.returnRouteDuration || null,
+        destName:            currentSession.destName            || null,
+        poiCategory:         currentSession.poiCategory         || null,
+        tripMode:            currentSession.tripMode,
     };
 
     const visits = getVisits();
     visits.push(visit);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
+    ExplorerSync.mutate('visits', 'put', visit.id, visit);
+    maybeRequestConsent();
     currentSession.visitId = visit.id;
 
     btn.classList.add('marked');
@@ -1440,11 +1583,14 @@ function toggleFavorite() {
     );
 
     if (idx >= 0) {
+        const removed = favs[idx];
         favs.splice(idx, 1);
         btn.classList.remove('active');
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+        ExplorerSync.mutate('favorites', 'delete', String(removed.id));
     } else {
-        favs.unshift({
-            id: Date.now(),
+        const newFav = {
+            id: crypto.randomUUID(),
             date: new Date().toISOString(),
             startLat:            currentSession.startLat,
             startLng:            currentSession.startLng,
@@ -1458,11 +1604,13 @@ function toggleFavorite() {
             routeDuration:       currentSession.routeDuration       || null,
             returnRouteCoords:   currentSession.returnRouteCoords   || null,
             returnRouteDuration: currentSession.returnRouteDuration || null,
-        });
+        };
+        favs.unshift(newFav);
         btn.classList.add('active');
+        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+        ExplorerSync.mutate('favorites', 'put', newFav.id, newFav);
+        maybeRequestConsent();
     }
-
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
     renderFavoritesSection();
 }
 
@@ -1480,8 +1628,10 @@ function updateFavoriteBtn() {
 function deleteFavorite(index, event) {
     event.stopPropagation();
     const favs = getFavorites();
+    const removed = favs[index];
     favs.splice(index, 1);
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
+    ExplorerSync.mutate('favorites', 'delete', String(removed.id));
     renderFavoritesSection();
     updateFavoriteBtn();
 }
@@ -1559,6 +1709,7 @@ function importVisits(event) {
             const existingIds = new Set(existing.map(v => v.id));
             const newEntries = imported.filter(v => !existingIds.has(v.id));
             localStorage.setItem(STORAGE_KEY, JSON.stringify([...existing, ...newEntries]));
+            maybeRequestConsent();
             showSuccess(`Added ${newEntries.length} new ${newEntries.length === 1 ? 'visit' : 'visits'}.`);
             updateVisitedCounter();
             renderVisitedLayer();
@@ -1924,7 +2075,7 @@ function getHistory() {
 
 function saveToHistory(session) {
     const entry = {
-        id: Date.now(),
+        id: crypto.randomUUID(),
         date: new Date().toISOString(),
         startLat:            session.startLat,
         startLng:            session.startLng,
@@ -1943,13 +2094,17 @@ function saveToHistory(session) {
     history.unshift(entry);
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    ExplorerSync.mutate('history', 'put', entry.id, entry);
+    maybeRequestConsent();
     renderHistorySection();
 }
 
 function deleteHistoryEntry(index) {
     const history = getHistory();
+    const removed = history[index];
     history.splice(index, 1);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    ExplorerSync.mutate('history', 'delete', String(removed.id));
     renderHistorySection();
 }
 
@@ -2060,6 +2215,10 @@ restoreSettings();
 initSettingsListeners();
 renderSavedLocations();
 updateSaveLocationBtn();
+if (typeof ExplorerSync !== 'undefined') {
+    ExplorerSync.init().finally(updateSyncMenu);
+    updateSyncMenu();
+}
 renderVisitedLayer();
 updateVisitedCounter();
 renderFavoritesSection();

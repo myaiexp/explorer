@@ -156,6 +156,78 @@ html, body {
     background: rgba(255, 255, 255, 0.06);
 }
 
+.overflow-status {
+    padding: 8px 12px 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+
+.overflow-status-value {
+    font-family: var(--mono);
+    color: var(--text);
+    margin-left: 4px;
+    word-break: break-all;
+}
+
+/* ── Consent toast ─────────────────────────────────────────────────────── */
+
+.toast-consent {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    max-width: 360px;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.45;
+    animation: slideUpFade 0.18s ease-out both;
+}
+
+.toast-consent-message {
+    margin-bottom: 10px;
+}
+
+.toast-consent-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.toast-consent-buttons button {
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--font);
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    transition: background 0.1s, border-color 0.1s;
+}
+
+.toast-consent-buttons button:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.toast-consent-buttons button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.toast-consent-buttons button.primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
 /* ── Main layout ───────────────────────────────────────────────────────── */
 
 .main {
