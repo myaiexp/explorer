@@ -103,6 +103,7 @@ function saveSettings() {
         spread: document.getElementById('spreadSlider').value,
         requestDelay: requestDelay,
         winterMode: document.getElementById('winterMode').checked,
+        smartRouting: document.getElementById('smartRouting').checked,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -125,6 +126,7 @@ function restoreSettings() {
             document.getElementById('delayValue').textContent = requestDelay + 'ms';
         }
         if (settings.winterMode != null) document.getElementById('winterMode').checked = settings.winterMode;
+        if (settings.smartRouting != null) document.getElementById('smartRouting').checked = settings.smartRouting;
         // Sync distance label with restored trip mode
         const isOneWay = document.getElementById('oneWay').checked;
         document.getElementById('distanceLabel').textContent =
@@ -142,6 +144,7 @@ function initSettingsListeners() {
     document.getElementById('spreadSlider').addEventListener('change', saveSettings);
     document.getElementById('delaySlider').addEventListener('change', saveSettings);
     document.getElementById('winterMode').addEventListener('change', saveSettings);
+    document.getElementById('smartRouting').addEventListener('change', saveSettings);
 }
 
 // ─── Saved locations ─────────────────────────────────────────────────────────
@@ -549,6 +552,104 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
     const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
     const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
     return { outbound, return: ret };
+}
+
+// Fetch OSM nodes referenced by ≥2 highway ways inside the corridor between
+// start/dest, expanded by offsetKm on each side. Returns array of {lat, lng}.
+async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode = false) {
+    const minLat = Math.min(startLat, destLat);
+    const maxLat = Math.max(startLat, destLat);
+    const minLng = Math.min(startLng, destLng);
+    const maxLng = Math.max(startLng, destLng);
+    const midLat = (minLat + maxLat) / 2;
+    const latPad = offsetKm / 111;
+    const lngPad = offsetKm / (111 * Math.cos(midLat * Math.PI / 180));
+    const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
+    const exclude = winterMode ? HIGHWAY_EXCLUDE_WINTER : HIGHWAY_EXCLUDE_DEFAULT;
+    const query = `
+        [out:json][timeout:15];
+        way["highway"]["highway"!~"${exclude}"](${bbox});
+        out body;
+        >;
+        out skel qt;
+    `;
+    const data = await queryOverpass(query, onProgress);
+    const nodeWayCount = new Map();
+    const nodeCoords = new Map();
+    for (const el of data.elements) {
+        if (el.type === 'way' && Array.isArray(el.nodes)) {
+            for (const id of el.nodes) {
+                nodeWayCount.set(id, (nodeWayCount.get(id) || 0) + 1);
+            }
+        } else if (el.type === 'node' && el.lat != null && el.lon != null) {
+            nodeCoords.set(el.id, { lat: el.lat, lng: el.lon });
+        }
+    }
+    const junctions = [];
+    for (const [id, count] of nodeWayCount) {
+        if (count < 2) continue;
+        const c = nodeCoords.get(id);
+        if (c) junctions.push(c);
+    }
+    return junctions;
+}
+
+// Find the closest junction in the pool to `via` within maxKm. Returns the
+// junction, or the original `via` if no junction is in range.
+function snapToJunction(via, junctionPool, maxKm) {
+    if (!junctionPool || junctionPool.length === 0) return via;
+    let best = null, bestDist = Infinity;
+    for (const j of junctionPool) {
+        const d = calculateDistance(via.lat, via.lng, j.lat, j.lng);
+        if (d < bestDist) { bestDist = d; best = j; }
+    }
+    return bestDist <= maxKm ? best : via;
+}
+
+// Junction-snap variant of buildLoop: same envelope vias, same snap radius,
+// but snaps each via to the closest OSM junction in a corridor pool instead
+// of OSRM nearest-snap. Falls back to buildLoop on Overpass/OSRM failure.
+// cachedJunctions: pass a previously returned `junctions` to skip Overpass.
+async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, cachedJunctions = null, winterMode = false) {
+    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+    const { offsetMult, viaTs } = getSpreadParams();
+    const offsetKm = Math.max(0.1, straightDist * offsetMult);
+    const A = { lat: startLat, lng: startLng };
+    const B = { lat: destLat,  lng: destLng };
+
+    const viasRight = viaTs.map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+    const viasLeftReturn = viaTs.slice().reverse().map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+
+    let junctions = cachedJunctions;
+    if (!junctions) {
+        try {
+            onProgress('Searching for junctions…');
+            junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode);
+        } catch {
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            return { outbound: loop.outbound, return: loop.return, junctions: null };
+        }
+    }
+
+    const snapRadius = Math.max(0.3, offsetKm * 0.5);
+    const allVias = [...viasRight, ...viasLeftReturn];
+    const snapped = allVias.map(v => snapToJunction(v, junctions, snapRadius));
+    const snappedRight = snapped.slice(0, 3);
+    const snappedLeft = snapped.slice(3);
+
+    onProgress('Building outbound route…');
+    const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
+    onProgress('Building return route…');
+    const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
+
+    if (!outbound || !ret) {
+        const loop = await buildLoop(startLat, startLng, destLat, destLng);
+        return { outbound: loop.outbound, return: loop.return, junctions };
+    }
+
+    return { outbound, return: ret, junctions };
 }
 
 // Build a single routed leg A → B. Returns {coords, duration, distance} or null.
@@ -1098,12 +1199,19 @@ async function generateDestination() {
         }
 
         // Build route
-        let outboundRoute, returnRoute;
-        onProgress('Building route…');
+        let outboundRoute, returnRoute, junctions = null;
         if (tripMode === 'one-way') {
+            onProgress('Building route…');
             outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
             returnRoute = null;
+        } else if (document.getElementById('smartRouting').checked) {
+            const winterMode = document.getElementById('winterMode').checked;
+            const result = await buildJunctionLoop(startLat, startLng, dest.lat, dest.lng, onProgress, null, winterMode);
+            outboundRoute = result.outbound;
+            returnRoute = result.return;
+            junctions = result.junctions;
         } else {
+            onProgress('Building route…');
             const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
@@ -1112,6 +1220,7 @@ async function generateDestination() {
         displayRoute(startLat, startLng, dest.lat, dest.lng,
                      straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode,
                      null, null);
+        if (currentSession) currentSession.junctions = junctions;
 
     } catch (error) {
         showError(error.message || 'An error occurred. Please try again.');
@@ -1181,13 +1290,20 @@ function togglePickMode() {
             const { startLat, startLng, locationInput: locInput } = await resolveStart();
             clearMap();
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
-            let outboundRoute, returnRoute;
+            let outboundRoute, returnRoute, junctions = null;
             const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-            onProgress('Building route…');
             if (tripMode === 'one-way') {
+                onProgress('Building route…');
                 outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
                 returnRoute = null;
+            } else if (document.getElementById('smartRouting').checked) {
+                const winterMode = document.getElementById('winterMode').checked;
+                const result = await buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, null, winterMode);
+                outboundRoute = result.outbound;
+                returnRoute = result.return;
+                junctions = result.junctions;
             } else {
+                onProgress('Building route…');
                 const loop = await buildLoop(startLat, startLng, destLat, destLng);
                 outboundRoute = loop.outbound;
                 returnRoute = loop.return;
@@ -1195,6 +1311,7 @@ function togglePickMode() {
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                          outboundRoute, returnRoute, locInput, null, tripMode,
                          null, null);
+            if (currentSession) currentSession.junctions = junctions;
         } catch (error) {
             showError(error.message || 'An error occurred. Please try again.');
         } finally {
@@ -1537,12 +1654,18 @@ async function restoreFromHash() {
         genBtn.disabled = true;
 
         clearMap();
-        let outboundRoute, returnRoute;
+        let outboundRoute, returnRoute, junctions = null;
         const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
         onProgress('Loading shared route…');
         if (m === 'one-way') {
             outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
             returnRoute = null;
+        } else if (document.getElementById('smartRouting').checked) {
+            const winterMode = document.getElementById('winterMode').checked;
+            const result = await buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, null, winterMode);
+            outboundRoute = result.outbound;
+            returnRoute = result.return;
+            junctions = result.junctions;
         } else {
             const loop = await buildLoop(startLat, startLng, destLat, destLng);
             outboundRoute = loop.outbound;
@@ -1551,6 +1674,7 @@ async function restoreFromHash() {
         displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                      outboundRoute, returnRoute, s, n, m,
                      null, null);
+        if (currentSession) currentSession.junctions = junctions;
 
         loadingEl.classList.remove('active');
         loadingEl.querySelector('p').textContent = 'Finding your random destination…';
@@ -1691,14 +1815,22 @@ async function rerouteWithCurrentSpread() {
         routeLines = [];
 
         const { tripMode } = currentSession;
-        let outbound, ret;
+        let outbound, ret, junctions = currentSession.junctions || null;
+        const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
         if (tripMode === 'one-way') {
             outbound = await buildOneWay(startLat, startLng, destLat, destLng);
             ret = null;
+        } else if (document.getElementById('smartRouting').checked) {
+            const winterMode = document.getElementById('winterMode').checked;
+            const result = await buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, junctions, winterMode);
+            outbound = result.outbound;
+            ret = result.return;
+            junctions = result.junctions;
         } else {
             const loop = await buildLoop(startLat, startLng, destLat, destLng);
             outbound = loop.outbound;
             ret = loop.return;
+            junctions = null;
         }
 
         // Redraw routes
@@ -1744,7 +1876,8 @@ async function rerouteWithCurrentSpread() {
             returnRouteDuration: ret      ? ret.duration       : null,
             returnRouteSteps:    ret      ? ret.steps          : null,
             outboundVias:        null,
-            returnVias:          null
+            returnVias:          null,
+            junctions
         };
 
         // Re-fetch elevation for new route
