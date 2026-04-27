@@ -93,7 +93,8 @@ function saveSettings() {
         maxDistance: document.getElementById('maxDistance').value,
         poiType: document.getElementById('locationTypeSelect').value,
         spread: document.getElementById('spreadSlider').value,
-        requestDelay: requestDelay
+        requestDelay: requestDelay,
+        winterMode: document.getElementById('winterMode').checked,
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -115,6 +116,7 @@ function restoreSettings() {
             document.getElementById('delaySlider').value = requestDelay;
             document.getElementById('delayValue').textContent = requestDelay + 'ms';
         }
+        if (settings.winterMode != null) document.getElementById('winterMode').checked = settings.winterMode;
         // Sync distance label with restored trip mode
         const isOneWay = document.getElementById('oneWay').checked;
         document.getElementById('distanceLabel').textContent =
@@ -131,6 +133,7 @@ function initSettingsListeners() {
     document.getElementById('locationTypeSelect').addEventListener('change', saveSettings);
     document.getElementById('spreadSlider').addEventListener('change', saveSettings);
     document.getElementById('delaySlider').addEventListener('change', saveSettings);
+    document.getElementById('winterMode').addEventListener('change', saveSettings);
 }
 
 // ─── Saved locations ─────────────────────────────────────────────────────────
@@ -459,12 +462,16 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter, onP
 
 // ─── Roads (Overpass) ────────────────────────────────────────────────────────
 
-async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress) {
+const HIGHWAY_EXCLUDE_DEFAULT = 'motorway|motorway_link|trunk|trunk_link|service|steps';
+const HIGHWAY_EXCLUDE_WINTER  = 'motorway|motorway_link|trunk|trunk_link|service|steps|path|track|footway|bridleway|cycleway|pedestrian';
+
+async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress, winterMode = false) {
     const latOffset = maxKm / 111;
     const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
+    const exclude = winterMode ? HIGHWAY_EXCLUDE_WINTER : HIGHWAY_EXCLUDE_DEFAULT;
     const query = `
         [out:json][timeout:15];
-        way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
+        way["highway"]["highway"!~"${exclude}"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
         out center;
     `;
     const data = await queryOverpass(query, onProgress);
@@ -482,7 +489,7 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress
 
 // Fetch roads in the corridor between start and dest, expanded by offsetKm on each side.
 // Returns array of {lat, lng} road center points.
-async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress) {
+async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode = false) {
     const cosLat = Math.cos(((startLat + destLat) / 2) * Math.PI / 180);
     const latPad = offsetKm / 111;
     const lngPad = offsetKm / (111 * cosLat);
@@ -490,9 +497,10 @@ async function fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offset
     const maxLat = Math.max(startLat, destLat) + latPad;
     const minLng = Math.min(startLng, destLng) - lngPad;
     const maxLng = Math.max(startLng, destLng) + lngPad;
+    const exclude = winterMode ? HIGHWAY_EXCLUDE_WINTER : HIGHWAY_EXCLUDE_DEFAULT;
     const query = `
         [out:json][timeout:15];
-        way["highway"]["highway"!~"motorway|motorway_link|trunk|trunk_link|service|steps"](${minLat},${minLng},${maxLat},${maxLng});
+        way["highway"]["highway"!~"${exclude}"](${minLat},${minLng},${maxLat},${maxLng});
         out center;
     `;
     const data = await queryOverpass(query, onProgress);
@@ -622,7 +630,7 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
 // onProgress(message) callback updates loading text.
 // cachedRoads: optional previously-fetched roads (for spread slider re-routes).
 // Returns { outbound, return, outboundVias, returnVias, roads }
-async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, cachedRoads = null) {
+async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, cachedRoads = null, winterMode = false) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
     const offsetKm = Math.max(0.1, straightDist * offsetMult);
@@ -640,7 +648,7 @@ async function buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, 
     if (!roads) {
         try {
             onProgress('Searching for roads…');
-            roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress);
+            roads = await fetchRoadsInCorridor(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode);
         } catch {
             // Fall back to geometric vias on road fetch failure
             onProgress('Building round-trip loop…');
@@ -1135,7 +1143,8 @@ async function generateDestination() {
         if (locationType === 'roads') {
             onProgress('Searching for roads in the area…');
             try {
-                const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress);
+                const winterMode = document.getElementById('winterMode').checked;
+                const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
                 if (roads.length === 0) throw new Error('empty');
                 dest = pickMostNovelDestination(roads, existingDests);
             } catch {
@@ -1174,12 +1183,13 @@ async function generateDestination() {
         // Build route
         let outboundRoute, returnRoute, smartLoopData = null;
         const useSmartRouting = document.getElementById('smartRouting').checked;
+        const winterMode = document.getElementById('winterMode').checked;
         if (tripMode === 'one-way') {
             onProgress('Building route…');
             outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
             returnRoute = null;
         } else if (useSmartRouting) {
-            const loop = await buildSmartLoop(startLat, startLng, dest.lat, dest.lng, onProgress);
+            const loop = await buildSmartLoop(startLat, startLng, dest.lat, dest.lng, onProgress, null, winterMode);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
             smartLoopData = loop;
@@ -1265,12 +1275,13 @@ function togglePickMode() {
             let outboundRoute, returnRoute, smartLoopData = null;
             const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
             const useSmartRouting = document.getElementById('smartRouting').checked;
+            const winterMode = document.getElementById('winterMode').checked;
             if (tripMode === 'one-way') {
                 onProgress('Building route…');
                 outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
                 returnRoute = null;
             } else if (useSmartRouting) {
-                const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress);
+                const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, null, winterMode);
                 outboundRoute = loop.outbound;
                 returnRoute = loop.return;
                 smartLoopData = loop;
@@ -1613,11 +1624,12 @@ async function restoreFromHash() {
         let outboundRoute, returnRoute, smartLoopData = null;
         const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
         const useSmartRouting = document.getElementById('smartRouting').checked;
+        const winterMode = document.getElementById('winterMode').checked;
         if (m === 'one-way') {
             outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
             returnRoute = null;
         } else if (useSmartRouting) {
-            const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress);
+            const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, null, winterMode);
             outboundRoute = loop.outbound;
             returnRoute = loop.return;
             smartLoopData = loop;
@@ -1773,11 +1785,12 @@ async function rerouteWithCurrentSpread() {
         let outbound, ret, smartLoopData = null;
         const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
         const useSmartRouting = document.getElementById('smartRouting').checked;
+        const winterMode = document.getElementById('winterMode').checked;
         if (tripMode === 'one-way') {
             outbound = await buildOneWay(startLat, startLng, destLat, destLng);
             ret = null;
         } else if (useSmartRouting) {
-            const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, currentSession.cachedRoads || null);
+            const loop = await buildSmartLoop(startLat, startLng, destLat, destLng, onProgress, currentSession.cachedRoads || null, winterMode);
             outbound = loop.outbound;
             ret = loop.return;
             smartLoopData = loop;
