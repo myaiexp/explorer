@@ -1,0 +1,12 @@
+{
+  "name": "wander-tools",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only tooling for wander (FIT validator, etc.)",
+  "scripts": {
+    "validate-fit": "node validate-fit.mjs"
+  },
+  "devDependencies": {
+    "@garmin/fitsdk": "^21.158.0"
+  }
+}

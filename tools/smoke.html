@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>FIT smoke</title></head>
+<body>
+<pre id="out">PENDING</pre>
+<script src="../fit-encoder.js"></script>
+<script>
+(function () {
+    var routeCoords = [[60.17, 24.93], [60.171, 24.932], [60.172, 24.934], [60.171, 24.937]];
+    var routeSteps = [
+        { name: 'Start St', maneuver: { type: 'depart', modifier: '',      location: [24.93, 60.17] } },
+        { name: 'Right Rd', maneuver: { type: 'turn',   modifier: 'right', location: [24.932, 60.171] } },
+        { name: 'Dest Way', maneuver: { type: 'arrive', modifier: '',      location: [24.937, 60.171] } }
+    ];
+    var returnRouteCoords = [[60.171, 24.937], [60.170, 24.935], [60.17, 24.93]];
+    var returnRouteSteps = [
+        { name: 'Back St',   maneuver: { type: 'depart', modifier: '',     location: [24.937, 60.171] } },
+        { name: 'Left Rd',   maneuver: { type: 'turn',   modifier: 'left', location: [24.935, 60.170] } },
+        { name: 'Start Way', maneuver: { type: 'arrive', modifier: '',     location: [24.93, 60.17] } }
+    ];
+
+    // Replicate mergeRouteCoords (since this page doesn't load app.js)
+    function merge(a, b) {
+        a = a || []; b = b || [];
+        if (!a.length) return b.slice();
+        if (!b.length) return a.slice();
+        var aLast = a[a.length - 1], bFirst = b[0];
+        var dup = Math.abs(aLast[0] - bFirst[0]) < 1e-5 && Math.abs(aLast[1] - bFirst[1]) < 1e-5;
+        return dup ? a.concat(b.slice(1)) : a.concat(b);
+    }
+
+    var coords = merge(routeCoords, returnRouteCoords);
+    var steps = routeSteps.concat(returnRouteSteps);
+    var cps = FitEncoder.osrmStepsToCoursePoints(coords, steps);
+    var bytes = FitEncoder.encodeCourse({ name: 'Smoke test', coords: coords, coursePoints: cps });
+
+    var hex = '';
+    for (var i = 0; i < bytes.length; i++) {
+        var h = bytes[i].toString(16);
+        hex += (h.length === 1 ? '0' : '') + h;
+    }
+
+    var summary = {
+        merged_len: coords.length,
+        cp_count: cps.length,
+        cp_types: cps.map(function (c) { return c.type + ':' + c.name; }),
+        byte_len: bytes.length,
+        hex: hex
+    };
+    document.getElementById('out').textContent = JSON.stringify(summary);
+})();
+</script>
+</body>
+</html>

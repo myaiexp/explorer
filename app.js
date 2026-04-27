@@ -1065,8 +1065,10 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         distance: totalWalkKm,
         routeCoords:         outboundRoute ? outboundRoute.coords   : null,
         routeDuration:       outboundRoute ? outboundRoute.duration  : null,
+        routeSteps:          outboundRoute ? outboundRoute.steps     : null,
         returnRouteCoords:   returnRoute   ? returnRoute.coords      : null,
         returnRouteDuration: returnRoute   ? returnRoute.duration    : null,
+        returnRouteSteps:    returnRoute   ? returnRoute.steps       : null,
         outboundVias:        outboundVias  || null,
         returnVias:          returnVias    || null,
         cachedRoads:         cachedRoads   || null
@@ -1644,10 +1646,7 @@ function exportGPX() {
     if (!currentSession) return;
     const { destName, routeCoords, returnRouteCoords } = currentSession;
     const name = destName || 'Wander route';
-    const allCoords = [
-        ...(routeCoords || []),
-        ...(returnRouteCoords || [])
-    ];
+    const allCoords = mergeRouteCoords(routeCoords, returnRouteCoords);
     if (allCoords.length === 0) { showError('No route data to export.'); return; }
 
     const trkpts = allCoords.map(([lat, lng]) =>
@@ -1665,11 +1664,49 @@ ${trkpts}
   </trk>
 </gpx>`;
 
-    const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+    triggerDownload(gpx, name, 'gpx', 'application/gpx+xml');
+}
+
+// ─── Garmin FIT export ───────────────────────────────────────────────────────
+
+async function exportFIT() {
+    if (!currentSession) { showError('Generate a route first.'); return; }
+    if (typeof FitEncoder === 'undefined') { showError('FIT encoder not loaded.'); return; }
+
+    const { destName, routeCoords, returnRouteCoords, routeSteps, returnRouteSteps } = currentSession;
+    const coords = mergeRouteCoords(routeCoords, returnRouteCoords);
+    if (coords.length < 2) { showError('No route data to export.'); return; }
+
+    const steps = [...(routeSteps || []), ...(returnRouteSteps || [])];
+    const coursePoints = FitEncoder.osrmStepsToCoursePoints(coords, steps);
+
+    let elevations = null;
+    try { elevations = await fetchElevations(coords); } catch { /* optional */ }
+
+    const name = destName || 'Wander route';
+    const bytes = FitEncoder.encodeCourse({ name, coords, coursePoints, elevations });
+    triggerDownload(bytes, name, 'fit', 'application/vnd.ant.fit');
+}
+
+// Concatenate outbound + return route coords, dropping the duplicate destination
+// point (last of outbound == first of return, within 1 m).
+function mergeRouteCoords(out, ret) {
+    const a = out || [];
+    const b = ret || [];
+    if (a.length === 0) return b.slice();
+    if (b.length === 0) return a.slice();
+    const [aLat, aLng] = a[a.length - 1];
+    const [bLat, bLng] = b[0];
+    const dup = Math.abs(aLat - bLat) < 1e-5 && Math.abs(aLng - bLng) < 1e-5;
+    return dup ? a.concat(b.slice(1)) : a.concat(b);
+}
+
+function triggerDownload(data, name, ext, mime) {
+    const blob = new Blob([data], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.gpx`;
+    a.download = `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -1775,8 +1812,10 @@ async function rerouteWithCurrentSpread() {
             distance: totalWalkKm,
             routeCoords:         outbound ? outbound.coords   : null,
             routeDuration:       outbound ? outbound.duration  : null,
+            routeSteps:          outbound ? outbound.steps     : null,
             returnRouteCoords:   ret      ? ret.coords         : null,
             returnRouteDuration: ret      ? ret.duration       : null,
+            returnRouteSteps:    ret      ? ret.steps          : null,
             outboundVias:        newOutVias,
             returnVias:          newRetVias,
             cachedRoads:         smartLoopData?.roads || currentSession.cachedRoads || null
