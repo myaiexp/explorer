@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
     <div class="app">
@@ -25,7 +25,7 @@
                     <button type="button" id="toggleVisitedBtn" onclick="toggleVisitedLayer()">Show visited routes</button>
                     <button type="button" onclick="exportVisits()">Export visits</button>
                     <button type="button" onclick="exportGPX()">Export GPX</button>
-                    <button type="button" onclick="exportFIT()">Export FIT (Garmin)</button>
+                    <button type="button" onclick="openFITModal()">Export FIT (Garmin)</button>
                     <button type="button" onclick="document.getElementById('importInput').click()">Import visits</button>
                     <input type="file" id="importInput" accept=".json" style="display:none" onchange="importVisits(event)">
                 </div>
@@ -154,6 +154,9 @@
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 17L17 7M17 7H7M17 7v10"/></svg>
                             </a>
                             <a href="#" id="streetViewLink" target="_blank">Street View</a>
+                            <button type="button" class="link-icon-btn" onclick="openFITModal()" title="Send to Garmin watch">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="2"/><path d="M9 7V4h6v3M9 17v3h6v-3"/><circle cx="12" cy="12" r="2"/></svg>
+                            </button>
                             <button type="button" class="link-icon-btn" onclick="copyRouteLink()" title="Copy link">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
                             </button>
@@ -184,9 +187,39 @@
                 </div>
             </div>
         </div>
+
+        <!-- FIT export modal -->
+        <div class="modal-backdrop" id="fitModal" onclick="closeFITModal(event)">
+            <div class="modal" role="dialog" aria-labelledby="fitModalTitle" onclick="event.stopPropagation()">
+                <div class="modal-header" id="fitModalTitle">Send to Garmin watch</div>
+                <p class="modal-intro">Download the route as a Garmin <code>.fit</code> course file, then transfer it to your watch:</p>
+                <ol class="modal-steps">
+                    <li>Tap <b>Download .fit</b> below.</li>
+                    <li>Open <b>Garmin Connect</b> (mobile or web).</li>
+                    <li>Go to <b>Training → Courses → Import</b> and choose the file.</li>
+                    <li>Save the course, then tap <b>Send to Device</b>.</li>
+                    <li>Wait ~30 s for the watch to sync over Bluetooth.</li>
+                    <li>On the watch: <b>Navigate → Courses</b>, pick the route, start.</li>
+                </ol>
+                <details class="modal-tech">
+                    <summary>Technical notes</summary>
+                    <ul>
+                        <li>Sport is set to <b>walking</b> — appears under that filter on the watch.</li>
+                        <li>Turn cues are embedded as course points. Map-capable watches (Fenix, Epix, Forerunner 255+) will show turn-by-turn prompts; older watches show a breadcrumb with waypoint chimes.</li>
+                        <li>Round-trip routes loop back to the start; the watch shows the full loop.</li>
+                        <li><b>USB shortcut:</b> with the watch plugged in, drop the <code>.fit</code> straight into <code>GARMIN/NewFiles/</code> — skips Garmin Connect entirely.</li>
+                        <li><b>Heads-up:</b> if the route shows dead-end spurs, the watch may give "off course" alerts when you skip them. These are guidance only, not blocking — you can mute or ignore them.</li>
+                    </ul>
+                </details>
+                <div class="modal-actions">
+                    <button type="button" class="btn-ghost" onclick="closeFITModal()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="confirmFITExport()">Download .fit</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="fit-encoder.js?v=1" defer></script>
-    <script src="app.js?v=5" defer></script>
+    <script src="app.js?v=6" defer></script>
 </body>
 </html>

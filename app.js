@@ -1669,9 +1669,25 @@ ${trkpts}
 
 // ─── Garmin FIT export ───────────────────────────────────────────────────────
 
-async function exportFIT() {
+function openFITModal() {
     if (!currentSession) { showError('Generate a route first.'); return; }
     if (typeof FitEncoder === 'undefined') { showError('FIT encoder not loaded.'); return; }
+    document.getElementById('fitModal').classList.add('active');
+}
+
+function closeFITModal() {
+    document.getElementById('fitModal').classList.remove('active');
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('fitModal').classList.contains('active')) {
+        closeFITModal();
+    }
+});
+
+async function confirmFITExport() {
+    if (!currentSession) { showError('Generate a route first.'); return; }
+    closeFITModal();
 
     const { destName, routeCoords, returnRouteCoords, routeSteps, returnRouteSteps } = currentSession;
     const coords = mergeRouteCoords(routeCoords, returnRouteCoords);
