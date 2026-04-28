@@ -4,7 +4,9 @@ Description=Weekly OSRM-foot Finland data refresh
 
 [Timer]
 OnCalendar=Sun 03:00:00
-Persistent=true
+# Persistent intentionally OFF: catching up a missed weekly run on boot would
+# re-download Finland (~700 MB) and burn ~25 min preprocessing right after a
+# restart. Skip the missed run; the next Sunday is fine.
 Unit=osrm-refresh.service
 
 [Install]
