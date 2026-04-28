@@ -465,7 +465,11 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress
 
 // ─── OSRM routing ─────────────────────────────────────────────────────────────
 
-const OSRM_BASE = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
+// Self-hosted OSRM-foot for Finland; public OSRM as fallback / non-Finland default.
+const OSRM_FI_BASE        = 'https://mase.fi/api/osrm-fi/route/v1/foot';
+const OSRM_FI_NEAREST     = 'https://mase.fi/api/osrm-fi/nearest/v1/foot';
+const OSRM_PUBLIC_BASE    = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
+const OSRM_PUBLIC_NEAREST = 'https://routing.openstreetmap.de/routed-foot/nearest/v1/driving';
 
 let requestDelay = 300;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -475,18 +479,14 @@ function adjustRequestDelay(delta) {
     document.getElementById('delayValue').textContent = requestDelay + 'ms';
 }
 
-// Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance, steps} or null.
-async function fetchRouteThrough(waypoints) {
-    await sleep(requestDelay);
+// Internal: fetch + parse OSRM /route response. Returns null on any failure.
+async function tryOsrm(url) {
     try {
-        const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
-        const url = `${OSRM_BASE}/${coordStr}?overview=full&geometries=geojson&steps=true&continue_straight=true`;
         const res = await fetch(url);
         if (!res.ok) return null;
         const data = await res.json();
         if (!data.routes || data.routes.length === 0) return null;
         const r = data.routes[0];
-        // Flatten steps from all legs
         const steps = r.legs ? r.legs.flatMap(leg => leg.steps || []) : null;
         return {
             coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
@@ -495,6 +495,21 @@ async function fetchRouteThrough(waypoints) {
             steps: steps
         };
     } catch { return null; }
+}
+
+// Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance, steps} or null.
+async function fetchRouteThrough(waypoints) {
+    const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
+    const query = `${coordStr}?overview=full&geometries=geojson&steps=true&continue_straight=true`;
+
+    // In Finland: try self-hosted first, no throttle. Fall through to public on failure.
+    if (allInFinland(waypoints)) {
+        const result = await tryOsrm(`${OSRM_FI_BASE}/${query}`);
+        if (result) return result;
+    }
+
+    await sleep(requestDelay);
+    return tryOsrm(`${OSRM_PUBLIC_BASE}/${query}`);
 }
 
 // Build a full oval loop: A → (right vias) → B → (left vias) → A
@@ -514,19 +529,34 @@ function getSpreadParams() {
     return { offsetMult, viaTs: [0.25, 0.5, 0.75] };
 }
 
+// Internal: OSRM /nearest call. Returns {lat, lng} or null on any failure.
+async function tryNearest(url) {
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data.waypoints || !data.waypoints.length) return null;
+        return { lat: data.waypoints[0].location[1], lng: data.waypoints[0].location[0] };
+    } catch { return null; }
+}
+
 // Snap a geometric via to the nearest road point within maxKm.
 // Returns the snapped point, or the original if snapping fails or is too far.
 async function snapToRoad(via, maxKm = 0.5) {
-    try {
-        const nearestBase = OSRM_BASE.replace('/route/', '/nearest/');
-        const res = await fetch(`${nearestBase}/${via.lng},${via.lat}?number=1`);
-        if (!res.ok) return via;
-        const data = await res.json();
-        if (!data.waypoints || !data.waypoints.length) return via;
-        const snap = { lat: data.waypoints[0].location[1], lng: data.waypoints[0].location[0] };
-        const dist = calculateDistance(via.lat, via.lng, snap.lat, snap.lng);
-        return dist <= maxKm ? snap : via;
-    } catch { return via; }
+    if (inFinland(via.lat, via.lng)) {
+        const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
+        if (snapped) {
+            const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
+            return dist <= maxKm ? snapped : via;
+        }
+        // Self-hosted failed (network/5xx) — fall through to public.
+    }
+
+    await sleep(requestDelay);
+    const snapped = await tryNearest(`${OSRM_PUBLIC_NEAREST}/${via.lng},${via.lat}?number=1`);
+    if (!snapped) return via;
+    const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
+    return dist <= maxKm ? snapped : via;
 }
 
 async function buildLoop(startLat, startLng, destLat, destLng) {
