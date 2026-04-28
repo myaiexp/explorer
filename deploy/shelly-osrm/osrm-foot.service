@@ -1,0 +1,16 @@
+# OSRM-foot routing service for Finland (Wander self-hosted endpoint)
+[Unit]
+Description=OSRM-foot routing service (Finland)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=osrm
+Group=osrm
+ExecStart=/usr/bin/osrm-routed --algorithm mld --ip 100.69.160.113 --port 5000 /srv/osrm/finland/processed/current/finland-latest.osrm
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

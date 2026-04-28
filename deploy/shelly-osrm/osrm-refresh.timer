@@ -1,0 +1,11 @@
+# Trigger weekly OSRM-foot refresh at Sun 03:00 UTC.
+[Unit]
+Description=Weekly OSRM-foot Finland data refresh
+
+[Timer]
+OnCalendar=Sun 03:00:00
+Persistent=true
+Unit=osrm-refresh.service
+
+[Install]
+WantedBy=timers.target
