@@ -636,10 +636,37 @@ function snapToJunction(via, junctionPool, maxKm) {
     return bestDist <= maxKm ? best : via;
 }
 
+// Pick lower-overlap of two candidate (outbound, return) pairs. Falls back
+// gracefully if one chirality fully failed. Used by buildJunctionLoop's
+// both-chirality success path.
+function pickBetterLoop(outA, retA, outB, retB) {
+    const aOk = outA && retA;
+    const bOk = outB && retB;
+    if (aOk && bOk) {
+        const ovA = loopOverlapFraction(outA.coords, retA.coords);
+        const ovB = loopOverlapFraction(outB.coords, retB.coords);
+        return ovA <= ovB
+            ? { outbound: outA, return: retA, overlap: ovA }
+            : { outbound: outB, return: retB, overlap: ovB };
+    }
+    if (aOk) {
+        const ovA = loopOverlapFraction(outA.coords, retA.coords);
+        return { outbound: outA, return: retA, overlap: ovA };
+    }
+    if (bOk) {
+        const ovB = loopOverlapFraction(outB.coords, retB.coords);
+        return { outbound: outB, return: retB, overlap: ovB };
+    }
+    return { outbound: null, return: null, overlap: null };
+}
+
 // Junction-snap variant of buildLoop: same envelope vias, same snap radius,
 // but snaps each via to the closest OSM junction in a corridor pool instead
 // of OSRM nearest-snap. Falls back to buildLoop on Overpass/OSRM failure.
 // cachedJunctions: pass a previously returned `junctions` to skip Overpass.
+// In Finland: builds both chiralities in parallel and returns the lower-
+// overlap one. Outside Finland: single chirality, but still computes overlap
+// for the warning chip.
 async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, cachedJunctions = null, winterMode = false) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
@@ -647,9 +674,11 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgres
     const A = { lat: startLat, lng: startLng };
     const B = { lat: destLat,  lng: destLng };
 
+    // Forward-order vias on each side. Reversal happens at call time on the
+    // leg that needs it (return-direction leg).
     const viasRight = viaTs.map(t =>
         envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const viasLeftReturn = viaTs.slice().reverse().map(t =>
+    const viasLeft = viaTs.map(t =>
         envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
 
     let junctions = cachedJunctions;
@@ -659,27 +688,44 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgres
             junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode);
         } catch {
             const loop = await buildLoop(startLat, startLng, destLat, destLng);
-            return { outbound: loop.outbound, return: loop.return, junctions: null };
+            return { outbound: loop.outbound, return: loop.return, overlap: null, junctions: null };
         }
     }
 
     const snapRadius = Math.max(0.3, offsetKm * 0.5);
-    const allVias = [...viasRight, ...viasLeftReturn];
-    const snapped = allVias.map(v => snapToJunction(v, junctions, snapRadius));
-    const snappedRight = snapped.slice(0, 3);
-    const snappedLeft = snapped.slice(3);
+    const snappedRight = viasRight.map(v => snapToJunction(v, junctions, snapRadius));
+    const snappedLeft  = viasLeft .map(v => snapToJunction(v, junctions, snapRadius));
+
+    const tryBoth = inFinland(startLat, startLng) && inFinland(destLat, destLng);
+
+    if (tryBoth) {
+        onProgress('Building both chiralities…');
+        const [outA, retA, outB, retB] = await Promise.all([
+            fetchRouteThrough([A, ...snappedRight, B]),
+            fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
+            fetchRouteThrough([A, ...snappedLeft, B]),
+            fetchRouteThrough([B, ...snappedRight.slice().reverse(), A]),
+        ]);
+        const picked = pickBetterLoop(outA, retA, outB, retB);
+        if (!picked.outbound || !picked.return) {
+            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
+        }
+        return { ...picked, junctions };
+    }
 
     onProgress('Building outbound route…');
     const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
     onProgress('Building return route…');
-    const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
+    const ret      = await fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]);
 
     if (!outbound || !ret) {
         const loop = await buildLoop(startLat, startLng, destLat, destLng);
-        return { outbound: loop.outbound, return: loop.return, junctions };
+        return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
     }
 
-    return { outbound, return: ret, junctions };
+    const overlap = loopOverlapFraction(outbound.coords, ret.coords);
+    return { outbound, return: ret, overlap, junctions };
 }
 
 // Build a single routed leg A → B. Returns {coords, duration, distance} or null.
