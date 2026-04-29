@@ -1,14 +1,14 @@
 # Phase 2 — Loop-Quality Filter (Overlap + Chirality + N-Retry) — Implementation Plan
 
-**Goal:** Detect degenerate loops (outbound and return collapse onto the same shoreline road, typically near lakes) and reject them by trying both chiralities and re-picking from a ranked POI candidate pool. Surface a soft warning when no acceptable loop is found.
+**Goal:** Detect degenerate loops (outbound and return collapse onto the same shoreline road, typically near lakes) and reject them by trying both chiralities and re-picking from a ranked POI candidate pool. Surface a soft warning when no acceptable loop is found. **All Phase 2 changes are gated behind the existing smart-routing toggle** — when smart routing is OFF, behavior is exactly as it is today (single-chirality `buildLoop`, single attempt, no overlap detection, no warning). This isolation lets the original generation path keep working while we iterate on the improved one.
 
-**Architecture:** Three additions on top of Phase 1. (1) A pure utility `loopOverlapFraction(outboundCoords, returnCoords)` that measures geometric overlap between two polylines as a `[0, 1]` fraction. (2) `buildLoop` and `buildJunctionLoop` build both chiralities in parallel (when in Finland) and return the lower-overlap one, exposing the score. (3) `generateDestination` ranks POI candidates by novelty, builds loops in order, and retries up to `MAX_RETRY_ATTEMPTS` times if overlap exceeds threshold, falling back to the best-seen result with a soft warning if all attempts are degenerate.
+**Architecture:** Three additions on top of Phase 1, all reachable only via the smart-routing branch in `generateDestination`. (1) A pure utility `loopOverlapFraction(outboundCoords, returnCoords)` that measures geometric overlap between two polylines as a `[0, 1]` fraction. (2) `buildJunctionLoop` builds both chiralities in parallel (when in Finland) and returns the lower-overlap one, exposing the score. **`buildLoop` is NOT modified** — it remains the un-touched fallback used by the non-smart-routing path and by `buildJunctionLoop`'s internal Overpass/OSRM-failure fallback. (3) The smart-routing branch of `generateDestination` ranks POI candidates by novelty (via a new `rankByNovelty` helper added alongside the existing untouched `pickMostNovelDestination`), builds loops in order, and retries up to `MAX_RETRY_ATTEMPTS` times if overlap exceeds threshold, falling back to the best-seen result with a soft warning if all attempts are degenerate.
 
 **Tech Stack:** Vanilla JS in `app.js`, new pure-helper file `loop-quality.js` (mirrors the `bbox.js` pattern), vitest+jsdom for tests. No backend or infra changes.
 
-**Spec reference:** `docs/plans/2026-04-28-self-hosted-osrm-and-overlap-filter-design.md`, sections 4.1–4.6.
+**Spec reference:** `docs/plans/2026-04-28-self-hosted-osrm-and-overlap-filter-design.md`, sections 4.1–4.6. Note: the spec describes Phase 2 as a global change; this plan deliberately scopes it tighter — gated behind the smart-routing toggle so the original `buildLoop` path stays a stable comparison baseline during iteration.
 
-**Phase 1 line numbers** (post-`d0c3123`): bbox helpers in `bbox.js`; `OSRM_*` constants at `app.js:469`; `tryOsrm`/`tryNearest` at 483/533; `fetchRouteThrough`/`snapToRoad` at 501/545; `buildLoop` at 562; `buildJunctionLoop` at 643; `pickMostNovelDestination` at 362; `generateDestination` at 1155.
+**Phase 1 line numbers** (post-`d0c3123`): bbox helpers in `bbox.js`; `OSRM_*` constants at `app.js:469`; `tryOsrm`/`tryNearest` at 483/533; `fetchRouteThrough`/`snapToRoad` at 501/545; `buildLoop` at 562 (UNTOUCHED in Phase 2); `buildJunctionLoop` at 643; `pickMostNovelDestination` at 362 (UNTOUCHED in Phase 2 — `rankByNovelty` is a pure addition); `generateDestination` at 1155 (only the smart-routing branch is modified).
 
 ---
 
@@ -17,15 +17,29 @@
 ```
 explorer repo:
   loop-quality.js                ← new: pure helpers (overlap + constants), like bbox.js
-  index.html                     ← modify: <script src="loop-quality.js"> before app.js
-  app.js                         ← modify: buildLoop, buildJunctionLoop,
-                                   pickMostNovelDestination → rankByNovelty,
-                                   generateDestination retry loop + warning
+  novelty.js                     ← new: pure helpers (rankByNovelty + minDistanceToExisting
+                                   + shuffleInPlace), like bbox.js — testable in isolation
+                                   without loading app.js
+  index.html                     ← modify: <script src="loop-quality.js"> AND
+                                   <script src="novelty.js"> before app.js, after bbox.js
+  app.js                         ← modify ONLY:
+                                   - buildJunctionLoop (both-chirality success path
+                                     + viasLeftReturn → viasLeft rename)
+                                   - ADD pickBetterLoop helper (used by buildJunctionLoop)
+                                   - smart-routing branch of generateDestination
+                                     (retry loop + warning chip)
+                                   - ADD candidatePool capture alongside existing
+                                     pickMostNovelDestination call sites
+                                   - ADD showWarning UI primitive (or reuse existing)
+                                   - buildLoop, pickMostNovelDestination,
+                                     non-smart-routing branch, one-way branch UNTOUCHED
   tests/loop-quality.test.js     ← new: unit tests for loopOverlapFraction
   tests/rank-by-novelty.test.js  ← new: unit tests for ranking
 ```
 
 No new files outside the explorer repo. No deploy artifacts changed.
+
+`novelty.js` is loaded after `bbox.js` (so it can use `calculateDistance`-style helpers if needed) but before `app.js`. If `calculateDistance` is currently a function defined in `app.js` and is NOT in `bbox.js`, the implementer has two options: (a) move `calculateDistance` into a new shared helper file, or (b) keep `calculateDistance` in `app.js` and embed a haversine inside `novelty.js` (already needed in `loop-quality.js` as `haversineM`, so this is a 4-line copy or a third-shared-file). Either is fine. The contract is what matters.
 
 ---
 
@@ -204,66 +218,41 @@ pnpm vitest run tests/loop-quality.test.js
 
 ---
 
-## Task 2: Both-chirality `buildLoop` and `buildJunctionLoop`
+## Task 2: Both-chirality `buildJunctionLoop` (smart-routing only)
 
 **Files:**
-- Modify: `app.js` (buildLoop at 562, buildJunctionLoop at 643)
+- Modify: `app.js` (buildJunctionLoop at 643 only — `buildLoop` at 562 stays untouched)
 
 **Contracts:**
 
-Both functions gain a both-chirality path. When start AND dest are in Finland (cheap self-hosted calls), build the mirror chirality in parallel and return the lower-overlap one with `overlap` exposed. Outside Finland, behavior matches Phase 1 single-chirality (overlap still computed and returned for the warning chip — it's a local computation, free).
+`buildJunctionLoop` gains a both-chirality success path. When start AND dest are in Finland (cheap self-hosted calls), build the mirror chirality in parallel and return the lower-overlap one with `overlap` exposed. Outside Finland, behavior matches Phase 1 single-chirality (overlap still computed and returned for the warning chip — it's a local computation, free).
 
-Updated `buildLoop` (lines 562-585):
+**`buildLoop` is explicitly NOT modified.** It stays as it is today (single-chirality, no overlap field on the return value). It is reached:
+- From the non-smart-routing branch of `generateDestination` — preserves today's UX exactly.
+- From `buildJunctionLoop`'s internal fallback when Overpass or both OSRM legs fail — preserves today's degraded-fallback behavior.
+
+This means `buildLoop`'s return shape is unchanged: `{ outbound, return }` (no `overlap`). Callers that consume buildLoop directly don't need to know about Phase 2.
+
+### Required rename in `buildJunctionLoop`
+
+The current code at app.js:652 builds `viasLeftReturn = viaTs.slice().reverse().map(...)` (left vias in REVERSED `t` order). For the both-chirality logic to work, this must change to `viasLeft = viaTs.map(...)` (forward `t` order, matching `viasRight`). Reversal moves to call time via `.slice().reverse()` on whichever leg uses it. Without this rename, the left-chirality outbound leg in the both-chirality path would silently feed already-reversed vias as if they were forward-order, producing wrong geometry.
 
 ```js
-// Build a routed loop A → vias → B → vias → A.
-// In Finland: builds both chiralities (right-then-left and left-then-right)
-// in parallel and returns the lower-overlap one. Outside: single chirality.
-// Always returns { outbound, return, overlap } — overlap is null only if
-// either leg failed.
-async function buildLoop(startLat, startLng, destLat, destLng) {
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    const { offsetMult, viaTs } = getSpreadParams();
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
-    const A = { lat: startLat, lng: startLng };
-    const B = { lat: destLat,  lng: destLng };
+// REPLACE the existing left-vias construction (currently at app.js:652
+// using `viasLeftReturn = viaTs.slice().reverse().map(...)`) with this
+// forward-order construction matching the right side:
+const viasRight = viaTs.map(t =>
+    envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+const viasLeft = viaTs.map(t =>
+    envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+```
 
-    const viasRight = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const viasLeft = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+### `pickBetterLoop` helper (new, defined alongside `buildJunctionLoop`)
 
-    const snapRadius = Math.max(0.3, offsetKm * 0.5);
-    const allVias = [...viasRight, ...viasLeft];
-    const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
-    const snappedRight = snapped.slice(0, 3);
-    const snappedLeft  = snapped.slice(3);
-
-    const tryBoth = inFinland(startLat, startLng) && inFinland(destLat, destLng);
-
-    if (tryBoth) {
-        // Both chiralities in parallel — 4 OSRM calls.
-        const [outA, retA, outB, retB] = await Promise.all([
-            fetchRouteThrough([A, ...snappedRight, B]),
-            fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
-            fetchRouteThrough([A, ...snappedLeft, B]),
-            fetchRouteThrough([B, ...snappedRight.slice().reverse(), A]),
-        ]);
-        return pickBetterLoop(outA, retA, outB, retB);
-    }
-
-    // Single chirality — Phase 1 behavior — 2 OSRM calls.
-    const [outbound, ret] = await Promise.all([
-        fetchRouteThrough([A, ...snappedRight, B]),
-        fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
-    ]);
-    const overlap = (outbound && ret)
-        ? loopOverlapFraction(outbound.coords, ret.coords) : null;
-    return { outbound, return: ret, overlap };
-}
-
+```js
 // Helper: pick lower-overlap of two candidate (outbound, return) pairs.
-// Falls back gracefully if one chirality fully failed.
+// Falls back gracefully if one chirality fully failed. Used only by
+// buildJunctionLoop's both-chirality success path.
 function pickBetterLoop(outA, retA, outB, retB) {
     const aOk = outA && retA;
     const bOk = outB && retB;
@@ -286,23 +275,7 @@ function pickBetterLoop(outA, retA, outB, retB) {
 }
 ```
 
-Updated `buildJunctionLoop` (lines 643-683): same pattern — when in Finland, run both chiralities through `pickBetterLoop`. Junction snap happens once on the full vias array. Existing fallback to `buildLoop` on Overpass/OSRM failure is preserved (and inherits buildLoop's both-chirality logic).
-
-**Required rename in `buildJunctionLoop`:** the current code at app.js:652 builds `viasLeftReturn = viaTs.slice().reverse().map(...)` (i.e., left vias constructed in REVERSED `t` order). For the both-chirality logic to work, this must change to `viasLeft = viaTs.map(...)` (forward `t` order, matching `viasRight`) — same rename as in `buildLoop` above. Reversal moves to call time via `.slice().reverse()` on whichever leg uses it. Without this rename, the left-chirality outbound leg in the both-chirality path would silently feed already-reversed vias as if they were forward-order, producing wrong geometry.
-
-Key snippet for buildJunctionLoop (replacing the success path that currently does outbound + ret sequentially, and including the via-construction rename):
-
-```js
-// REPLACE the existing left-vias construction (currently at app.js:652
-// using `viasLeftReturn = viaTs.slice().reverse().map(...)`) with this
-// forward-order construction matching the right side:
-const viasRight = viaTs.map(t =>
-    envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-const viasLeft = viaTs.map(t =>
-    envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-```
-
-Then the success path:
+### `buildJunctionLoop` success path
 
 ```js
 const tryBoth = inFinland(startLat, startLng) && inFinland(destLat, destLng);
@@ -317,43 +290,53 @@ if (tryBoth) {
     ]);
     const picked = pickBetterLoop(outA, retA, outB, retB);
     if (!picked.outbound || !picked.return) {
+        // Fall back to the un-touched buildLoop (no overlap field)
         const loop = await buildLoop(startLat, startLng, destLat, destLng);
-        return { ...loop, junctions };
+        return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
     }
     return { ...picked, junctions };
 }
 
-// Single-chirality (foreign) path — current Phase 1 behavior:
+// Single-chirality (foreign) path — current Phase 1 behavior plus an
+// overlap calculation for the warning chip:
 onProgress('Building outbound route…');
 const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
 onProgress('Building return route…');
 const ret = await fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]);
 if (!outbound || !ret) {
     const loop = await buildLoop(startLat, startLng, destLat, destLng);
-    return { ...loop, junctions };
+    return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
 }
 const overlap = loopOverlapFraction(outbound.coords, ret.coords);
 return { outbound, return: ret, overlap, junctions };
 ```
 
 **Constraints:**
-- The current `viasLeftReturn` variable (`viaTs.slice().reverse().map(...)`, app.js:572) is replaced with `viasLeft = viaTs.map(...)` — left side built in same `t` order as right. Reversal happens at fetch-call time (`.slice().reverse()`) so `pickBetterLoop` and the left-leg orderings stay readable.
-- Both chiralities use the SAME snapped vias (snap step is once, not per chirality). Different chirality only changes the *order* and *side assignment*, not the snap targets.
+- Both chiralities use the SAME snapped vias. Snap step is once, not per chirality. Different chirality only changes the *order* and *side assignment*, not the snap targets.
+- `buildJunctionLoop`'s return shape grows an `overlap` field (number or null). Callers must accept null. The retry loop in Task 3 handles null correctly (treats as worst-case).
+- The fallback path through `buildLoop` returns `{outbound, return}` from buildLoop, which we wrap with `overlap: null, junctions`. This preserves the today's-buildLoop behavior on the fallback path while keeping the return shape consistent.
+- `buildLoop` is NOT touched. Do not refactor it. Do not add an `overlap` field. Leave the file region around app.js:562-585 unchanged. (Verification step below explicitly checks this.)
 - Mode A change at the integration level — single-file, well-defined replacements.
-- Stale comment in current buildLoop about "tries both chiralities, picks least overlap" (app.js:502 in pre-Phase-1 numbering) is now true and should be kept (or rephrased to reflect actual behavior). Audit the comment block above buildLoop and clean it up.
 
 **Test Cases:**
 
-No new automated tests for the build*Loop integration — testing them requires mocking fetch and OSRM responses, which is heavy for what's mostly orchestration. The behavior is verifiable manually post-deploy. The unit-tested kernel (`loopOverlapFraction`) plus visual inspection is sufficient.
+No new automated tests for `buildJunctionLoop` orchestration — testing it requires mocking fetch + OSRM responses, which is heavy for what's mostly glue code. The behavior is verifiable manually post-deploy. The unit-tested kernel (`loopOverlapFraction`) plus visual inspection is sufficient.
 
 **Verification:**
 ```bash
+# 1. buildLoop is genuinely untouched:
+git diff master -- app.js | grep -A 30 "buildLoop"
+# Expected: no changes inside the buildLoop body (lines around 562-585).
+# Only buildJunctionLoop and pickBetterLoop additions show up.
+
 # After deploy:
-# 1. Generate route from Helsinki center to a destination across a peninsula
-#    (e.g. Lauttasaari → Kulosaari via mainland) — DevTools Network shows 4
-#    /api/osrm-fi/ calls in parallel, not 2 sequential.
-# 2. Generate from a non-Finnish coord — Network shows 2 sequential public calls
-#    (current behavior preserved).
+# 2. Smart-routing OFF, generate Helsinki round-trip — DevTools Network shows
+#    2 sequential /api/osrm-fi calls (Phase 1 behavior preserved exactly).
+# 3. Smart-routing ON, generate Helsinki round-trip — DevTools Network shows
+#    Overpass junction call, then 4 parallel /api/osrm-fi/ route calls.
+# 4. Smart-routing ON, generate from non-Finnish coord — Network shows 2
+#    sequential public OSRM calls (Phase 1 single-chirality preserved for
+#    foreign queries even with smart routing on).
 ```
 
 **[Mode: Direct]**
@@ -362,25 +345,26 @@ No new automated tests for the build*Loop integration — testing them requires 
 
 ---
 
-## Task 3: Ranked candidates + retry loop in `generateDestination` + soft warning chip
+## Task 3: Ranked candidates + retry loop in smart-routing branch + soft warning chip
 
 **Files:**
-- Modify: `app.js` (`pickMostNovelDestination` at 362, `generateDestination` at 1155)
+- Modify: `app.js` (smart-routing branch of `generateDestination` at 1155 only)
+- ADD to `app.js`: `rankByNovelty`, `minDistanceToExisting`, `shuffleInPlace` helpers
 - Create: `tests/rank-by-novelty.test.js`
 
 **Contracts:**
 
-### 3a — `rankByNovelty`
+### 3a — `rankByNovelty` (pure addition; `pickMostNovelDestination` is NOT modified)
 
-Replace `pickMostNovelDestination` internals with `rankByNovelty(candidates, existingDests)` returning the candidates ordered for retry use (most-novel-first, with the top half shuffled to preserve current variety semantics). Keep `pickMostNovelDestination` as a one-line wrapper.
+Add `rankByNovelty(candidates, existingDests)` as new code alongside the existing untouched `pickMostNovelDestination` (app.js:362). Both functions co-exist:
+- `pickMostNovelDestination` keeps its current logic and call sites — used by the non-smart-routing branch and the one-way branch of `generateDestination`. Behavior unchanged.
+- `rankByNovelty` is the new ranked-list function used only by the smart-routing branch's retry loop.
+
+The minor scoring-logic duplication between the two is intentional safety — fully isolating the change to the smart path. After Phase 2 ships and stabilizes, a future cleanup pass can de-duplicate by having `pickMostNovelDestination` delegate to `rankByNovelty`. This plan does NOT do that cleanup.
 
 **Critical: data formats.** `existingDests` is an array of 2-tuples `[[lat, lng], ...]` (returned by `getAllExistingDestinations` at app.js:358-360). `candidates` is an array of objects with `.lat`/`.lng` (sometimes also `.name`). Don't mix them up.
 
-**Critical: behavior preservation.** The current `pickMostNovelDestination` (app.js:362-374) does NOT return the top-most candidate deterministically:
-- No history → random pick from all candidates
-- With history → score by min-distance-to-existing, sort descending, take top half, RANDOM pick from that pool
-
-This randomization preserves variety. Naïvely returning a deterministic ranked list would silently change the no-retry call site's behavior. Solution: `rankByNovelty` shuffles the top half (and shuffles all candidates when history is empty), so `[0], [1], [2]` are random samples from the top half — matching current variety while still favoring novel candidates first for retries.
+**Behavior choice for retry use:** `rankByNovelty` orders candidates most-novel-first, with the top half shuffled. The retry loop consumes `[0], [1], [2]` — three uniformly-random picks from the top-half novel pool, distinct (no candidate is tried twice).
 
 ```js
 // Internal helper: min haversine distance from candidate `c` (object with
@@ -402,8 +386,7 @@ function shuffleInPlace(arr) {
 }
 
 // Order candidates for retry use: most-novel half (shuffled) first, rest
-// after. Single-pick callers (pickMostNovelDestination) get the same
-// random-from-top-half behavior as before; retry callers consume [0]..[N-1].
+// after. Used only by the smart-routing branch's retry loop.
 function rankByNovelty(candidates, existingDests) {
     if (!candidates.length) return [];
     if (!existingDests || existingDests.length === 0) {
@@ -420,119 +403,130 @@ function rankByNovelty(candidates, existingDests) {
     return [...top, ...rest];
 }
 
-function pickMostNovelDestination(candidates, existingDests) {
-    return rankByNovelty(candidates, existingDests)[0];
-}
+// pickMostNovelDestination at app.js:362-374 is NOT modified.
 ```
 
-This preserves the current call-site distribution: for `existingDests.length > 0`, `pickMostNovelDestination` still returns a uniformly-random pick from the top-half by novelty. For empty history, it still returns a uniformly-random pick from all candidates. Only difference: retries (Task 3b) take `[1], [2]` from the same pre-shuffled top half — also random samples from the novel pool, no duplicates.
+### 3b — Retry loop, scoped to the smart-routing branch only
 
-### 3b — Retry loop in `generateDestination`
+The structure of `generateDestination` (app.js:1155+) currently has three branches at the route-building stage (app.js:1232-1248):
 
-Replace the single-pick + single-route block (app.js:1187-1248) with a retry loop:
+1. `tripMode === 'one-way'` — calls `buildOneWay`. **Untouched in Phase 2.**
+2. `smartRouting` toggle ON — calls `buildJunctionLoop`. **This branch is rewritten to use the retry loop.**
+3. else (smart routing OFF) — calls `buildLoop`. **Untouched in Phase 2.**
+
+The candidate-picking stage (app.js:1187-1229) currently picks one destination via `pickMostNovelDestination` for all three branches. This stays untouched. The smart-routing branch additionally derives a ranked candidate list via `rankByNovelty` for retry purposes — picking the same source POI/road/random pool.
+
+**Restructuring approach:** keep the existing single-pick logic that lands at app.js:1229 with `dest = pickMostNovelDestination(...)`. The non-smart and one-way branches use this `dest` exactly as today. The smart-routing branch re-derives a ranked list from the same pool and runs the retry loop.
+
+To avoid re-fetching POIs/roads/random-points, the candidate pool used in the smart-routing retry must be the same one that produced `dest`. Two options:
+
+- **Option A (recommended):** Capture the candidate pool (the array passed to `pickMostNovelDestination`) in a local variable, then `rankByNovelty` over it inside the smart-routing branch. Single Overpass fetch, deterministic same-pool retry. Add one local variable assignment to each of the three pool-creation paths.
+- Option B: Re-call `pickMostNovelDestination` repeatedly until N distinct picks. Wastes work and doesn't get the deterministic shuffled-top-half ordering.
+
+Use Option A. Wire it like this — at each point that currently sets `dest = pickMostNovelDestination(pool, existingDests)`, also retain the pool in a `candidatePool` variable scoped to the function:
 
 ```js
-// Build ranked candidate list (same source as today, just ranked instead of picked)
-let candidates;
-try {
-    if (locationType === 'roads') {
-        const winterMode = document.getElementById('winterMode').checked;
-        const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
-        if (roads.length === 0) throw new Error('empty');
-        candidates = rankByNovelty(roads, existingDests);
-    } else if (locationType === 'any_poi' || locationType === 'poi') {
-        const filters = locationType === 'any_poi'
-            ? POI_TYPES.map(p => p.filter)
-            : [POI_TYPES.find(p => p.key === locationTypeVal)?.filter].filter(Boolean);
-        const label = locationType === 'any_poi'
-            ? 'any POI'
-            : POI_TYPES.find(p => p.key === locationTypeVal)?.label || 'places';
-        onProgress(`Searching for ${label}…`);
-        const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax,
-            filters.length === 1 ? filters[0] : filters, onProgress);
-        if (pois.length === 0) throw new Error('empty');
-        candidates = rankByNovelty(pois, existingDests);
-    } else {
-        const pool = Array.from({ length: 5 }, () =>
-            generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
-        candidates = rankByNovelty(pool, existingDests);
+let candidatePool = null; // populated alongside `dest`, used by the smart-routing retry
+
+// Inside the 'roads' branch:
+candidatePool = roads;
+dest = pickMostNovelDestination(roads, existingDests);
+
+// Inside the 'any_poi' / 'poi' branch:
+candidatePool = pois;
+dest = pickMostNovelDestination(pois, existingDests);
+destName = dest.name;
+
+// Inside the Overpass-fail catch blocks (which already build a random pool):
+candidatePool = candidates;  // the random-points array already named `candidates`
+dest = pickMostNovelDestination(candidates, existingDests);
+
+// Inside the else (locationType !== known) branch (also a random pool):
+candidatePool = candidates;
+dest = pickMostNovelDestination(candidates, existingDests);
+```
+
+Then the route-building stage becomes:
+
+```js
+let outboundRoute, returnRoute, junctions = null;
+let overlap = null;          // Phase 2: tracked for warning chip in smart-routing branch
+let bestSeen = null;         // Phase 2: best-overlap result across retries
+
+if (tripMode === 'one-way') {
+    // UNCHANGED from today
+    onProgress('Building route…');
+    outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
+    returnRoute = null;
+} else if (document.getElementById('smartRouting').checked) {
+    // PHASE 2 — retry loop
+    const winterMode = document.getElementById('winterMode').checked;
+    const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
+
+    // Retry budget gated by Finland — foreign destinations get one shot
+    // (matches Phase 1 behavior, avoids surprise public-OSRM throughput hits).
+    const retryBudget = (inFinland(startLat, startLng)
+        && ranked.length > 0 && inFinland(ranked[0].lat, ranked[0].lng))
+        ? Math.min(MAX_RETRY_ATTEMPTS, ranked.length)
+        : 1;
+
+    let cachedJunctions = null;
+
+    for (let i = 0; i < retryBudget; i++) {
+        const tryDest = ranked[i];
+        if (!tryDest) break;
+
+        onProgress(retryBudget > 1
+            ? `Building route… (attempt ${i + 1}/${retryBudget})`
+            : 'Building route…');
+        const result = await buildJunctionLoop(startLat, startLng,
+            tryDest.lat, tryDest.lng, onProgress, cachedJunctions, winterMode);
+        if (cachedJunctions === null) cachedJunctions = result.junctions;
+
+        // Track best-seen by overlap (lower is better; null displaces nothing)
+        const candidate = {
+            dest: tryDest,
+            destName: tryDest.name || null,
+            outbound: result.outbound,
+            return: result.return,
+            overlap: result.overlap,
+            junctions: result.junctions,
+        };
+        if (!bestSeen
+            || (candidate.overlap !== null
+                && (bestSeen.overlap === null || candidate.overlap < bestSeen.overlap))) {
+            bestSeen = candidate;
+        }
+
+        // Early exit if good enough
+        if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
     }
-} catch {
-    // Existing Overpass-fail fallback path
-    onProgress('Overpass unavailable, using random point…');
-    const pool = Array.from({ length: 5 }, () =>
-        generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
-    candidates = rankByNovelty(pool, existingDests);
-    usedFallback = true;
+
+    // Promote best-seen result back into the outer-scope variables so the
+    // existing displayRoute call shape stays unchanged.
+    if (bestSeen) {
+        dest = bestSeen.dest;
+        destName = bestSeen.destName;
+        outboundRoute = bestSeen.outbound;
+        returnRoute = bestSeen.return;
+        junctions = bestSeen.junctions;
+        overlap = bestSeen.overlap;
+    }
+} else {
+    // UNCHANGED from today (non-smart-routing path)
+    onProgress('Building route…');
+    const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
+    outboundRoute = loop.outbound;
+    returnRoute = loop.return;
 }
 
-// Retry budget gated by Finland — foreign destinations get one shot
-// (matches Phase 1 behavior, avoids surprise public-OSRM throughput hits).
-const retryBudget = (tripMode !== 'one-way' && inFinland(startLat, startLng)
-    && candidates.length > 0 && inFinland(candidates[0].lat, candidates[0].lng))
-    ? Math.min(MAX_RETRY_ATTEMPTS, candidates.length)
-    : 1;
+displayRoute(startLat, startLng, dest.lat, dest.lng,
+             straightMax, straightMin, outboundRoute, returnRoute,
+             locationInput, destName, tripMode, null, null);
+if (currentSession) currentSession.junctions = junctions;
 
-let bestResult = null; // { dest, outbound, return, overlap, junctions, destName }
-let cachedJunctions = null;
-
-for (let i = 0; i < retryBudget; i++) {
-    const dest = candidates[i];
-    if (!dest) break;
-    const destName = dest.name || null;
-
-    let outboundRoute, returnRoute, junctions = null, overlap = null;
-    if (tripMode === 'one-way') {
-        onProgress('Building route…');
-        outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
-        returnRoute = null;
-        // No overlap concept for one-way — break after first attempt.
-        bestResult = { dest, outboundRoute, returnRoute, overlap: null, junctions, destName };
-        break;
-    }
-
-    if (document.getElementById('smartRouting').checked) {
-        const winterMode = document.getElementById('winterMode').checked;
-        const result = await buildJunctionLoop(startLat, startLng, dest.lat, dest.lng,
-            onProgress, cachedJunctions, winterMode);
-        outboundRoute = result.outbound;
-        returnRoute = result.return;
-        junctions = result.junctions;
-        overlap = result.overlap;
-        if (cachedJunctions === null) cachedJunctions = junctions; // cache for retries
-    } else {
-        onProgress(retryBudget > 1 ? `Building route… (attempt ${i + 1}/${retryBudget})` : 'Building route…');
-        const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
-        outboundRoute = loop.outbound;
-        returnRoute = loop.return;
-        overlap = loop.overlap;
-    }
-
-    // Track best-seen by overlap (lower is better; null overlap from full
-    // route failure should not displace a real result).
-    const candidate = { dest, outboundRoute, returnRoute, overlap, junctions, destName };
-    if (!bestResult
-        || (candidate.overlap !== null
-            && (bestResult.overlap === null || candidate.overlap < bestResult.overlap))) {
-        bestResult = candidate;
-    }
-
-    // Early exit if good enough
-    if (overlap !== null && overlap < OVERLAP_BAD_THRESHOLD) break;
-}
-
-if (!bestResult || !bestResult.outboundRoute) {
-    showError('Could not build a route to any candidate destination.');
-    return;
-}
-
-displayRoute(startLat, startLng, bestResult.dest.lat, bestResult.dest.lng,
-             straightMax, straightMin, bestResult.outboundRoute, bestResult.returnRoute,
-             locationInput, bestResult.destName, tripMode, null, null);
-if (currentSession) currentSession.junctions = bestResult.junctions;
-
-// Soft warning if we couldn't find a non-degenerate loop
-if (bestResult.overlap !== null && bestResult.overlap >= OVERLAP_BAD_THRESHOLD) {
+// Phase 2: soft warning if smart-routing exhausted retries with degenerate result
+if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
     showWarning('This area has limited routing options — the loop overlaps significantly.');
 }
 ```
@@ -542,11 +536,12 @@ if (bestResult.overlap !== null && bestResult.overlap >= OVERLAP_BAD_THRESHOLD) 
 `app.js` already has `showError` and `showSuccess` (search for `showSuccess(` and `showError(`). Add a `showWarning` of the same shape that targets a third state (or repurposes existing toast styling). If a "warning"-styled toast doesn't exist yet, the simplest path is `showSuccess(msg)` with a different CSS class — implementer's call which existing UI primitive is closest.
 
 **Constraints:**
-- Junction cache: `buildJunctionLoop` accepts `cachedJunctions` already; we pass `null` on attempt 1 (Overpass fetch) and reuse the returned junction list on subsequent attempts. That means smart-routing retries don't re-query Overpass. Plain `buildLoop` retries don't query Overpass at all (only OSRM nearest), so no caching needed there.
-- One-way mode: `tripMode === 'one-way'` short-circuits to `retryBudget = 1` regardless. No overlap concept for one-way trips.
-- Foreign destinations get `retryBudget = 1` AND get single-chirality loops (from Task 2). Behavior is exactly Phase 1 minus the (free) overlap calculation that drives the warning chip.
-- Warning chip fires whenever `overlap >= OVERLAP_BAD_THRESHOLD` is non-null at display time — applies to foreign queries too, since overlap is computed regardless. Useful info either way.
-- The candidate-source try/catch changes: previously the catch landed inside the locationType branches with a fallback random pool. The retry loop wants `candidates` populated regardless, so the catch is restructured to set `candidates` before entering the retry loop. Behavior preserved.
+- **Non-smart-routing branch is bit-for-bit unchanged.** No `rankByNovelty`, no retry loop, no overlap calculation, no warning chip. Reaches `buildLoop` exactly as today.
+- **One-way branch is bit-for-bit unchanged.** No retry, no overlap. Reaches `buildOneWay` exactly as today.
+- Junction cache: `buildJunctionLoop` accepts `cachedJunctions` already; we pass `null` on attempt 1 (Overpass fetch) and reuse the returned junction list on subsequent attempts. Retries don't re-query Overpass.
+- Foreign destinations under smart routing: `retryBudget = 1` AND single-chirality loops (from Task 2). Behavior is exactly Phase 1 minus the (free) overlap calculation that drives the warning chip.
+- Warning chip fires only from the smart-routing branch (it's the only branch that computes `overlap`). Non-smart users never see it. This is intentional — the chip is part of the new path.
+- The `candidatePool` capture is a pure addition — it's set alongside the existing `pickMostNovelDestination` call sites without altering them. If the smart-routing branch isn't entered, `candidatePool` is set but unused (harmless).
 
 **Test Cases (`tests/rank-by-novelty.test.js`):**
 
@@ -628,7 +623,7 @@ describe('pickMostNovelDestination', () => {
 });
 ```
 
-Test loading note: extract `rankByNovelty`, `minDistanceToExisting`, and `shuffleInPlace` into a small pure-helper file (e.g. `novelty.js`), loaded before `app.js` in `index.html` — same pattern as `bbox.js` and `loop-quality.js`. `calculateDistance` is also needed by `minDistanceToExisting`; either move it to the helper file too, or keep `minDistanceToExisting` in app.js and only extract the helpers that don't depend on it. Implementer's call — both shapes are reasonable.
+Test loading: load `novelty.js` (NOT `app.js`) using the same browser-script-loading pattern as `tests/sync.test.js`. `novelty.js` is small and pure (per the File Structure section above), parses cleanly in jsdom.
 
 **Verification:**
 
@@ -637,17 +632,33 @@ pnpm vitest run tests/loop-quality.test.js tests/rank-by-novelty.test.js tests/i
 # Expected: all tests pass
 
 # Manual browser verification (post-deploy):
-# 1. Generate Helsinki round-trip — DevTools shows 4 parallel /api/osrm-fi calls
-#    on first attempt. If overlap < 0.4, no retry. Network panel shows 4 calls total.
-# 2. Pick a known lake-collapse start (somewhere in Päijänne or Saimaa with a
-#    POI across the lake) — DevTools shows multiple attempts, network calls
-#    in batches of 4 per attempt, up to 3 attempts. Either: a non-degenerate
-#    loop is found and displayed, OR all 3 attempts collapse and the warning
+#
+# A. Smart-routing OFF — non-smart path completely unchanged
+# 1. Toggle smart routing OFF, generate Helsinki round-trip — DevTools shows
+#    2 sequential /api/osrm-fi calls (Phase 1 single-chirality buildLoop).
+#    No retry messages, no warning chip ever.
+# 2. Toggle smart routing OFF, generate near a known lake-collapse area —
+#    same degenerate behavior as today (no overlap detection, no retry).
+#    This is the deliberate iteration-safety baseline.
+#
+# B. Smart-routing ON — Phase 2 active
+# 3. Toggle smart routing ON, generate Helsinki round-trip — DevTools shows
+#    Overpass junction call, then 4 parallel /api/osrm-fi route calls on
+#    first attempt. If overlap < 0.4 → no retry, network total ~5 calls.
+# 4. Toggle smart routing ON, pick a known lake-collapse start (Päijänne /
+#    Saimaa with a POI across water) — DevTools shows up to 3 attempts of
+#    4 parallel calls each. Either a non-degenerate loop is found and
+#    displayed, OR all 3 attempts collapse and the warning chip appears.
+# 5. Smart routing ON, retry attempts reuse cached junctions — Overpass call
+#    happens once, no second Overpass fetch even across multiple retries.
+#
+# C. One-way mode — unchanged
+# 6. One-way mode, any destination — Phase 1 behavior. No retry, no warning.
+#
+# D. Foreign destinations
+# 7. Smart routing ON, generate from non-Finnish coord — DevTools shows 2
+#    sequential public OSRM calls, no retries. If overlap >= 0.4, warning
 #    chip appears.
-# 3. Generate from non-Finnish coord — DevTools shows 2 sequential public calls,
-#    no retries. If the result happens to overlap, warning chip still appears.
-# 4. Smart-routing toggle ON in lake area — Overpass junction call happens once;
-#    retry attempts reuse cached junctions (no second Overpass call).
 ```
 
 **[Mode: Direct]**
@@ -658,6 +669,8 @@ pnpm vitest run tests/loop-quality.test.js tests/rank-by-novelty.test.js tests/i
 
 ## Out of Scope
 
+- **Modifying `buildLoop` or the non-smart-routing branch.** Deliberately deferred — the original generation path stays as a stable comparison baseline while we iterate on the smart-routing improvements. After Phase 2 ships, validates, and stabilizes, the non-smart path's role gets re-evaluated (likely deprecated and removed, but that's a separate decision).
+- **De-duplicating `pickMostNovelDestination` and `rankByNovelty` scoring logic.** Intentional duplication for safety isolation — `pickMostNovelDestination` stays bit-for-bit identical so non-smart-path users get exactly today's pick distribution. Cleanup is a future task.
 - Closure-scoped `selfHostedDegraded` flag from spec section 4.5: deferred. Phase 1 has been live and stable; the cross-call coordination this flag provides is over-engineering until we see actual self-hosted brownouts during retry sequences. Capture as an idea if needed.
 - User-facing overlap-score badge on every route (idea #863): explicitly deferred — wait to see if the warning chip is enough.
 - Auto-widening spread before re-picking (idea #864): explicitly deferred.
