@@ -789,6 +789,21 @@ function showSuccess(message) {
     }, 4000);
 }
 
+function showWarning(message) {
+    const el = document.getElementById('error');
+    el.textContent = message;
+    el.style.color = '#fcd34d';
+    el.style.background = 'rgba(245, 158, 11, 0.15)';
+    el.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+    el.classList.add('active');
+    setTimeout(() => {
+        el.classList.remove('active');
+        el.style.color = '';
+        el.style.background = '';
+        el.style.borderColor = '';
+    }, 5000);
+}
+
 // ─── Cloud-backup UI ──────────────────────────────────────────────────────────
 
 function showConsentToast() {
@@ -1233,6 +1248,9 @@ async function generateDestination() {
         let dest;
         let destName = null;
         let usedFallback = false;
+        // Phase 2: capture the candidate pool that produced `dest` so the
+        // smart-routing branch can re-rank it for retries without re-fetching.
+        let candidatePool = null;
 
         if (locationType === 'roads') {
             onProgress('Searching for roads in the area…');
@@ -1240,11 +1258,13 @@ async function generateDestination() {
                 const winterMode = document.getElementById('winterMode').checked;
                 const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
                 if (roads.length === 0) throw new Error('empty');
+                candidatePool = roads;
                 dest = pickMostNovelDestination(roads, existingDests);
             } catch {
                 onProgress('Overpass unavailable, using random point…');
                 const candidates = Array.from({ length: 5 }, () =>
                     generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+                candidatePool = candidates;
                 dest = pickMostNovelDestination(candidates, existingDests);
                 usedFallback = true;
             }
@@ -1259,33 +1279,81 @@ async function generateDestination() {
             try {
                 const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
                 if (pois.length === 0) throw new Error('empty');
+                candidatePool = pois;
                 dest = pickMostNovelDestination(pois, existingDests);
                 destName = dest.name;
             } catch {
                 onProgress('Overpass unavailable, using random point…');
                 const candidates = Array.from({ length: 5 }, () =>
                     generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+                candidatePool = candidates;
                 dest = pickMostNovelDestination(candidates, existingDests);
                 usedFallback = true;
             }
         } else {
             const candidates = Array.from({ length: 5 }, () =>
                 generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+            candidatePool = candidates;
             dest = pickMostNovelDestination(candidates, existingDests);
         }
 
         // Build route
         let outboundRoute, returnRoute, junctions = null;
+        let overlap = null;
         if (tripMode === 'one-way') {
             onProgress('Building route…');
             outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
             returnRoute = null;
         } else if (document.getElementById('smartRouting').checked) {
             const winterMode = document.getElementById('winterMode').checked;
-            const result = await buildJunctionLoop(startLat, startLng, dest.lat, dest.lng, onProgress, null, winterMode);
-            outboundRoute = result.outbound;
-            returnRoute = result.return;
-            junctions = result.junctions;
+            const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
+
+            // Retry budget gated by Finland — foreign destinations get one shot
+            // to avoid surprise public-OSRM throughput hits.
+            const retryBudget = (inFinland(startLat, startLng)
+                && ranked.length > 0 && inFinland(ranked[0].lat, ranked[0].lng))
+                ? Math.min(MAX_RETRY_ATTEMPTS, ranked.length)
+                : 1;
+
+            let cachedJunctions = null;
+            let bestSeen = null;
+
+            for (let i = 0; i < retryBudget; i++) {
+                const tryDest = ranked[i];
+                if (!tryDest) break;
+
+                onProgress(retryBudget > 1
+                    ? `Building route… (attempt ${i + 1}/${retryBudget})`
+                    : 'Building route…');
+                const result = await buildJunctionLoop(startLat, startLng,
+                    tryDest.lat, tryDest.lng, onProgress, cachedJunctions, winterMode);
+                if (cachedJunctions === null) cachedJunctions = result.junctions;
+
+                const candidate = {
+                    dest: tryDest,
+                    destName: tryDest.name || null,
+                    outbound: result.outbound,
+                    return: result.return,
+                    overlap: result.overlap,
+                    junctions: result.junctions,
+                };
+                if (!bestSeen
+                    || (candidate.overlap !== null
+                        && (bestSeen.overlap === null || candidate.overlap < bestSeen.overlap))) {
+                    bestSeen = candidate;
+                }
+
+                if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
+            }
+
+            if (bestSeen) {
+                dest = bestSeen.dest;
+                destName = bestSeen.destName;
+                outboundRoute = bestSeen.outbound;
+                returnRoute = bestSeen.return;
+                junctions = bestSeen.junctions;
+                overlap = bestSeen.overlap;
+            }
         } else {
             onProgress('Building route…');
             const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
@@ -1297,6 +1365,10 @@ async function generateDestination() {
                      straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode,
                      null, null);
         if (currentSession) currentSession.junctions = junctions;
+
+        if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
+            showWarning('This area has limited routing options — the loop overlaps significantly.');
+        }
 
     } catch (error) {
         showError(error.message || 'An error occurred. Please try again.');
