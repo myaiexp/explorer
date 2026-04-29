@@ -1,5 +1,5 @@
 /**
- * Tests for bbox.js — inFinland / allInFinland helpers.
+ * Tests for bbox.js — inFinland helper.
  *
  * Loading: bbox.js is a non-module browser script. We load its source and
  * run it in the current realm via Node's vm module; the script's explicit
@@ -55,22 +55,3 @@ describe('inFinland bbox helper', () => {
     });
 });
 
-describe('allInFinland', () => {
-    test('all waypoints in Finland → true', () => {
-        expect(globalThis.allInFinland([
-            { lat: 60.17, lng: 24.94 },
-            { lat: 60.20, lng: 24.99 },
-        ])).toBe(true);
-    });
-
-    test('one waypoint outside → false', () => {
-        expect(globalThis.allInFinland([
-            { lat: 60.17, lng: 24.94 },
-            { lat: 59.33, lng: 18.07 },
-        ])).toBe(false);
-    });
-
-    test('empty array → true (vacuous)', () => {
-        expect(globalThis.allInFinland([])).toBe(true);
-    });
-});

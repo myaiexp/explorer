@@ -11,13 +11,8 @@ function inFinland(lat, lng) {
         && lng >= FINLAND_BBOX.minLng && lng <= FINLAND_BBOX.maxLng;
 }
 
-function allInFinland(waypoints) {
-    return waypoints.every(p => inFinland(p.lat, p.lng));
-}
-
 // Browser script tags hoist top-level function declarations to window
 // automatically. Explicit globalThis assignment makes the helpers loadable
 // from non-script consumers (e.g. vm.runInThisContext in tests).
 globalThis.FINLAND_BBOX = FINLAND_BBOX;
 globalThis.inFinland = inFinland;
-globalThis.allInFinland = allInFinland;

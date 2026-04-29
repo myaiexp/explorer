@@ -101,7 +101,6 @@ function saveSettings() {
         maxDistance: document.getElementById('maxDistance').value,
         poiType: document.getElementById('locationTypeSelect').value,
         spread: document.getElementById('spreadSlider').value,
-        requestDelay: requestDelay,
         winterMode: document.getElementById('winterMode').checked,
         smartRouting: document.getElementById('smartRouting').checked,
     };
@@ -120,11 +119,6 @@ function restoreSettings() {
         if (settings.maxDistance != null) document.getElementById('maxDistance').value = settings.maxDistance;
         if (settings.poiType) document.getElementById('locationTypeSelect').value = settings.poiType;
         if (settings.spread != null) document.getElementById('spreadSlider').value = settings.spread;
-        if (settings.requestDelay != null) {
-            requestDelay = settings.requestDelay;
-            document.getElementById('delaySlider').value = requestDelay;
-            document.getElementById('delayValue').textContent = requestDelay + 'ms';
-        }
         if (settings.winterMode != null) document.getElementById('winterMode').checked = settings.winterMode;
         if (settings.smartRouting != null) document.getElementById('smartRouting').checked = settings.smartRouting;
         // Sync distance label with restored trip mode
@@ -142,7 +136,6 @@ function initSettingsListeners() {
     document.getElementById('maxDistance').addEventListener('change', saveSettings);
     document.getElementById('locationTypeSelect').addEventListener('change', saveSettings);
     document.getElementById('spreadSlider').addEventListener('change', saveSettings);
-    document.getElementById('delaySlider').addEventListener('change', saveSettings);
     document.getElementById('winterMode').addEventListener('change', saveSettings);
     document.getElementById('smartRouting').addEventListener('change', saveSettings);
 }
@@ -465,19 +458,11 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress
 
 // ─── OSRM routing ─────────────────────────────────────────────────────────────
 
-// Self-hosted OSRM-foot for Finland; public OSRM as fallback / non-Finland default.
-const OSRM_FI_BASE        = 'https://mase.fi/api/osrm-fi/route/v1/foot';
-const OSRM_FI_NEAREST     = 'https://mase.fi/api/osrm-fi/nearest/v1/foot';
-const OSRM_PUBLIC_BASE    = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving';
-const OSRM_PUBLIC_NEAREST = 'https://routing.openstreetmap.de/routed-foot/nearest/v1/driving';
+// Self-hosted OSRM-foot for Finland.
+const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
+const OSRM_FI_NEAREST = 'https://mase.fi/api/osrm-fi/nearest/v1/foot';
 
-let requestDelay = 300;
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function adjustRequestDelay(delta) {
-    requestDelay = Math.max(0, Math.min(2000, requestDelay + delta));
-    document.getElementById('delayValue').textContent = requestDelay + 'ms';
-}
 
 // Internal: fetch + parse OSRM /route response. Returns null on any failure.
 async function tryOsrm(url) {
@@ -501,15 +486,7 @@ async function tryOsrm(url) {
 async function fetchRouteThrough(waypoints) {
     const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
     const query = `${coordStr}?overview=full&geometries=geojson&steps=true&continue_straight=true`;
-
-    // In Finland: try self-hosted first, no throttle. Fall through to public on failure.
-    if (allInFinland(waypoints)) {
-        const result = await tryOsrm(`${OSRM_FI_BASE}/${query}`);
-        if (result) return result;
-    }
-
-    await sleep(requestDelay);
-    return tryOsrm(`${OSRM_PUBLIC_BASE}/${query}`);
+    return tryOsrm(`${OSRM_FI_BASE}/${query}`);
 }
 
 // Build a full oval loop: A → (right vias) → B → (left vias) → A
@@ -543,17 +520,7 @@ async function tryNearest(url) {
 // Snap a geometric via to the nearest road point within maxKm.
 // Returns the snapped point, or the original if snapping fails or is too far.
 async function snapToRoad(via, maxKm = 0.5) {
-    if (inFinland(via.lat, via.lng)) {
-        const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
-        if (snapped) {
-            const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
-            return dist <= maxKm ? snapped : via;
-        }
-        // Self-hosted failed (network/5xx) — fall through to public.
-    }
-
-    await sleep(requestDelay);
-    const snapped = await tryNearest(`${OSRM_PUBLIC_NEAREST}/${via.lng},${via.lat}?number=1`);
+    const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
     if (!snapped) return via;
     const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
     return dist <= maxKm ? snapped : via;
@@ -662,11 +629,9 @@ function pickBetterLoop(outA, retA, outB, retB) {
 
 // Junction-snap variant of buildLoop: same envelope vias, same snap radius,
 // but snaps each via to the closest OSM junction in a corridor pool instead
-// of OSRM nearest-snap. Falls back to buildLoop on Overpass/OSRM failure.
+// of OSRM nearest-snap. Builds both chiralities in parallel and returns the
+// lower-overlap one. Falls back to buildLoop on Overpass/OSRM failure.
 // cachedJunctions: pass a previously returned `junctions` to skip Overpass.
-// In Finland: builds both chiralities in parallel and returns the lower-
-// overlap one. Outside Finland: single chirality, but still computes overlap
-// for the warning chip.
 async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, cachedJunctions = null, winterMode = false) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
@@ -696,36 +661,19 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgres
     const snappedRight = viasRight.map(v => snapToJunction(v, junctions, snapRadius));
     const snappedLeft  = viasLeft .map(v => snapToJunction(v, junctions, snapRadius));
 
-    const tryBoth = inFinland(startLat, startLng) && inFinland(destLat, destLng);
-
-    if (tryBoth) {
-        onProgress('Building both chiralities…');
-        const [outA, retA, outB, retB] = await Promise.all([
-            fetchRouteThrough([A, ...snappedRight, B]),
-            fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
-            fetchRouteThrough([A, ...snappedLeft, B]),
-            fetchRouteThrough([B, ...snappedRight.slice().reverse(), A]),
-        ]);
-        const picked = pickBetterLoop(outA, retA, outB, retB);
-        if (!picked.outbound || !picked.return) {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng);
-            return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
-        }
-        return { ...picked, junctions };
-    }
-
-    onProgress('Building outbound route…');
-    const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
-    onProgress('Building return route…');
-    const ret      = await fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]);
-
-    if (!outbound || !ret) {
+    onProgress('Building both chiralities…');
+    const [outA, retA, outB, retB] = await Promise.all([
+        fetchRouteThrough([A, ...snappedRight, B]),
+        fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
+        fetchRouteThrough([A, ...snappedLeft, B]),
+        fetchRouteThrough([B, ...snappedRight.slice().reverse(), A]),
+    ]);
+    const picked = pickBetterLoop(outA, retA, outB, retB);
+    if (!picked.outbound || !picked.return) {
         const loop = await buildLoop(startLat, startLng, destLat, destLng);
         return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
     }
-
-    const overlap = loopOverlapFraction(outbound.coords, ret.coords);
-    return { outbound, return: ret, overlap, junctions };
+    return { ...picked, junctions };
 }
 
 // Build a single routed leg A → B. Returns {coords, duration, distance} or null.
@@ -1307,13 +1255,7 @@ async function generateDestination() {
         } else if (document.getElementById('smartRouting').checked) {
             const winterMode = document.getElementById('winterMode').checked;
             const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
-
-            // Retry budget gated by Finland — foreign destinations get one shot
-            // to avoid surprise public-OSRM throughput hits.
-            const retryBudget = (inFinland(startLat, startLng)
-                && ranked.length > 0 && inFinland(ranked[0].lat, ranked[0].lng))
-                ? Math.min(MAX_RETRY_ATTEMPTS, ranked.length)
-                : 1;
+            const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
 
             let cachedJunctions = null;
             let bestSeen = null;
