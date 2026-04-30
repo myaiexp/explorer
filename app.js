@@ -56,9 +56,32 @@ function escapeHtml(str) {
     return el.innerHTML;
 }
 
+// ─── Route color palette (colorblind-safe, Wong/Tol-derived) ──────────────────
+
+const ROUTE_COLORS = [
+    { name: 'Coral',   hex: '#E66100' },
+    { name: 'Sky',     hex: '#56B4E9' },
+    { name: 'Teal',    hex: '#009E73' },
+    { name: 'Magenta', hex: '#CC79A7' },
+    { name: 'Gold',    hex: '#F0E442' }
+];
+const DEFAULT_ROUTE_COLOR = ROUTE_COLORS[0].hex;
+const ROUTE_COLOR_KEY = 'walk_route_color';
+
+function getRouteColor() {
+    const stored = localStorage.getItem(ROUTE_COLOR_KEY);
+    if (stored && ROUTE_COLORS.some(c => c.hex === stored)) return stored;
+    return DEFAULT_ROUTE_COLOR;
+}
+
+function setRouteColor(hex) {
+    localStorage.setItem(ROUTE_COLOR_KEY, hex);
+}
+
 // ─── Mutable map state ────────────────────────────────────────────────────────
 
 let markers = [];
+let destMarker = null;  // ref to the destination pin so we can recolor on the fly
 let circle = null;
 let innerCircle = null;
 let routeLines = [];  // all polylines for the loop
@@ -240,9 +263,42 @@ function createPinIcon(color) {
     });
 }
 
+// "You are here" dot — universal current-location convention. Shape carries
+// the meaning, so we can keep the color fixed regardless of route color.
+function createHereDotIcon() {
+    return L.divIcon({
+        className: 'user-here-dot',
+        html: `<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="11" cy="11" r="10" fill="#3b82f6" fill-opacity="0.18"/>
+            <circle cx="11" cy="11" r="6" fill="#3b82f6" stroke="white" stroke-width="2.5"/>
+        </svg>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+        popupAnchor: [0, -12]
+    });
+}
+
+// Strava-style glow polyline: thick low-opacity halo + crisp top stroke.
+// Pushes both layers into routeLines so clearMap() removes them together.
+function drawRouteGlow(coords, color, { dashed = false } = {}) {
+    const halo = L.polyline(coords, {
+        color, weight: 10, opacity: 0.22,
+        lineCap: 'round', lineJoin: 'round'
+    }).addTo(map);
+    routeLines.push(halo);
+    const top = L.polyline(coords, {
+        color, weight: 3.5, opacity: 0.95,
+        lineCap: 'round', lineJoin: 'round',
+        dashArray: dashed ? '10, 10' : null
+    }).addTo(map);
+    routeLines.push(top);
+    return top;
+}
+
 function clearMap() {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
+    destMarker = null;
     if (circle)      { map.removeLayer(circle);      circle = null; }
     if (innerCircle) { map.removeLayer(innerCircle); innerCircle = null; }
     routeLines.forEach(l => map.removeLayer(l));
@@ -945,13 +1001,14 @@ function renderElevationChart(elevations) {
     grad.setAttribute('id', 'elevGrad');
     grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
     grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
+    const chartColor = getRouteColor();
     const stop1 = document.createElementNS(NS, 'stop');
     stop1.setAttribute('offset', '0%');
-    stop1.setAttribute('stop-color', '#3b82f6');
+    stop1.setAttribute('stop-color', chartColor);
     stop1.setAttribute('stop-opacity', '0.4');
     const stop2 = document.createElementNS(NS, 'stop');
     stop2.setAttribute('offset', '100%');
-    stop2.setAttribute('stop-color', '#3b82f6');
+    stop2.setAttribute('stop-color', chartColor);
     stop2.setAttribute('stop-opacity', '0.05');
     grad.appendChild(stop1);
     grad.appendChild(stop2);
@@ -966,7 +1023,7 @@ function renderElevationChart(elevations) {
     const line = document.createElementNS(NS, 'polyline');
     line.setAttribute('points', pts.join(' '));
     line.setAttribute('fill', 'none');
-    line.setAttribute('stroke', '#3b82f6');
+    line.setAttribute('stroke', chartColor);
     line.setAttribute('stroke-width', '1.5');
     line.setAttribute('vector-effect', 'non-scaling-stroke');
     svg.appendChild(line);
@@ -1027,11 +1084,12 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
                       outboundRoute, returnRoute, locationInput, destName, tripMode,
                       outboundVias, returnVias) {
     // Markers
-    const startMarker = L.marker([startLat, startLng], { icon: createPinIcon('#3b82f6') })
+    const routeColor = getRouteColor();
+    const startMarker = L.marker([startLat, startLng], { icon: createHereDotIcon() })
         .addTo(map).bindPopup(`<b>Start</b><br>${escapeHtml(locationInput)}`);
     markers.push(startMarker);
 
-    const destMarker = L.marker([destLat, destLng], { icon: createPinIcon('#f59e0b') })
+    destMarker = L.marker([destLat, destLng], { icon: createPinIcon(routeColor) })
         .addTo(map).bindPopup('<b>Destination</b><br>Turnaround point');
     markers.push(destMarker);
 
@@ -1050,29 +1108,21 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         }).addTo(map);
     }
 
-    // Route polylines — blue outbound, amber return
+    // Route polylines — single color, glow style. Outbound + return read as
+    // one continuous walk; direction is conveyed by the start dot vs dest pin.
     const allCoords = [];
     if (outboundRoute) {
-        const line = L.polyline(outboundRoute.coords, {
-            color: '#3b82f6', weight: 3, opacity: 0.85
-        }).addTo(map);
-        routeLines.push(line);
+        drawRouteGlow(outboundRoute.coords, routeColor);
         allCoords.push(...outboundRoute.coords);
     }
     if (returnRoute) {
-        const line = L.polyline(returnRoute.coords, {
-            color: '#f59e0b', weight: 3, opacity: 0.85
-        }).addTo(map);
-        routeLines.push(line);
+        drawRouteGlow(returnRoute.coords, routeColor);
         allCoords.push(...returnRoute.coords);
     }
 
     // Fallback: dashed straight line if no routes at all
     if (!outboundRoute && !returnRoute) {
-        const line = L.polyline([[startLat, startLng], [destLat, destLng]], {
-            color: '#3b82f6', weight: 3, opacity: 0.7, dashArray: '10, 10'
-        }).addTo(map);
-        routeLines.push(line);
+        drawRouteGlow([[startLat, startLng], [destLat, destLng]], routeColor, { dashed: true });
         allCoords.push([startLat, startLng], [destLat, destLng]);
     }
 
@@ -1484,25 +1534,28 @@ function markAsVisited() {
 
 function renderVisitedLayer() {
     visitedLayerGroup.clearLayers();
+    const color = getRouteColor();
     for (const visit of getVisits()) {
         if (visit.routeCoords?.length > 0) {
             L.polyline(visit.routeCoords, {
-                color: '#3b82f6', weight: 2, opacity: 0.35
+                color, weight: 2, opacity: 0.4
             }).addTo(visitedLayerGroup);
         }
         if (visit.returnRouteCoords?.length > 0) {
             L.polyline(visit.returnRouteCoords, {
-                color: '#f59e0b', weight: 2, opacity: 0.35
+                color, weight: 2, opacity: 0.4
             }).addTo(visitedLayerGroup);
         }
+        // Start: hollow ring (matches "you are here" semantic but compact for overlay)
         L.circleMarker([visit.startLat, visit.startLng], {
-            radius: 5, color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.8, weight: 1
+            radius: 4, color: '#3b82f6', fillColor: '#fff', fillOpacity: 1, weight: 2
         })
         .bindPopup(`<b>${escapeHtml(visit.startLabel)}</b><br>${new Date(visit.date).toLocaleDateString()}`)
         .addTo(visitedLayerGroup);
 
+        // Destination: filled in route color (matches the active route's pin)
         L.circleMarker([visit.destLat, visit.destLng], {
-            radius: 5, color: '#0d9488', fillColor: '#0d9488', fillOpacity: 0.8, weight: 1
+            radius: 5, color, fillColor: color, fillOpacity: 0.85, weight: 1
         })
         .bindPopup(`${visit.distance.toFixed(1)} km<br>${new Date(visit.date).toLocaleDateString()}`)
         .addTo(visitedLayerGroup);
@@ -1821,7 +1874,49 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && document.getElementById('fitModal').classList.contains('active')) {
         closeFITModal();
     }
+    if (e.key === 'Escape' && document.getElementById('prefsModal').classList.contains('active')) {
+        closePreferencesModal();
+    }
 });
+
+// ─── Preferences modal ───────────────────────────────────────────────────────
+
+function openPreferencesModal() {
+    document.getElementById('prefsModal').classList.add('active');
+}
+
+function closePreferencesModal() {
+    document.getElementById('prefsModal').classList.remove('active');
+}
+
+function renderRouteColorSwatches() {
+    const grid = document.getElementById('routeColorSwatches');
+    if (!grid) return;
+    const active = getRouteColor();
+    grid.replaceChildren();
+    for (const c of ROUTE_COLORS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'swatch' + (c.hex === active ? ' active' : '');
+        btn.style.background = c.hex;
+        btn.title = c.name;
+        btn.setAttribute('aria-label', `Route color: ${c.name}`);
+        btn.onclick = () => {
+            setRouteColor(c.hex);
+            applyRouteColor();
+            renderRouteColorSwatches();
+        };
+        grid.appendChild(btn);
+    }
+}
+
+// Apply the current routeColor to all live map layers without re-running OSRM.
+function applyRouteColor() {
+    const color = getRouteColor();
+    routeLines.forEach(l => l.setStyle({ color }));
+    if (destMarker) destMarker.setIcon(createPinIcon(color));
+    renderVisitedLayer();
+}
 
 async function confirmFITExport() {
     if (!currentSession) { showError('Generate a route first.'); return; }
@@ -1926,20 +2021,15 @@ async function rerouteWithCurrentSpread() {
             junctions = null;
         }
 
-        // Redraw routes
+        // Redraw routes (glow style, single color)
+        const retryColor = getRouteColor();
         const allCoords = [];
         if (outbound) {
-            const line = L.polyline(outbound.coords, {
-                color: '#3b82f6', weight: 3, opacity: 0.85
-            }).addTo(map);
-            routeLines.push(line);
+            drawRouteGlow(outbound.coords, retryColor);
             allCoords.push(...outbound.coords);
         }
         if (ret) {
-            const line = L.polyline(ret.coords, {
-                color: '#f59e0b', weight: 3, opacity: 0.85
-            }).addTo(map);
-            routeLines.push(line);
+            drawRouteGlow(ret.coords, retryColor);
             allCoords.push(...ret.coords);
         }
         if (allCoords.length > 0) {
@@ -2185,6 +2275,7 @@ document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
 
 restoreSettings();
 initSettingsListeners();
+renderRouteColorSwatches();
 renderSavedLocations();
 updateSaveLocationBtn();
 if (typeof ExplorerSync !== 'undefined') {

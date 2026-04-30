@@ -1295,3 +1295,55 @@ input[type="range"]::-moz-range-thumb {
 .modal-actions .btn-primary:hover {
     background: var(--accent-hover);
 }
+
+/* ── Preferences modal ────────────────────────────────────────────────── */
+
+.prefs-section {
+    margin-bottom: 20px;
+}
+
+.prefs-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.prefs-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.swatch-grid {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.swatch {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    padding: 0;
+    background-clip: content-box;
+    box-shadow: 0 0 0 2px var(--bg) inset;
+    transition: transform 0.1s, border-color 0.15s;
+}
+
+.swatch:hover {
+    transform: scale(1.08);
+}
+
+.swatch.active {
+    border-color: var(--text);
+}
+
+/* Leaflet "you are here" dot — outer halo + inner solid */
+.user-here-dot {
+    background: none;
+    border: none;
+}

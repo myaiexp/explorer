@@ -29,6 +29,7 @@
                     <button type="button" id="enableCloudBackupBtn" onclick="enableCloudBackup()" style="display:none">Enable cloud backup</button>
                     <button type="button" id="deleteCloudDataBtn" onclick="confirmDeleteCloudData()" style="display:none">Delete cloud data</button>
                     <button type="button" id="toggleVisitedBtn" onclick="toggleVisitedLayer()">Show visited routes</button>
+                    <button type="button" onclick="openPreferencesModal()">Preferences</button>
                     <button type="button" onclick="exportVisits()">Export visits</button>
                     <button type="button" onclick="exportGPX()">Export GPX</button>
                     <button type="button" onclick="openFITModal()">Export FIT (Garmin)</button>
@@ -215,6 +216,21 @@
                 <div class="modal-actions">
                     <button type="button" class="btn-ghost" onclick="closeFITModal()">Cancel</button>
                     <button type="button" class="btn-primary" onclick="confirmFITExport()">Download .fit</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Preferences modal -->
+        <div class="modal-backdrop" id="prefsModal" onclick="closePreferencesModal(event)">
+            <div class="modal" role="dialog" aria-labelledby="prefsModalTitle" onclick="event.stopPropagation()">
+                <div class="modal-header" id="prefsModalTitle">Preferences</div>
+                <div class="prefs-section">
+                    <div class="prefs-label">Route color</div>
+                    <div class="prefs-hint">Used for the route line and the destination pin. Palette is colorblind-safe.</div>
+                    <div class="swatch-grid" id="routeColorSwatches"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-primary" onclick="closePreferencesModal()">Done</button>
                 </div>
             </div>
         </div>
