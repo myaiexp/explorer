@@ -9,10 +9,12 @@ const MAX_ATTEMPTS = 3;
 
 export type LatLng = { lat: number; lng: number };
 
+// Mirror the constants in explorer/app.js so server-cached results match what
+// the frontend would have computed from a direct Overpass call.
 export type ExcludePreset = 'default' | 'winter';
 export const HIGHWAY_EXCLUDE: Record<ExcludePreset, string> = {
-    default: 'footway|path|cycleway|service|track|steps|pedestrian|bridleway|corridor|elevator|raceway|construction|proposed|abandoned|disused',
-    winter:  'footway|path|cycleway|service|track|steps|pedestrian|bridleway|corridor|elevator|raceway|construction|proposed|abandoned|disused|residential|living_street|unclassified|tertiary_link'
+    default: 'motorway|motorway_link|trunk|trunk_link|service|steps',
+    winter:  'motorway|motorway_link|trunk|trunk_link|service|steps|path|track|footway|bridleway|cycleway|pedestrian'
 };
 
 export type Bbox = { minLat: number; minLng: number; maxLat: number; maxLng: number };

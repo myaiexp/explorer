@@ -608,7 +608,9 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
 }
 
 // Fetch OSM nodes referenced by ≥2 highway ways inside the corridor between
-// start/dest, expanded by offsetKm on each side. Returns array of {lat, lng}.
+// start/dest, expanded by offsetKm on each side. Goes through the
+// junctions-cache service on shelly (mase.fi/api/junctions) which handles
+// Overpass calls + persistent caching.
 async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode = false) {
     const minLat = Math.min(startLat, destLat);
     const maxLat = Math.max(startLat, destLat);
@@ -618,33 +620,15 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     const latPad = offsetKm / 111;
     const lngPad = offsetKm / (111 * Math.cos(midLat * Math.PI / 180));
     const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
-    const exclude = winterMode ? HIGHWAY_EXCLUDE_WINTER : HIGHWAY_EXCLUDE_DEFAULT;
-    const query = `
-        [out:json][timeout:15];
-        way["highway"]["highway"!~"${exclude}"](${bbox});
-        out body;
-        >;
-        out skel qt;
-    `;
-    const data = await queryOverpass(query, onProgress);
-    const nodeWayCount = new Map();
-    const nodeCoords = new Map();
-    for (const el of data.elements) {
-        if (el.type === 'way' && Array.isArray(el.nodes)) {
-            for (const id of el.nodes) {
-                nodeWayCount.set(id, (nodeWayCount.get(id) || 0) + 1);
-            }
-        } else if (el.type === 'node' && el.lat != null && el.lon != null) {
-            nodeCoords.set(el.id, { lat: el.lat, lng: el.lon });
-        }
+    const exclude = winterMode ? 'winter' : 'default';
+    const url = `/api/junctions/junctions?bbox=${encodeURIComponent(bbox)}&exclude=${exclude}`;
+    if (onProgress) onProgress('Searching for junctions…');
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error('POI search is busy. Please try again.');
     }
-    const junctions = [];
-    for (const [id, count] of nodeWayCount) {
-        if (count < 2) continue;
-        const c = nodeCoords.get(id);
-        if (c) junctions.push(c);
-    }
-    return junctions;
+    const data = await response.json();
+    return data.junctions || [];
 }
 
 // Find the closest junction in the pool to `via` within maxKm. Returns the
