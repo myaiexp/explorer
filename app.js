@@ -1156,6 +1156,9 @@ async function resolveStart() {
     } else {
         startLat = locationData.lat; startLng = locationData.lng;
     }
+    if (!inFinland(startLat, startLng)) {
+        throw new Error('Wander only routes within Finland — pick a starting location inside the country.');
+    }
     return { startLat, startLng, locationInput };
 }
 
