@@ -433,7 +433,7 @@ async function queryOverpass(query, onProgress) {
                 const status = await fetch('https://overpass-api.de/api/status').then(r => r.text());
                 const match = status.match(/Slot available after: .+, in (\d+) seconds/);
                 const waitSec = match ? Math.min(parseInt(match[1]) + 2, 60) : 15;
-                if (onProgress) onProgress(`OpenStreetMap is busy, retrying in ${waitSec}s…`);
+                if (onProgress) onProgress(`POI search is busy, retrying in ${waitSec}s…`);
                 await sleep(waitSec * 1000);
             } catch {
                 await sleep(15000);
@@ -446,9 +446,9 @@ async function queryOverpass(query, onProgress) {
         });
         if (response.ok) return response.json();
         if (response.status === 429 || response.status === 504) continue;
-        throw new Error('Failed to fetch data from OpenStreetMap. Please try again.');
+        throw new Error('Failed to fetch POI data. Please try again.');
     }
-    throw new Error('OpenStreetMap is busy. Please wait a moment and try again.');
+    throw new Error('POI search is busy. Please wait a moment and try again.');
 }
 
 // ─── POIs (Overpass) ─────────────────────────────────────────────────────────
