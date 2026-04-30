@@ -1882,6 +1882,7 @@ document.addEventListener('keydown', e => {
 // ─── Preferences modal ───────────────────────────────────────────────────────
 
 function openPreferencesModal() {
+    renderRouteColorSwatches();
     document.getElementById('prefsModal').classList.add('active');
 }
 
@@ -2275,7 +2276,6 @@ document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
 
 restoreSettings();
 initSettingsListeners();
-renderRouteColorSwatches();
 renderSavedLocations();
 updateSaveLocationBtn();
 if (typeof ExplorerSync !== 'undefined') {
