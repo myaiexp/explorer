@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { getJunctions, loadCache, cacheSize } from './cache.js';
-import { log } from './log.js';
+import { log, getRecentLogs } from './log.js';
 import type { Bbox, ExcludePreset } from './overpass.js';
 
 const PORT = parseInt(process.env.PORT ?? '5001', 10);
@@ -13,6 +13,11 @@ const MAX_AREA_DEG2 = 4;  // hard cap on bbox area to prevent abuse (~ 444km × 
 const app = new Hono();
 
 app.get('/health', c => c.json({ ok: true, cacheEntries: cacheSize() }));
+
+app.get('/logs', c => {
+    const n = parseInt(c.req.query('n') ?? '100', 10);
+    return c.json({ logs: getRecentLogs(Number.isNaN(n) ? 100 : n) });
+});
 
 app.get('/junctions', async c => {
     const bboxStr = c.req.query('bbox');
