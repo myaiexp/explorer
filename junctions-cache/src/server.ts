@@ -7,6 +7,7 @@ import { log } from './log.js';
 import type { Bbox, ExcludePreset } from './overpass.js';
 
 const PORT = parseInt(process.env.PORT ?? '5001', 10);
+const HOST = process.env.HOST ?? '127.0.0.1';
 const MAX_AREA_DEG2 = 4;  // hard cap on bbox area to prevent abuse (~ 444km × 222km in Finland)
 
 const app = new Hono();
@@ -61,5 +62,5 @@ app.get('/junctions', async c => {
 });
 
 await loadCache();
-serve({ fetch: app.fetch, port: PORT, hostname: '127.0.0.1' });
-log('INFO', { event: 'started', port: PORT });
+serve({ fetch: app.fetch, port: PORT, hostname: HOST });
+log('INFO', { event: 'started', host: HOST, port: PORT });
