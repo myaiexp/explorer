@@ -582,6 +582,20 @@ async function snapToRoad(via, maxKm = 0.5) {
     return dist <= maxKm ? snapped : via;
 }
 
+// Adapter for screenCandidates' nearestFn contract.
+async function screeningNearestFn(c) {
+    return tryNearest(`${OSRM_FI_NEAREST}/${c.lng},${c.lat}?number=1`);
+}
+
+// Adapter for screenCandidates' routeFn contract.
+async function screeningRouteFn(start, c) {
+    const r = await fetchRouteThrough([
+        { lat: start.lat, lng: start.lng },
+        { lat: c.lat,     lng: c.lng     },
+    ]);
+    return r ? { distance: r.distance } : null;
+}
+
 async function buildLoop(startLat, startLng, destLat, destLng) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
@@ -1247,7 +1261,7 @@ async function generateDestination() {
                 dest = pickMostNovelDestination(roads, existingDests);
             } catch {
                 onProgress('Overpass unavailable, using random point…');
-                const candidates = Array.from({ length: 5 }, () =>
+                const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
                     generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
                 candidatePool = candidates;
                 dest = pickMostNovelDestination(candidates, existingDests);
@@ -1269,17 +1283,40 @@ async function generateDestination() {
                 destName = dest.name;
             } catch {
                 onProgress('Overpass unavailable, using random point…');
-                const candidates = Array.from({ length: 5 }, () =>
+                const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
                     generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
                 candidatePool = candidates;
                 dest = pickMostNovelDestination(candidates, existingDests);
                 usedFallback = true;
             }
         } else {
-            const candidates = Array.from({ length: 5 }, () =>
+            const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
                 generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
             candidatePool = candidates;
             dest = pickMostNovelDestination(candidates, existingDests);
+        }
+
+        // Screen candidates for water-reachability before route building.
+        let waterLocked = false;
+        try {
+            onProgress('Checking reachability…');
+            const screened = await screenCandidates(
+                { lat: startLat, lng: startLng },
+                candidatePool,
+                { nearestFn: screeningNearestFn, routeFn: screeningRouteFn }
+            );
+            if (screened.survivors.length > 0) {
+                candidatePool = screened.survivors;
+                dest = pickMostNovelDestination(candidatePool, existingDests);
+                destName = dest.name || destName;
+            } else if (screened.bestRejected) {
+                candidatePool = [screened.bestRejected];
+                dest = screened.bestRejected;
+                destName = dest.name || destName;
+                waterLocked = true;
+            }
+        } catch (err) {
+            console.warn('Screening failed, falling back to unscreened pool:', err);
         }
 
         // Build route
@@ -1347,6 +1384,9 @@ async function generateDestination() {
 
         if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
             showWarning('This area has limited routing options — the loop overlaps significantly.');
+        }
+        if (waterLocked) {
+            showWarning('This area is mostly water — try a different start or larger radius.');
         }
 
     } catch (error) {
