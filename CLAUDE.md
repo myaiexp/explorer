@@ -6,13 +6,17 @@
 
 ## Architecture
 
-Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`:
+Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`, in `index.html` `defer` load order:
 
 - `index.html` — structure
 - `style.css` — styles
-- `app.js` — all application logic (~95KB single file)
-- `sync.js` — cloud-backup sync engine (outbox + per-row upserts to `/explorer/api`)
 - `fit-encoder.js` — Garmin FIT course-file encoder (used by `exportFIT()` in app.js)
+- `sync.js` — cloud-backup sync engine (outbox + per-row upserts to `/explorer/api`)
+- `bbox.js` — Finland bounding box helpers (pure, globalThis-exposed)
+- `loop-quality.js` — loop overlap detection (pure, globalThis-exposed)
+- `novelty.js` — novelty ranking helpers (pure, globalThis-exposed)
+- `screening.js` — water-aware reachability filtering (pure, globalThis-exposed)
+- `app.js` — main application logic (orchestration, DOM, OSRM/Overpass calls)
 
 Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom (`pnpm vitest run tests/sync.test.js`); backend tests run with `cd server && pnpm test`.
 
