@@ -625,6 +625,10 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
 // start/dest, expanded by offsetKm on each side. Goes through the
 // junctions-cache service on shelly (mase.fi/api/junctions) which handles
 // Overpass calls + persistent caching.
+//
+// startLat/startLng + maxKm are sent so the server can cache once per
+// (start, radius) instead of per destination bbox; it fetches a wide
+// start ± maxKm bbox once and filters to the requested corridor.
 async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode = false) {
     const minLat = Math.min(startLat, destLat);
     const maxLat = Math.max(startLat, destLat);
@@ -635,7 +639,14 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     const lngPad = offsetKm / (111 * Math.cos(midLat * Math.PI / 180));
     const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
     const exclude = winterMode ? 'winter' : 'default';
-    const url = `/api/junctions/junctions?bbox=${encodeURIComponent(bbox)}&exclude=${exclude}`;
+    const maxKm = parseFloat(document.getElementById('maxDistance').value);
+    const params = new URLSearchParams({ bbox, exclude });
+    if (Number.isFinite(maxKm) && maxKm > 0) {
+        params.set('startLat', String(startLat));
+        params.set('startLng', String(startLng));
+        params.set('maxKm', String(maxKm));
+    }
+    const url = `/api/junctions/junctions?${params.toString()}`;
     if (onProgress) onProgress('Searching for junctions…');
     const response = await fetch(url);
     if (!response.ok) {
