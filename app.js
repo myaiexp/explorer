@@ -1257,8 +1257,8 @@ async function generateDestination() {
                 const winterMode = document.getElementById('winterMode').checked;
                 const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
                 if (roads.length === 0) throw new Error('empty');
-                candidatePool = roads;
-                dest = pickMostNovelDestination(roads, existingDests);
+                candidatePool = capPool(roads);
+                dest = pickMostNovelDestination(candidatePool, existingDests);
             } catch {
                 onProgress('Overpass unavailable, using random point…');
                 const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
@@ -1278,8 +1278,8 @@ async function generateDestination() {
             try {
                 const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
                 if (pois.length === 0) throw new Error('empty');
-                candidatePool = pois;
-                dest = pickMostNovelDestination(pois, existingDests);
+                candidatePool = capPool(pois);
+                dest = pickMostNovelDestination(candidatePool, existingDests);
                 destName = dest.name;
             } catch {
                 onProgress('Overpass unavailable, using random point…');

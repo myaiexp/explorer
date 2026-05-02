@@ -166,6 +166,49 @@ test('screenCandidates: input candidate objects are not mutated', async () => {
     expect(CANDS).toEqual(original);
 });
 
+// ── capPool ────────────────────────────────────────────────────────────────
+
+test('capPool: array below cap returned unchanged (same identity)', () => {
+    const small = Array.from({length: 10}, (_, i) => ({lat: 60 + i*0.001, lng: 24}));
+    expect(globalThis.capPool(small)).toBe(small);
+});
+
+test('capPool: array exactly at cap returned unchanged', () => {
+    const exact = Array.from({length: globalThis.SCREENING_POOL_CAP}, (_, i) => ({lat: 60, lng: 24 + i*0.001}));
+    expect(globalThis.capPool(exact)).toBe(exact);
+});
+
+test('capPool: array above cap returns new array of length cap', () => {
+    const big = Array.from({length: 200}, (_, i) => ({lat: 60, lng: 24 + i*0.001, idx: i}));
+    const r = globalThis.capPool(big);
+    expect(r).not.toBe(big);
+    expect(r).toHaveLength(globalThis.SCREENING_POOL_CAP);
+    expect(big).toHaveLength(200);  // input untouched
+});
+
+test('capPool: down-sample preserves candidate identity (no clones)', () => {
+    const big = Array.from({length: 100}, (_, i) => ({lat: 60, lng: 24 + i*0.001, idx: i}));
+    const r = globalThis.capPool(big);
+    for (const c of r) expect(big).toContain(c);
+});
+
+test('capPool: down-sample is randomized (not just first-N)', () => {
+    // With 200 input and cap 45, P(every sample is first-45) is astronomically
+    // low (≈ (45/200)^45). Across 5 runs we should see at least one idx ≥ 45.
+    const big = Array.from({length: 200}, (_, i) => ({lat: 60, lng: 24 + i*0.001, idx: i}));
+    let sawHigh = false;
+    for (let i = 0; i < 5; i++) {
+        const r = globalThis.capPool(big);
+        if (r.some(c => c.idx >= 45)) { sawHigh = true; break; }
+    }
+    expect(sawHigh).toBe(true);
+});
+
+test('capPool: handles null/empty', () => {
+    expect(globalThis.capPool(null)).toBe(null);
+    expect(globalThis.capPool([])).toEqual([]);
+});
+
 test('screenCandidates: bestRejected does not mutate input candidate', async () => {
     const cands = [{lat:60.215, lng:24.94}];
     const original = JSON.parse(JSON.stringify(cands));
