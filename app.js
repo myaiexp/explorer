@@ -1382,11 +1382,10 @@ async function generateDestination() {
                      null, null);
         if (currentSession) currentSession.junctions = junctions;
 
-        if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
-            showWarning('This area has limited routing options — the loop overlaps significantly.');
-        }
         if (waterLocked) {
             showWarning('This area is mostly water — try a different start or larger radius.');
+        } else if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
+            showWarning('This area has limited routing options — the loop overlaps significantly.');
         }
 
     } catch (error) {

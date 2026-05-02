@@ -90,9 +90,8 @@ async function screenCandidates(start, candidates, { nearestFn, routeFn }) {
 
     // bestRejected: prefer the lowest-detour reject if stage 2 ran for any
     // candidate (the rejects with computed detour); otherwise fall back to
-    // the smallest-snapM reject. Annotated in place so the caller can use
-    // the same object identity (and read its existing fields like .name)
-    // when surfacing it as the chosen destination.
+    // the smallest-snapM reject. Shallow-copied so the snapM/detour
+    // annotations don't leak back onto the caller's input objects.
     let bestRejected = null;
     const rejects = states.filter(s => s.stage !== 'survived');
     if (rejects.length > 0) {
@@ -109,9 +108,7 @@ async function screenCandidates(start, candidates, { nearestFn, routeFn }) {
             }
         }
         if (pick) {
-            pick.candidate.snapM = pick.snapM;
-            pick.candidate.detour = pick.detour;
-            bestRejected = pick.candidate;
+            bestRejected = { ...pick.candidate, snapM: pick.snapM, detour: pick.detour };
         }
     }
 
