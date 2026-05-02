@@ -517,6 +517,7 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress
 // Self-hosted OSRM-foot for Finland.
 const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
 const OSRM_FI_NEAREST = 'https://mase.fi/api/osrm-fi/nearest/v1/foot';
+const OSRM_FI_TABLE   = 'https://mase.fi/api/osrm-fi/table/v1/foot';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -582,18 +583,36 @@ async function snapToRoad(via, maxKm = 0.5) {
     return dist <= maxKm ? snapped : via;
 }
 
-// Adapter for screenCandidates' nearestFn contract.
-async function screeningNearestFn(c) {
-    return tryNearest(`${OSRM_FI_NEAREST}/${c.lng},${c.lat}?number=1`);
-}
-
-// Adapter for screenCandidates' routeFn contract.
-async function screeningRouteFn(start, c) {
-    const r = await fetchRouteThrough([
-        { lat: start.lat, lng: start.lng },
-        { lat: c.lat,     lng: c.lng     },
-    ]);
-    return r ? { distance: r.distance } : null;
+// Adapter for screenCandidates' tableFn contract: one OSRM /table call
+// returns snap distance + route distance for every candidate at once,
+// replacing N parallel /nearest + N parallel /route calls.
+//
+// `destinations[i].distance` is OSRM's snap distance for input coord i;
+// `distances[0][i]` is the route distance from source[0] to coord i.
+// Both arrays include source[0] at index 0, so candidate i lives at i+1.
+async function screeningTableFn(start, candidates) {
+    if (candidates.length === 0) return [];
+    const coords = [
+        `${start.lng},${start.lat}`,
+        ...candidates.map(c => `${c.lng},${c.lat}`)
+    ].join(';');
+    const url = `${OSRM_FI_TABLE}/${coords}?sources=0&annotations=distance`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`osrm table http ${res.status}`);
+    const data = await res.json();
+    if (data.code !== 'Ok') throw new Error(`osrm table ${data.code}`);
+    const dests = data.destinations;
+    const dists = data.distances && data.distances[0];
+    if (!Array.isArray(dests) || !Array.isArray(dists)) {
+        throw new Error('osrm table malformed');
+    }
+    return candidates.map((_, i) => {
+        const d = dests[i + 1];
+        const r = dists[i + 1];
+        const snapM = d && typeof d.distance === 'number' ? d.distance : null;
+        const routeM = typeof r === 'number' ? r : null;
+        return { snapM, routeM };
+    });
 }
 
 async function buildLoop(startLat, startLng, destLat, destLng) {
@@ -1314,7 +1333,7 @@ async function generateDestination() {
             const screened = await screenCandidates(
                 { lat: startLat, lng: startLng },
                 candidatePool,
-                { nearestFn: screeningNearestFn, routeFn: screeningRouteFn }
+                { tableFn: screeningTableFn }
             );
             if (screened.survivors.length > 0) {
                 candidatePool = screened.survivors;
