@@ -69,48 +69,54 @@ const CANDS = [
 ];
 
 test('screenCandidates: all pass → all survivors, null bestRejected', async () => {
-    const nearestFn = async (c) => ({lat:c.lat+0.0001, lng:c.lng});  // ~11 m snap
-    const routeFn   = async (s,c) => ({distance: 6000});  // ~6 km route, ~5 km straight → 1.2
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+    const tableFn = async () => [
+        {snapM: 11, routeM: 6000},
+        {snapM: 11, routeM: 6000},
+        {snapM: 11, routeM: 6000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.survivors).toHaveLength(3);
     expect(r.bestRejected).toBeNull();
-    expect(r.survivors[0].snapM).toBeLessThan(20);
+    expect(r.survivors[0].snapM).toBe(11);
     expect(r.survivors[0].detour).toBeCloseTo(1.2, 1);
 });
 
 test('screenCandidates: all stage-1 fail → empty survivors, bestRejected by min snapM', async () => {
     // Three candidates with progressively larger snap distances, all > 500 m.
-    const offsets = [0.01, 0.02, 0.005];  // ~1.1 km, 2.2 km, 0.55 km
-    let i = 0;
-    const nearestFn = async (c) => ({lat:c.lat + offsets[i++], lng:c.lng});
-    const routeFn   = async () => { throw new Error('stage 2 should not be called'); };
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+    const tableFn = async () => [
+        {snapM: 1100, routeM: null},
+        {snapM: 2200, routeM: null},
+        {snapM:  550, routeM: null},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.survivors).toHaveLength(0);
-    // c2 had the smallest snap (~550 m), so it's bestRejected
+    // c2 had the smallest snap (550 m), so it's bestRejected
     expect(r.bestRejected).toEqual(expect.objectContaining({lat: CANDS[2].lat, lng: CANDS[2].lng}));
-    expect(r.bestRejected.snapM).toBeGreaterThan(500);
+    expect(r.bestRejected.snapM).toBe(550);
 });
 
 test('screenCandidates: stage 1 passes but stage 2 rejects → bestRejected by min detour', async () => {
-    const nearestFn = async (c) => ({lat:c.lat+0.0001, lng:c.lng});
-    // straight distances differ: c0 ~5 km, c1 ~6 km, c2 ~8.3 km. Routes give
-    // detours c0=6.0×, c1=3.3×, c2=6.0× — all > 2.2 → all stage-2 rejected.
-    const routes = [{distance:30000}, {distance:20000}, {distance:50000}];
-    let i = 0;
-    const routeFn = async () => routes[i++];
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+    // straight distances: c0 ~5 km, c1 ~6 km, c2 ~8.3 km. Routes give detours
+    // c0=6.0×, c1=3.3×, c2=6.0× — all > 2.2 → all stage-2 rejected.
+    const tableFn = async () => [
+        {snapM: 11, routeM: 30000},
+        {snapM: 11, routeM: 20000},
+        {snapM: 11, routeM: 50000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.survivors).toHaveLength(0);
     expect(r.bestRejected).toEqual(expect.objectContaining({lat: CANDS[1].lat, lng: CANDS[1].lng}));
     expect(r.bestRejected.detour).toBeCloseTo(3.3, 1);
 });
 
 test('screenCandidates: mixed → only survivors annotated', async () => {
-    const nearestFn = async (c) => ({lat:c.lat+0.0001, lng:c.lng});
     // c0 passes (1.2×), c1 rejected (5×), c2 passes (1.5×)
-    const routes = [{distance:6000}, {distance:25000}, {distance:7500}];
-    let i = 0;
-    const routeFn = async () => routes[i++];
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+    const tableFn = async () => [
+        {snapM: 11, routeM:  6000},
+        {snapM: 11, routeM: 25000},
+        {snapM: 11, routeM:  7500},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.survivors).toHaveLength(2);
     expect(r.survivors).toEqual([
         expect.objectContaining({lat: CANDS[0].lat, lng: CANDS[0].lng}),
@@ -119,50 +125,50 @@ test('screenCandidates: mixed → only survivors annotated', async () => {
     expect(r.bestRejected).toEqual(expect.objectContaining({lat: CANDS[1].lat, lng: CANDS[1].lng}));
 });
 
-test('screenCandidates: nearestFn returns null for one → that one rejected, others screen', async () => {
-    let call = 0;
-    const nearestFn = async (c) => {
-        call++;
-        return call === 2 ? null : {lat:c.lat+0.0001, lng:c.lng};
-    };
-    const routeFn = async () => ({distance: 6000});
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+test('screenCandidates: snapM null for one → that one rejected, others screen', async () => {
+    const tableFn = async () => [
+        {snapM:   11, routeM: 6000},
+        {snapM: null, routeM: null},
+        {snapM:   11, routeM: 6000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.survivors).toHaveLength(2);
-    expect(r.survivors.find(s => s === CANDS[1])).toBeUndefined();
+    expect(r.survivors.find(s => s.lat === CANDS[1].lat && s.lng === CANDS[1].lng)).toBeUndefined();
 });
 
-test('screenCandidates: routeFn returns null for one → that one rejected at stage 2', async () => {
-    const nearestFn = async (c) => ({lat:c.lat+0.0001, lng:c.lng});
-    let call = 0;
-    const routeFn = async () => (++call === 2 ? null : {distance: 6000});
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+test('screenCandidates: routeM null for one → that one rejected at stage 2', async () => {
+    const tableFn = async () => [
+        {snapM: 11, routeM: 6000},
+        {snapM: 11, routeM: null},
+        {snapM: 11, routeM: 6000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.survivors).toHaveLength(2);
 });
 
 test('screenCandidates: empty candidates → empty survivors, null bestRejected', async () => {
-    const nearestFn = async () => { throw new Error('should not be called'); };
-    const routeFn   = async () => { throw new Error('should not be called'); };
-    const r = await globalThis.screenCandidates(START, [], {nearestFn, routeFn});
+    const tableFn = async () => { throw new Error('should not be called'); };
+    const r = await globalThis.screenCandidates(START, [], {tableFn});
     expect(r.survivors).toHaveLength(0);
     expect(r.bestRejected).toBeNull();
     expect(r.diagnostics).toHaveLength(0);
 });
 
 test('screenCandidates: diagnostics array length equals input count, with stage labels', async () => {
-    const nearestFn = async (c) => ({lat:c.lat+0.0001, lng:c.lng});
-    const routes = [{distance:6000}, {distance:25000}, {distance:7500}];
-    let i = 0;
-    const routeFn = async () => routes[i++];
-    const r = await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+    const tableFn = async () => [
+        {snapM: 11, routeM:  6000},
+        {snapM: 11, routeM: 25000},
+        {snapM: 11, routeM:  7500},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(r.diagnostics).toHaveLength(3);
     expect(r.diagnostics.map(d => d.stage)).toEqual(['survived', 'stage2-reject', 'survived']);
 });
 
 test('screenCandidates: input candidate objects are not mutated', async () => {
     const original = JSON.parse(JSON.stringify(CANDS));
-    const nearestFn = async (c) => ({lat:c.lat+0.0001, lng:c.lng});
-    const routeFn   = async () => ({distance: 6000});
-    await globalThis.screenCandidates(START, CANDS, {nearestFn, routeFn});
+    const tableFn = async () => CANDS.map(() => ({snapM: 11, routeM: 6000}));
+    await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(CANDS).toEqual(original);
 });
 
@@ -170,10 +176,19 @@ test('screenCandidates: bestRejected does not mutate input candidate', async () 
     const cands = [{lat:60.215, lng:24.94}];
     const original = JSON.parse(JSON.stringify(cands));
     // Stage-1 reject: snap > 500 m.
-    const nearestFn = async (c) => ({lat:c.lat+0.01, lng:c.lng});
-    const routeFn   = async () => { throw new Error('stage 2 should not be called'); };
-    const r = await globalThis.screenCandidates(START, cands, {nearestFn, routeFn});
-    expect(r.bestRejected.snapM).toBeGreaterThan(500);
+    const tableFn = async () => [{snapM: 1100, routeM: null}];
+    const r = await globalThis.screenCandidates(START, cands, {tableFn});
+    expect(r.bestRejected.snapM).toBe(1100);
     expect(cands).toEqual(original);  // input untouched
     expect(cands[0]).not.toHaveProperty('snapM');
+});
+
+test('screenCandidates: tableFn throw propagates to caller', async () => {
+    const tableFn = async () => { throw new Error('osrm down'); };
+    await expect(globalThis.screenCandidates(START, CANDS, {tableFn})).rejects.toThrow('osrm down');
+});
+
+test('screenCandidates: malformed table response throws', async () => {
+    const tableFn = async () => [{snapM: 11, routeM: 6000}];  // length mismatch
+    await expect(globalThis.screenCandidates(START, CANDS, {tableFn})).rejects.toThrow(/malformed/);
 });

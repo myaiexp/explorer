@@ -1,23 +1,19 @@
 // Water-aware reachability filtering for destination candidates.
 // Loaded after bbox.js / loop-quality.js / novelty.js, before app.js.
-// Pure module, no DOM access. OSRM I/O is dependency-injected.
+// Pure module, no DOM access. OSRM I/O is dependency-injected as a single
+// `tableFn(start, candidates) → [{snapM, routeM} | null, ...]` so the caller
+// can collapse Stage 1 (snap) and Stage 2 (detour) into one OSRM /table query.
 
 const STAGE1_NEAREST_MAX_M = 500;
 const STAGE2_DETOUR_MAX    = 2.2;
 const RANDOM_POOL_SIZE     = 15;
 
-// haversineM (from loop-quality.js, on globalThis) takes [lat, lng] arrays —
-// not {lat, lng} objects. Adapter centralizes the conversion.
-function _snapMeters(candidate, nearestResult) {
+function passesStage1(candidate, nearestResult) {
+    if (!nearestResult) return false;
     return haversineM(
         [candidate.lat, candidate.lng],
         [nearestResult.lat, nearestResult.lng]
-    );
-}
-
-function passesStage1(candidate, nearestResult) {
-    if (!nearestResult) return false;
-    return _snapMeters(candidate, nearestResult) <= STAGE1_NEAREST_MAX_M;
+    ) <= STAGE1_NEAREST_MAX_M;
 }
 
 function detourRatio(routeMeters, straightKm) {
@@ -25,58 +21,46 @@ function detourRatio(routeMeters, straightKm) {
     return (routeMeters / 1000) / straightKm;
 }
 
-async function screenCandidates(start, candidates, { nearestFn, routeFn }) {
+async function screenCandidates(start, candidates, { tableFn }) {
     if (!candidates || candidates.length === 0) {
         return { survivors: [], bestRejected: null, diagnostics: [] };
     }
 
-    // Stage 1: snap each candidate to the foot graph. A null/throw from
-    // nearestFn → treated as a stage 1 reject (snap unknown, safe to skip).
-    const nearestResults = await Promise.all(
-        candidates.map(c => nearestFn(c).catch(() => null))
-    );
+    // Single OSRM /table call replaces the old N nearest + N route calls.
+    // tableFn must return an array aligned with `candidates`; each entry is
+    // `{snapM, routeM}` (numbers or null) or `null` if the row could not be
+    // resolved at all. A throw here lets the caller fall back to unscreened.
+    const table = await tableFn(start, candidates);
+    if (!Array.isArray(table) || table.length !== candidates.length) {
+        throw new Error('tableFn returned malformed result');
+    }
 
     const states = candidates.map((c, i) => {
-        const nr = nearestResults[i];
-        let snapM = null;
-        let stage1Ok = false;
-        if (nr) {
-            snapM = _snapMeters(c, nr);
-            stage1Ok = snapM <= STAGE1_NEAREST_MAX_M;
-        }
-        return {
-            candidate: c,
-            snapM,
-            detour: null,
-            stage1Ok,
-            stage: stage1Ok ? null : 'stage1-reject',
-            reason: stage1Ok ? null : (nr ? 'snap-too-far' : 'nearest-failed'),
-        };
-    });
+        const t = table[i] ?? {};
+        const snapM = (typeof t.snapM === 'number' && isFinite(t.snapM)) ? t.snapM : null;
+        const routeM = (typeof t.routeM === 'number' && isFinite(t.routeM)) ? t.routeM : null;
+        const stage1Ok = snapM !== null && snapM <= STAGE1_NEAREST_MAX_M;
 
-    // Stage 2: route from start to each stage-1 survivor. A null/throw from
-    // routeFn → stage 2 reject (detour unknown, safe to skip).
-    const stage2Indices = [];
-    states.forEach((s, i) => { if (s.stage1Ok) stage2Indices.push(i); });
-    const stage2Routes = await Promise.all(
-        stage2Indices.map(i => routeFn(start, candidates[i]).catch(() => null))
-    );
-
-    for (let k = 0; k < stage2Indices.length; k++) {
-        const i = stage2Indices[k];
-        const route = stage2Routes[k];
-        const c = candidates[i];
-        const straightKm = haversineM([start.lat, start.lng], [c.lat, c.lng]) / 1000;
-        const detour = route ? detourRatio(route.distance, straightKm) : Infinity;
-        states[i].detour = isFinite(detour) ? detour : null;
-        if (route && isFinite(detour) && detour <= STAGE2_DETOUR_MAX) {
-            states[i].stage = 'survived';
-            states[i].reason = null;
+        let stage = null, reason = null, detour = null;
+        if (!stage1Ok) {
+            stage = 'stage1-reject';
+            reason = snapM === null ? 'nearest-failed' : 'snap-too-far';
+        } else if (routeM === null) {
+            stage = 'stage2-reject';
+            reason = 'route-failed';
         } else {
-            states[i].stage = 'stage2-reject';
-            states[i].reason = route ? 'detour-too-high' : 'route-failed';
+            const straightKm = haversineM([start.lat, start.lng], [c.lat, c.lng]) / 1000;
+            const d = detourRatio(routeM, straightKm);
+            detour = isFinite(d) ? d : null;
+            if (detour !== null && detour <= STAGE2_DETOUR_MAX) {
+                stage = 'survived';
+            } else {
+                stage = 'stage2-reject';
+                reason = 'detour-too-high';
+            }
         }
-    }
+        return { candidate: c, snapM, detour, stage, reason };
+    });
 
     // Survivors are shallow-copied so adding screening annotations does not
     // leak back onto the caller's input objects (tests verify this in the
@@ -88,10 +72,9 @@ async function screenCandidates(start, candidates, { nearestFn, routeFn }) {
         }
     }
 
-    // bestRejected: prefer the lowest-detour reject if stage 2 ran for any
-    // candidate (the rejects with computed detour); otherwise fall back to
-    // the smallest-snapM reject. Shallow-copied so the snapM/detour
-    // annotations don't leak back onto the caller's input objects.
+    // bestRejected: prefer the lowest-detour reject if Stage 2 ran for any
+    // candidate; otherwise fall back to the smallest-snapM reject. Shallow-
+    // copied so annotations don't leak onto caller inputs.
     let bestRejected = null;
     const rejects = states.filter(s => s.stage !== 'survived');
     if (rejects.length > 0) {
