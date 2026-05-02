@@ -5,6 +5,20 @@
 const STAGE1_NEAREST_MAX_M = 500;
 const STAGE2_DETOUR_MAX    = 2.2;
 const RANDOM_POOL_SIZE     = 15;
+const SCREENING_POOL_CAP   = 45;   // bound parallel OSRM fan-out for Overpass pools
+
+// Randomly down-sample a candidate pool to SCREENING_POOL_CAP entries.
+// Fisher-Yates partial shuffle on a copy — input array is not mutated.
+// Returns the input untouched if it's already at or below the cap.
+function capPool(candidates) {
+    if (!candidates || candidates.length <= SCREENING_POOL_CAP) return candidates;
+    const copy = candidates.slice();
+    for (let i = 0; i < SCREENING_POOL_CAP; i++) {
+        const j = i + Math.floor(Math.random() * (copy.length - i));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy.slice(0, SCREENING_POOL_CAP);
+}
 
 // haversineM (from loop-quality.js, on globalThis) takes [lat, lng] arrays —
 // not {lat, lng} objects. Adapter centralizes the conversion.
@@ -126,6 +140,8 @@ async function screenCandidates(start, candidates, { nearestFn, routeFn }) {
 globalThis.STAGE1_NEAREST_MAX_M = STAGE1_NEAREST_MAX_M;
 globalThis.STAGE2_DETOUR_MAX    = STAGE2_DETOUR_MAX;
 globalThis.RANDOM_POOL_SIZE     = RANDOM_POOL_SIZE;
+globalThis.SCREENING_POOL_CAP   = SCREENING_POOL_CAP;
+globalThis.capPool        = capPool;
 globalThis.passesStage1   = passesStage1;
 globalThis.detourRatio    = detourRatio;
 globalThis.screenCandidates = screenCandidates;
