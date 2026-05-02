@@ -6,6 +6,8 @@
 
 What's deployed is correct but only solves part of the problem. Helsinki testing exposed two follow-ups.
 
+**Update (2026-05-02):** Step 1 (start-anchored caching) shipped. Service now caches by `(start≈100m, ⌈maxKm⌉, exclude)` and fetches a wide `start ± maxKm` bbox once per key, filtering server-side per request. Legacy bbox path retained as fallback. Verify hit-rate via `/logs?n=50` after a fresh Helsinki test. If cold-path Overpass is still painful, proceed to Step 2.
+
 ## Problem 1 — cache misses every time in dense areas
 
 Three Helsinki tests, all logged as misses:

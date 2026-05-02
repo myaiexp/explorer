@@ -16,8 +16,15 @@ Listens on `127.0.0.1:5001` (override with `PORT`). Persists cache to `./data/ca
 
 ```
 GET /junctions?bbox=<minLat,minLng,maxLat,maxLng>&exclude=default|winter
+              [&startLat=<lat>&startLng=<lng>&maxKm=<km>]
 GET /health
+GET /logs?n=<count>
 ```
+
+Two cache modes:
+
+- **Start-anchored** (when `startLat`/`startLng`/`maxKm` are all sent): one Overpass call per `(start≈100m, ⌈maxKm⌉, exclude)`. Server fetches `start ± maxKm` once, filters to `bbox` per response. Designed so re-rolls from the same start hit the cache regardless of destination.
+- **Bbox-keyed** (legacy fallback when start params are absent): one Overpass call per quantized requested bbox. Kept so frontend rollout can lag the service.
 
 Response:
 
@@ -25,10 +32,13 @@ Response:
 {
     "cache": "hit" | "miss",
     "count": 1834,
+    "total": 30412,
     "overpassMs": 2345,
     "junctions": [{ "lat": 62.123, "lng": 21.456 }, ...]
 }
 ```
+
+`total` is the size of the underlying cached set (anchored mode only); `count` is the filtered slice returned in `junctions`.
 
 ## Logs
 
