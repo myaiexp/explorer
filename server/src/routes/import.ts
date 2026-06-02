@@ -3,16 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
-
-type AnyRecord = Record<string, unknown>;
-
-function isObject(v: unknown): v is AnyRecord {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function isArray(v: unknown): v is unknown[] {
-  return Array.isArray(v);
-}
+import { isObject, isArray } from '../lib/type-guards.js';
 
 // Shared validation + normalization for route-shaped rows. `visits` and `history` have an
 // identical column shape except `visits` also carries `poiCategory`, so both call sites reuse

@@ -7,12 +7,7 @@ import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
 import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
-
-type AnyRecord = Record<string, unknown>;
-
-function isObject(v: unknown): v is AnyRecord {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
+import { isObject, type AnyRecord } from '../lib/type-guards.js';
 
 async function userExists(db: Db, username: string): Promise<boolean> {
   const rows = await db
