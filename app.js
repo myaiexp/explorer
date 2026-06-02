@@ -1347,9 +1347,12 @@ async function generateDestination() {
         let outboundRoute, returnRoute, junctions = null;
         let overlap = null;
         if (tripMode === 'one-way') {
-            onProgress('Building route…');
-            outboundRoute = await buildOneWay(startLat, startLng, dest.lat, dest.lng);
-            returnRoute = null;
+            const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
+                tripMode, smartRouting: false, winterMode: false, onProgress,
+                buildingMessage: 'Building route…',
+            });
+            outboundRoute = r.outbound;
+            returnRoute = r.return;
         } else if (document.getElementById('smartRouting').checked) {
             const winterMode = document.getElementById('winterMode').checked;
             const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
@@ -1395,10 +1398,12 @@ async function generateDestination() {
                 overlap = bestSeen.overlap;
             }
         } else {
-            onProgress('Building route…');
-            const loop = await buildLoop(startLat, startLng, dest.lat, dest.lng);
-            outboundRoute = loop.outbound;
-            returnRoute = loop.return;
+            const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
+                tripMode, smartRouting: false, winterMode: false, onProgress,
+                buildingMessage: 'Building route…',
+            });
+            outboundRoute = r.outbound;
+            returnRoute = r.return;
         }
 
         displayRoute(startLat, startLng, dest.lat, dest.lng,
@@ -1482,22 +1487,18 @@ function togglePickMode() {
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
             let outboundRoute, returnRoute, junctions = null;
             const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-            if (tripMode === 'one-way') {
-                onProgress('Building route…');
-                outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
-                returnRoute = null;
-            } else if (document.getElementById('smartRouting').checked) {
-                const winterMode = document.getElementById('winterMode').checked;
-                const result = await buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, null, winterMode);
-                outboundRoute = result.outbound;
-                returnRoute = result.return;
-                junctions = result.junctions;
-            } else {
-                onProgress('Building route…');
-                const loop = await buildLoop(startLat, startLng, destLat, destLng);
-                outboundRoute = loop.outbound;
-                returnRoute = loop.return;
-            }
+            const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
+            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+                tripMode,
+                smartRouting,
+                winterMode: smartRouting && document.getElementById('winterMode').checked,
+                onProgress,
+                cachedJunctions: null,
+                buildingMessage: 'Building route…',
+            });
+            outboundRoute = r.outbound;
+            returnRoute = r.return;
+            junctions = r.junctions;
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                          outboundRoute, returnRoute, locInput, null, tripMode,
                          null, null);
@@ -1850,20 +1851,18 @@ async function restoreFromHash() {
         let outboundRoute, returnRoute, junctions = null;
         const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
         onProgress('Loading shared route…');
-        if (m === 'one-way') {
-            outboundRoute = await buildOneWay(startLat, startLng, destLat, destLng);
-            returnRoute = null;
-        } else if (document.getElementById('smartRouting').checked) {
-            const winterMode = document.getElementById('winterMode').checked;
-            const result = await buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, null, winterMode);
-            outboundRoute = result.outbound;
-            returnRoute = result.return;
-            junctions = result.junctions;
-        } else {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng);
-            outboundRoute = loop.outbound;
-            returnRoute = loop.return;
-        }
+        const smartRouting = m !== 'one-way' && document.getElementById('smartRouting').checked;
+        const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+            tripMode: m,
+            smartRouting,
+            winterMode: smartRouting && document.getElementById('winterMode').checked,
+            onProgress,
+            cachedJunctions: null,
+            buildingMessage: null,
+        });
+        outboundRoute = r.outbound;
+        returnRoute = r.return;
+        junctions = r.junctions;
         displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                      outboundRoute, returnRoute, s, n, m,
                      null, null);
@@ -2053,21 +2052,18 @@ async function rerouteWithCurrentSpread() {
         const { tripMode } = currentSession;
         let outbound, ret, junctions = currentSession.junctions || null;
         const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-        if (tripMode === 'one-way') {
-            outbound = await buildOneWay(startLat, startLng, destLat, destLng);
-            ret = null;
-        } else if (document.getElementById('smartRouting').checked) {
-            const winterMode = document.getElementById('winterMode').checked;
-            const result = await buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, junctions, winterMode);
-            outbound = result.outbound;
-            ret = result.return;
-            junctions = result.junctions;
-        } else {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng);
-            outbound = loop.outbound;
-            ret = loop.return;
-            junctions = null;
-        }
+        const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
+        const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+            tripMode,
+            smartRouting,
+            winterMode: smartRouting && document.getElementById('winterMode').checked,
+            onProgress,
+            cachedJunctions: junctions,
+            buildingMessage: null,
+        });
+        outbound = r.outbound;
+        ret = r.return;
+        if (tripMode !== 'one-way') junctions = r.junctions;
 
         // Redraw routes (glow style, single color)
         const retryColor = getRouteColor();
