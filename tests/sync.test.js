@@ -409,3 +409,168 @@ describe('ExplorerSync.requestConsent', () => {
         expect(result).toBe('declined');
     });
 });
+
+// ── #1566 — mergeSection last-write-wins + account-switch wipe ─────────────────
+// mergeSection is reachable only via init Case 2 (URL matches stored accepted
+// username → GET → merge per section by updatedAt). The account-switch path is
+// Case 4/5 (URL present but stored username differs → confirm → wipe + populate).
+
+describe('#1566 mergeSection last-write-wins', () => {
+    // Drive a single visits row through init Case 2 with a colliding id, varying
+    // only the server row's updatedAt relative to the local row's.
+    async function initCase2WithServerVisit(serverVisit) {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_visits: JSON.stringify([{ id: '1', updatedAt: '2024-06-01T00:00:00Z', name: 'local' }]),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [serverVisit], favorites: [], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        return JSON.parse(localStorage.getItem('walk_visits'));
+    }
+
+    test('Branch A: server row older than local → local wins', async () => {
+        const merged = await initCase2WithServerVisit(
+            { id: '1', updatedAt: '2024-01-01T00:00:00Z', name: 'server' }, // older
+        );
+        expect(merged).toHaveLength(1);
+        expect(merged[0].name).toBe('local');
+    });
+
+    test('Branch B: server row updatedAt EQUAL to local → server wins (pins `>=`)', async () => {
+        const merged = await initCase2WithServerVisit(
+            { id: '1', updatedAt: '2024-06-01T00:00:00Z', name: 'server' }, // equal
+        );
+        // PIN current behavior: mergeSection compares with `rt >= et`, so a server
+        // row with an EQUAL timestamp overwrites the local row (server wins ties).
+        // Mutating `>=` → `>` makes this assertion RED.
+        expect(merged[0].name).toBe('server');
+    });
+
+    test('Branch C: server row missing updatedAt → treated as epoch 0, local wins', async () => {
+        const merged = await initCase2WithServerVisit(
+            { id: '1', name: 'server' }, // no updatedAt → rt = 0 < local's et
+        );
+        expect(merged[0].name).toBe('local');
+    });
+
+    test('account switch: different stored username wipes local sections before load', async () => {
+        setLocation('/explorer/mossy-fern-7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+            walk_history: JSON.stringify([{ id: 'local-h' }]),
+        });
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        mockFetch({
+            // Server response deliberately OMITS `history`. If wipeSections() runs
+            // before populate, walk_history disappears; if it were skipped, the stale
+            // local history row would survive — making this test the wipe discriminator.
+            '/explorer/api/mossy-fern-7': {
+                visits: [{ id: 'server-v' }], favorites: [], savedLocations: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(confirmSpy.mock.calls[0][0]).toContain('Switching to account mossy-fern-7 from rugged-pine-42');
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'server-v' }]);
+        // wiped by wipeSections() and never repopulated (server omitted `history`)
+        expect(localStorage.getItem('walk_history')).toBeNull();
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'mossy-fern-7' });
+    });
+});
+
+// ── #1567 — outbox flush: DELETE op, 5xx backoff, multi-entry drain ────────────
+
+describe('#1567 outbox flush DELETE / backoff / drain', () => {
+    test('delete op sends DELETE with no body and clears entry on 204', async () => {
+        await setupAccepted('rugged-pine-42');
+        mockFetch({
+            'DELETE /explorer/api/rugged-pine-42/visits/uuid-del': { status: 204 },
+        });
+        window.ExplorerSync.mutate('visits', 'delete', 'uuid-del', undefined);
+        await flushPromises();
+
+        const deleteCall = global.fetch.mock.calls.find(c => (c[1] && c[1].method) === 'DELETE');
+        expect(deleteCall).toBeTruthy();
+        expect(deleteCall[0]).toBe('/explorer/api/rugged-pine-42/visits/uuid-del');
+        expect(deleteCall[1].body).toBeUndefined();
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
+    });
+
+    test('5xx triggers first backoff step (1000ms) then retry succeeds', async () => {
+        vi.useFakeTimers();
+        await setupAccepted('rugged-pine-42');
+
+        let callCount = 0;
+        global.fetch = vi.fn(() => {
+            callCount++;
+            if (callCount === 1) {
+                return Promise.resolve({
+                    ok: false, status: 500,
+                    headers: new Headers(),
+                    json: () => Promise.resolve({}),
+                });
+            }
+            return Promise.resolve({
+                ok: true, status: 204,
+                headers: new Headers(),
+                json: () => Promise.resolve({}),
+            });
+        });
+
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        // Let the first fetch fire and resolve (microtasks only — no timer yet)
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(callCount).toBe(1);
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
+
+        // BACKOFF_STEPS[0] is exactly 1000ms — retry must NOT fire before then.
+        // Mutating the first backoff step (e.g. 1000 → 500) makes this RED.
+        await vi.advanceTimersByTimeAsync(999);
+        expect(callCount).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(callCount).toBe(2);
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
+    });
+
+    test('two queued entries drain in order via post-flush reschedule', async () => {
+        await setupAccepted('rugged-pine-42');
+        mockFetch({
+            'PUT /explorer/api/rugged-pine-42/visits/uuid-1': { status: 204 },
+            'PUT /explorer/api/rugged-pine-42/visits/uuid-2': { status: 204 },
+        });
+
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-2', { id: 'uuid-2' });
+        // Both enqueued synchronously before the async flush drains either
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(2);
+
+        await flushPromises();
+
+        const putUrls = global.fetch.mock.calls
+            .filter(c => (c[1] && c[1].method) === 'PUT')
+            .map(c => c[0]);
+        // FIFO order proves the post-success scheduleFlush(0) reschedule fired for entry 2
+        expect(putUrls).toEqual([
+            '/explorer/api/rugged-pine-42/visits/uuid-1',
+            '/explorer/api/rugged-pine-42/visits/uuid-2',
+        ]);
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
+    });
+});
