@@ -6,9 +6,14 @@
  * { encodeCourse, osrmStepsToCoursePoints, CP } on globalThis. The closure
  * also holds ByteWriter, crc16, toSemicircles, toFitTime, haversine,
  * osrmStepToType and nearestCoordIndex — all of which the audit requires us
- * to test. We must NOT modify the source on disk, so we read its text and
- * string-inject an `_internals` export at load time only (the file is
- * untouched). If the export line ever changes, the injection throws loudly.
+ * to test. We read its text and string-inject an `_internals` export at load
+ * time only (the export line is untouched on disk). If the export line ever
+ * changes, the injection throws loudly.
+ *
+ * `haversine` is now an alias of the canonical globalThis.haversineM (audit
+ * #1262), so geo-utils.js must run in the realm first — exactly as it does in
+ * the browser load order. The distance assertions stay self-consistent: the
+ * encoder and these tests call the same `internals.haversine` reference.
  *
  * The FIT CRC-16 is exactly CRC-16/ARC (reflected, poly 0xA001, init 0,
  * catalog check value 0xBB3D for "123456789"). We validate the SUT's
@@ -31,7 +36,10 @@ const INJECTED =
 
 let enc, internals, CP;
 
+const GEO_SRC = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
+
 beforeAll(() => {
+    new vm.Script(GEO_SRC).runInThisContext();   // exposes globalThis.haversineM (aliased by the encoder)
     const RAW = readFileSync(resolve(__dirname, '../fit-encoder.js'), 'utf8');
     const SRC = RAW.replace(EXPORT_LINE, INJECTED);
     if (SRC === RAW) throw new Error('injection failed — export line changed in fit-encoder.js');

@@ -83,17 +83,11 @@
         }
     }
 
-    // Haversine distance in meters
-    function haversine(lat1, lng1, lat2, lng2) {
-        const R = 6371000;
-        const toRad = d => d * Math.PI / 180;
-        const dLat = toRad(lat2 - lat1);
-        const dLng = toRad(lng2 - lng1);
-        const a = Math.sin(dLat / 2) ** 2 +
-                  Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-                  Math.sin(dLng / 2) ** 2;
-        return 2 * R * Math.asin(Math.sqrt(a));
-    }
+    // Haversine distance in meters — canonical impl lives in geo-utils.js,
+    // which must load before this file (see index.html order). Aliased once
+    // at IIFE-exec time; the cumulative-distance and nearest-coord call sites
+    // below use it unchanged.
+    const haversine = globalThis.haversineM;
 
     function toSemicircles(deg) { return Math.round(deg * SEMICIRCLE); }
     function toFitTime(unix)    { return Math.max(0, Math.round(unix - FIT_EPOCH)); }

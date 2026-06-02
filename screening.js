@@ -1,5 +1,6 @@
 // Water-aware reachability filtering for destination candidates.
-// Loaded after bbox.js / loop-quality.js / novelty.js, before app.js.
+// Loaded after geo-utils.js (reads globalThis.haversineM) / bbox.js /
+// loop-quality.js / novelty.js, before app.js.
 // Pure module, no DOM access. OSRM I/O is dependency-injected as a single
 // `tableFn(start, candidates) → [{snapM, routeM} | null, ...]` so the caller
 // can collapse Stage 1 (snap) and Stage 2 (detour) into one OSRM /table query.
@@ -24,9 +25,9 @@ function capPool(candidates) {
 
 function passesStage1(candidate, nearestResult) {
     if (!nearestResult) return false;
-    return haversineM(
-        [candidate.lat, candidate.lng],
-        [nearestResult.lat, nearestResult.lng]
+    return globalThis.haversineM(
+        candidate.lat, candidate.lng,
+        nearestResult.lat, nearestResult.lng
     ) <= STAGE1_NEAREST_MAX_M;
 }
 
@@ -63,7 +64,7 @@ async function screenCandidates(start, candidates, { tableFn }) {
             stage = 'stage2-reject';
             reason = 'route-failed';
         } else {
-            const straightKm = haversineM([start.lat, start.lng], [c.lat, c.lng]) / 1000;
+            const straightKm = globalThis.haversineM(start.lat, start.lng, c.lat, c.lng) / 1000;
             const d = detourRatio(routeM, straightKm);
             detour = isFinite(d) ? d : null;
             if (detour !== null && detour <= STAGE2_DETOUR_MAX) {

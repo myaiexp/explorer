@@ -1,9 +1,11 @@
 /**
  * Tests for screening.js — water-aware reachability filtering.
  *
- * Loading: screening.js depends on haversineM from loop-quality.js. Both are
- * non-module browser scripts loaded into the current realm via Node's vm
- * module; explicit globalThis assignments expose the helpers.
+ * Loading: screening.js depends on the canonical globalThis.haversineM from
+ * geo-utils.js (audit #1262 — it no longer relies on loop-quality.js's old
+ * implicit global). Both are non-module browser scripts loaded into the
+ * current realm via Node's vm module; explicit globalThis assignments expose
+ * the helpers.
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
@@ -11,11 +13,11 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import vm from 'node:vm';
 
-const LOOP_QUALITY_SRC = readFileSync(resolve(__dirname, '../loop-quality.js'), 'utf8');
-const SCREENING_SRC    = readFileSync(resolve(__dirname, '../screening.js'),    'utf8');
+const GEO_SRC       = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
+const SCREENING_SRC = readFileSync(resolve(__dirname, '../screening.js'), 'utf8');
 
 beforeAll(() => {
-    new vm.Script(LOOP_QUALITY_SRC).runInThisContext();  // exposes haversineM
+    new vm.Script(GEO_SRC).runInThisContext();  // exposes globalThis.haversineM
     new vm.Script(SCREENING_SRC).runInThisContext();
 });
 
