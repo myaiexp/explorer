@@ -1,23 +1,12 @@
 // Novelty ranking helpers — distance-from-existing scoring for retry use.
-// Loaded after bbox.js, before app.js. Pure helpers, no DOM access.
-
-// Haversine in km between (lat1, lng1) and (lat2, lng2). Local copy to keep
-// novelty.js loadable without app.js (which owns calculateDistance).
-function _haversineKm(lat1, lng1, lat2, lng2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2
-            + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
-            * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// Loaded after geo-utils.js, before app.js. Pure helpers, no DOM access.
 
 // Min haversine distance from candidate `c` (object with .lat/.lng) to any
-// point in `existingDests` (array of [lat, lng] tuples).
+// point in `existingDests` (array of [lat, lng] tuples). Uses the shared
+// haversineKm from geo-utils.js.
 function minDistanceToExisting(c, existingDests) {
     return existingDests.reduce(
-        (min, [eLat, eLng]) => Math.min(min, _haversineKm(c.lat, c.lng, eLat, eLng)),
+        (min, [eLat, eLng]) => Math.min(min, haversineKm(c.lat, c.lng, eLat, eLng)),
         Infinity
     );
 }

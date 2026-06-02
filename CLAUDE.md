@@ -12,6 +12,7 @@ Frontend is a vanilla static app, no build step. Source files served as-is from 
 - `style.css` — styles
 - `fit-encoder.js` — Garmin FIT course-file encoder (used by `exportFIT()` in app.js)
 - `sync.js` — cloud-backup sync engine (outbox + per-row upserts to `/explorer/api`)
+- `geo-utils.js` — canonical Haversine distance (pure, globalThis-exposed; used by novelty.js + app.js)
 - `bbox.js` — Finland bounding box helpers (pure, globalThis-exposed)
 - `loop-quality.js` — loop overlap detection (pure, globalThis-exposed)
 - `novelty.js` — novelty ranking helpers (pure, globalThis-exposed)

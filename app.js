@@ -370,15 +370,9 @@ function generateRandomPointAnnulus(centerLat, centerLng, minKm, maxKm) {
 
 // ─── Distance & geometry ─────────────────────────────────────────────────────
 
-function calculateDistance(lat1, lng1, lat2, lng2) {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2 +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// Haversine great-circle distance in km — canonical impl lives in geo-utils.js
+// (shared with novelty.js); geo-utils.js loads before app.js per index.html.
+const calculateDistance = globalThis.haversineKm;
 
 function bearingRad(lat1, lng1, lat2, lng2) {
     const toRad = Math.PI / 180;

@@ -11,9 +11,13 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import vm from 'node:vm';
 
+// novelty.js depends on the shared haversineKm from geo-utils.js, so load
+// geo-utils.js into the realm first.
+const GEO_SRC = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
 const SRC = readFileSync(resolve(__dirname, '../novelty.js'), 'utf8');
 
 beforeAll(() => {
+    new vm.Script(GEO_SRC).runInThisContext();
     new vm.Script(SRC).runInThisContext();
 });
 
