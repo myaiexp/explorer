@@ -14,7 +14,11 @@ function isArray(v: unknown): v is unknown[] {
   return Array.isArray(v);
 }
 
-function validateVisit(row: unknown, username: string): typeof schema.visits.$inferInsert | null {
+// Shared validation + normalization for route-shaped rows. `visits` and `history` have an
+// identical column shape except `visits` also carries `poiCategory`, so both call sites reuse
+// this core and `validateVisit` grafts the extra field on top. Returns the common (history)
+// insert shape, or null if any required field is missing/mistyped.
+export function validateRouteRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
   if (!isObject(row)) return null;
   const { id, date, startLat, startLng, destLat, destLng, distance } = row;
   if (typeof id !== 'string' || !id) return null;
@@ -35,7 +39,6 @@ function validateVisit(row: unknown, username: string): typeof schema.visits.$in
     destLat,
     destLng,
     destName: typeof row.destName === 'string' ? row.destName : null,
-    poiCategory: typeof row.poiCategory === 'string' ? row.poiCategory : null,
     tripMode: typeof row.tripMode === 'string' ? row.tripMode : null,
     distance,
     routeCoords: row.routeCoords !== undefined ? row.routeCoords : null,
@@ -43,6 +46,14 @@ function validateVisit(row: unknown, username: string): typeof schema.visits.$in
     returnRouteCoords: row.returnRouteCoords !== undefined ? row.returnRouteCoords : null,
     returnRouteDuration: typeof row.returnRouteDuration === 'number' ? row.returnRouteDuration : null,
   };
+}
+
+export function validateVisit(row: unknown, username: string): typeof schema.visits.$inferInsert | null {
+  const base = validateRouteRow(row, username);
+  if (!base) return null;
+  // base !== null guarantees row is an object; re-narrow to read the visit-only poiCategory.
+  const poiCategory = isObject(row) && typeof row.poiCategory === 'string' ? row.poiCategory : null;
+  return { ...base, poiCategory };
 }
 
 function validateFavorite(row: unknown, username: string): typeof schema.favorites.$inferInsert | null {
@@ -62,34 +73,9 @@ function validateSavedLocation(row: unknown, username: string): typeof schema.sa
   return { id, username, label, value };
 }
 
-function validateHistoryRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
-  if (!isObject(row)) return null;
-  const { id, date, startLat, startLng, destLat, destLng, distance } = row;
-  if (typeof id !== 'string' || !id) return null;
-  if (typeof date !== 'string' || !date) return null;
-  if (typeof startLat !== 'number') return null;
-  if (typeof startLng !== 'number') return null;
-  if (typeof destLat !== 'number') return null;
-  if (typeof destLng !== 'number') return null;
-  if (typeof distance !== 'number') return null;
-
-  return {
-    id,
-    username,
-    date,
-    startLat,
-    startLng,
-    startLabel: typeof row.startLabel === 'string' ? row.startLabel : null,
-    destLat,
-    destLng,
-    destName: typeof row.destName === 'string' ? row.destName : null,
-    tripMode: typeof row.tripMode === 'string' ? row.tripMode : null,
-    distance,
-    routeCoords: row.routeCoords !== undefined ? row.routeCoords : null,
-    routeDuration: typeof row.routeDuration === 'number' ? row.routeDuration : null,
-    returnRouteCoords: row.returnRouteCoords !== undefined ? row.returnRouteCoords : null,
-    returnRouteDuration: typeof row.returnRouteDuration === 'number' ? row.returnRouteDuration : null,
-  };
+// History rows are exactly the shared route-row shape (no poiCategory) — thin delegate.
+export function validateHistoryRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
+  return validateRouteRow(row, username);
 }
 
 export function importRoutes(db: Db): Hono {
