@@ -636,8 +636,10 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
 //
 // startLat/startLng + maxKm are sent so the server can cache once per
 // (start, radius) instead of per destination bbox; it fetches a wide
-// start ± maxKm bbox once and filters to the requested corridor.
-async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode = false) {
+// start ± maxKm bbox once and filters to the requested corridor. maxKm is
+// the caller's max-distance budget (passed in, never read from the DOM here)
+// so this stays pure and the cache key matches the radius the caller works in.
+async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode = false) {
     const minLat = Math.min(startLat, destLat);
     const maxLat = Math.max(startLat, destLat);
     const minLng = Math.min(startLng, destLng);
@@ -647,7 +649,6 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     const lngPad = offsetKm / (111 * Math.cos(midLat * Math.PI / 180));
     const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
     const exclude = winterMode ? 'winter' : 'default';
-    const maxKm = parseFloat(document.getElementById('maxDistance').value);
     const params = new URLSearchParams({ bbox, exclude });
     if (Number.isFinite(maxKm) && maxKm > 0) {
         params.set('startLat', String(startLat));
@@ -705,7 +706,9 @@ function pickBetterLoop(outA, retA, outB, retB) {
 // of OSRM nearest-snap. Builds both chiralities in parallel and returns the
 // lower-overlap one. Falls back to buildLoop on Overpass/OSRM failure.
 // cachedJunctions: pass a previously returned `junctions` to skip Overpass.
-async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgress, cachedJunctions = null, winterMode = false) {
+// maxKm: the caller's max-distance budget — forwarded to fetchCorridorJunctions
+// for the start-anchored cache key (replaces a former DOM read in that helper).
+async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions = null, winterMode = false) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
     const offsetKm = Math.max(0.1, straightDist * offsetMult);
@@ -723,7 +726,7 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, onProgres
     if (!junctions) {
         try {
             onProgress('Searching for junctions…');
-            junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, onProgress, winterMode);
+            junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode);
         } catch {
             const loop = await buildLoop(startLat, startLng, destLat, destLng);
             return { outbound: loop.outbound, return: loop.return, overlap: null, junctions: null };
@@ -1327,7 +1330,7 @@ async function generateDestination() {
                     ? `Building route… (attempt ${i + 1}/${retryBudget})`
                     : 'Building route…');
                 const result = await buildJunctionLoop(startLat, startLng,
-                    tryDest.lat, tryDest.lng, onProgress, cachedJunctions, winterMode);
+                    tryDest.lat, tryDest.lng, maxKm, onProgress, cachedJunctions, winterMode);
                 if (cachedJunctions === null) cachedJunctions = result.junctions;
 
                 const candidate = {
@@ -1450,6 +1453,7 @@ function togglePickMode() {
                 tripMode,
                 smartRouting,
                 winterMode: smartRouting && document.getElementById('winterMode').checked,
+                maxKm: parseFloat(document.getElementById('maxDistance').value),
                 onProgress,
                 cachedJunctions: null,
                 buildingMessage: 'Building route…',
@@ -1814,6 +1818,7 @@ async function restoreFromHash() {
             tripMode: m,
             smartRouting,
             winterMode: smartRouting && document.getElementById('winterMode').checked,
+            maxKm: parseFloat(document.getElementById('maxDistance').value),
             onProgress,
             cachedJunctions: null,
             buildingMessage: null,
@@ -2015,6 +2020,7 @@ async function rerouteWithCurrentSpread() {
             tripMode,
             smartRouting,
             winterMode: smartRouting && document.getElementById('winterMode').checked,
+            maxKm: parseFloat(document.getElementById('maxDistance').value),
             onProgress,
             cachedJunctions: junctions,
             buildingMessage: null,

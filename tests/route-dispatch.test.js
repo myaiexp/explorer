@@ -75,12 +75,12 @@ describe('buildRouteForMode dispatch', () => {
         const onProgress = vi.fn();
         const cached = [{ lat: 60, lng: 24 }];
         const r = await globalThis.buildRouteForMode(60, 24, 61, 25, {
-            tripMode: 'round', smartRouting: true, winterMode: true, onProgress,
+            tripMode: 'round', smartRouting: true, winterMode: true, maxKm: 12, onProgress,
             cachedJunctions: cached, buildingMessage: 'Building route…',
         });
         expect(buildJunctionLoop).toHaveBeenCalledTimes(1);
-        // signature: (startLat, startLng, destLat, destLng, onProgress, cachedJunctions, winterMode)
-        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, onProgress, cached, true);
+        // signature: (startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode)
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, 12, onProgress, cached, true);
         expect(buildOneWay).not.toHaveBeenCalled();
         expect(buildLoop).not.toHaveBeenCalled();
         expect(r).toEqual({
@@ -96,7 +96,8 @@ describe('buildRouteForMode dispatch', () => {
         await globalThis.buildRouteForMode(60, 24, 61, 25, {
             tripMode: 'round', smartRouting: true, winterMode: false, onProgress: vi.fn(),
         });
-        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, expect.any(Function), null, false);
+        // maxKm omitted from opts → forwarded as undefined
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, expect.any(Function), null, false);
     });
 
     // ── Branch: plain loop ───────────────────────────────────────────────────
