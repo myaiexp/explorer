@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
+import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -44,6 +45,14 @@ export function sectionsRoutes(db: Db): Hono {
     if (typeof destLat !== 'number') return c.json({ error: 'Missing required field: destLat' }, 400);
     if (typeof destLng !== 'number') return c.json({ error: 'Missing required field: destLng' }, 400);
     if (typeof distance !== 'number') return c.json({ error: 'Missing required field: distance' }, 400);
+
+    try {
+      assertRouteCoords(body.routeCoords, 'routeCoords');
+      assertRouteCoords(body.returnRouteCoords, 'returnRouteCoords');
+    } catch (e) {
+      if (e instanceof RouteCoordsError) return c.json({ error: e.message }, 400);
+      throw e;
+    }
 
     const row: typeof schema.visits.$inferInsert = {
       id,
@@ -216,6 +225,14 @@ export function sectionsRoutes(db: Db): Hono {
     if (typeof destLat !== 'number') return c.json({ error: 'Missing required field: destLat' }, 400);
     if (typeof destLng !== 'number') return c.json({ error: 'Missing required field: destLng' }, 400);
     if (typeof distance !== 'number') return c.json({ error: 'Missing required field: distance' }, 400);
+
+    try {
+      assertRouteCoords(body.routeCoords, 'routeCoords');
+      assertRouteCoords(body.returnRouteCoords, 'returnRouteCoords');
+    } catch (e) {
+      if (e instanceof RouteCoordsError) return c.json({ error: e.message }, 400);
+      throw e;
+    }
 
     const row: typeof schema.history.$inferInsert = {
       id,

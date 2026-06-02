@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
+import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 
 type AnyRecord = Record<string, unknown>;
 
@@ -138,6 +139,13 @@ export function importRoutes(db: Db): Hono {
     for (const row of rawVisits) {
       const validated = validateVisit(row, username);
       if (!validated) return c.json({ error: 'Invalid visit row' }, 400);
+      try {
+        assertRouteCoords(validated.routeCoords, 'routeCoords');
+        assertRouteCoords(validated.returnRouteCoords, 'returnRouteCoords');
+      } catch (e) {
+        if (e instanceof RouteCoordsError) return c.json({ error: e.message }, 400);
+        throw e;
+      }
       visitRows.push(validated);
     }
 
@@ -159,6 +167,13 @@ export function importRoutes(db: Db): Hono {
     for (const row of rawHistory) {
       const validated = validateHistoryRow(row, username);
       if (!validated) return c.json({ error: 'Invalid history row' }, 400);
+      try {
+        assertRouteCoords(validated.routeCoords, 'routeCoords');
+        assertRouteCoords(validated.returnRouteCoords, 'returnRouteCoords');
+      } catch (e) {
+        if (e instanceof RouteCoordsError) return c.json({ error: e.message }, 400);
+        throw e;
+      }
       historyRows.push(validated);
     }
 
