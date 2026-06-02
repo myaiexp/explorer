@@ -402,18 +402,13 @@ function getAllExistingDestinations() {
     return getVisits().map(v => [v.destLat, v.destLng]);
 }
 
+// Single-pick novelty selection: delegate to rankByNovelty (novelty.js), which
+// owns the min-distance scoring + most-novel-half selection. rankByNovelty
+// shuffles the top half internally, so [0] is a uniformly random pick from the
+// most-novel half (or from all candidates when there's no history). Returns
+// undefined on an empty pool — same as the previous implementation.
 function pickMostNovelDestination(candidates, existingDests) {
-    if (!existingDests || existingDests.length === 0) {
-        return candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    const scored = candidates.map(c => {
-        const minDist = existingDests.reduce((min, [eLat, eLng]) =>
-            Math.min(min, calculateDistance(c.lat, c.lng, eLat, eLng)), Infinity);
-        return { ...c, minDist };
-    });
-    scored.sort((a, b) => b.minDist - a.minDist);
-    const pool = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
-    return pool[Math.floor(Math.random() * pool.length)];
+    return rankByNovelty(candidates, existingDests)[0];
 }
 
 // ─── Overpass helpers ────────────────────────────────────────────────────────
