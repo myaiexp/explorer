@@ -785,45 +785,8 @@ function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
 }
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
-
-function showError(message) {
-    const el = document.getElementById('error');
-    el.textContent = message;
-    el.style.color = '';
-    el.style.background = '';
-    el.classList.add('active');
-    setTimeout(() => el.classList.remove('active'), 5000);
-}
-
-function showSuccess(message) {
-    const el = document.getElementById('error');
-    el.textContent = message;
-    el.style.color = '#86efac';
-    el.style.background = 'rgba(34, 197, 94, 0.15)';
-    el.style.borderColor = 'rgba(34, 197, 94, 0.3)';
-    el.classList.add('active');
-    setTimeout(() => {
-        el.classList.remove('active');
-        el.style.color = '';
-        el.style.background = '';
-        el.style.borderColor = '';
-    }, 4000);
-}
-
-function showWarning(message) {
-    const el = document.getElementById('error');
-    el.textContent = message;
-    el.style.color = '#fcd34d';
-    el.style.background = 'rgba(245, 158, 11, 0.15)';
-    el.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-    el.classList.add('active');
-    setTimeout(() => {
-        el.classList.remove('active');
-        el.style.color = '';
-        el.style.background = '';
-        el.style.borderColor = '';
-    }, 5000);
-}
+// showToast + the showError/showSuccess/showWarning wrappers live in toast.js
+// (loaded before app.js); call them directly as globals.
 
 // ─── Cloud-backup UI ──────────────────────────────────────────────────────────
 

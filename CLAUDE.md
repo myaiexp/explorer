@@ -18,6 +18,7 @@ Frontend is a vanilla static app, no build step. Source files served as-is from 
 - `novelty.js` — novelty ranking helpers (pure, globalThis-exposed)
 - `screening.js` — water-aware reachability filtering (pure, globalThis-exposed)
 - `route-dispatch.js` — route-build dispatch by trip mode (globalThis-exposed; calls buildOneWay/buildJunctionLoop/buildLoop)
+- `toast.js` — transient #error toast (globalThis-exposed; showToast + showError/showSuccess/showWarning wrappers)
 - `app.js` — main application logic (orchestration, DOM, OSRM/Overpass calls)
 
 Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom (`pnpm vitest run tests/sync.test.js`); backend tests run with `cd server && pnpm test`.
