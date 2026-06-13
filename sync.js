@@ -1,6 +1,6 @@
 // Cloud-backup sync engine — outbox-based per-row mirror to /explorer/api
 //
-// Consent-toast hook contract for Task 5:
+// Consent-toast hook contract:
 //   Register: window.ExplorerSyncUI = { showConsentToast: function() { return Promise<'accepted'|'declined'> } }
 //   showConsentToast() must return a Promise that resolves to 'accepted' or 'declined'.
 //   If window.ExplorerSyncUI?.showConsentToast is not set, requestConsent() falls back to window.confirm().
@@ -329,7 +329,7 @@
             if (window.ExplorerSyncUI && typeof window.ExplorerSyncUI.showConsentToast === 'function') {
                 return window.ExplorerSyncUI.showConsentToast();
             }
-            // Fallback — Task 5 replaces with toast UI
+            // Fallback when no ExplorerSyncUI.showConsentToast hook is registered
             var ok = window.confirm(
                 'Save your walks to the cloud?\n\n' +
                 'Your visits, favourites, and saved locations will be backed up ' +
