@@ -67,6 +67,92 @@ describe('PUT /:username/visits/:id', () => {
   });
 });
 
+// audit #3170 — the visits route persists eight optional/nullable columns
+// (startLabel, destName, poiCategory, tripMode, routeCoords [jsonb],
+// routeDuration, returnRouteCoords [jsonb], returnRouteDuration). The fake-DB
+// suite only asserts buildRow's output; nothing wrote them through the real
+// route and read them back through Postgres + the GET serializer. These pin the
+// actual round-trip: PUT → DB → GET /api/:username.
+describe('visits optional fields round-trip', () => {
+  const routeCoords = [
+    [60.0, 25.0],
+    [60.05, 25.05],
+    [60.1, 25.1],
+  ];
+  const returnRouteCoords = [
+    [60.1, 25.1],
+    [60.05, 25.05],
+    [60.0, 25.0],
+  ];
+
+  const readBackVisit = async (u: string, id: string) => {
+    const res = await app.request(`/api/${u}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { visits: Record<string, unknown>[] };
+    const visit = body.visits.find((v) => v.id === id);
+    expect(visit, `visit ${id} should be present after PUT`).toBeDefined();
+    return visit!;
+  };
+
+  test('populated optional fields survive write then read back', async () => {
+    const u = await createTestAccount();
+    const id = 'v-rt-1';
+
+    const payload = {
+      id,
+      ...VISIT_BODY,
+      startLabel: 'Home dock',
+      destName: 'Hidden Lake',
+      poiCategory: 'nature',
+      tripMode: 'loop',
+      routeCoords,
+      routeDuration: 1800,
+      returnRouteCoords,
+      returnRouteDuration: 1750,
+    };
+
+    const put = await app.request(`/api/${u}/visits/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(put.status).toBe(204);
+
+    const visit = await readBackVisit(u, id);
+    expect(visit.startLabel).toBe('Home dock');
+    expect(visit.destName).toBe('Hidden Lake');
+    expect(visit.poiCategory).toBe('nature');
+    expect(visit.tripMode).toBe('loop');
+    expect(visit.routeCoords).toEqual(routeCoords); // jsonb array preserved
+    expect(visit.routeDuration).toBe(1800);
+    expect(visit.returnRouteCoords).toEqual(returnRouteCoords);
+    expect(visit.returnRouteDuration).toBe(1750);
+  });
+
+  test('omitted optional fields read back as null', async () => {
+    const u = await createTestAccount();
+    const id = 'v-rt-2';
+
+    // VISIT_BODY carries only the required fields — every optional one is absent.
+    const put = await app.request(`/api/${u}/visits/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ id, ...VISIT_BODY }),
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(put.status).toBe(204);
+
+    const visit = await readBackVisit(u, id);
+    expect(visit.startLabel).toBeNull();
+    expect(visit.destName).toBeNull();
+    expect(visit.poiCategory).toBeNull();
+    expect(visit.tripMode).toBeNull();
+    expect(visit.routeCoords).toBeNull();
+    expect(visit.routeDuration).toBeNull();
+    expect(visit.returnRouteCoords).toBeNull();
+    expect(visit.returnRouteDuration).toBeNull();
+  });
+});
+
 describe('DELETE /:username/visits/:id', () => {
   test('removes only that row', async () => {
     const u = await createTestAccount();
@@ -89,6 +175,27 @@ describe('DELETE /:username/visits/:id', () => {
   test('returns 404 for missing user', async () => {
     const res = await app.request('/api/no-such-user-99/visits/v-1', { method: 'DELETE' });
     expect(res.status).toBe(404);
+  });
+
+  // audit #3169 — for an existing user, DELETE on an id that matches no row is a
+  // silent no-op: the handler issues an unconditional delete-where(id ∧ username)
+  // and returns 204 regardless of how many rows matched. Pin that 204, and that
+  // it doesn't error or touch the user's other rows.
+  test('returns 204 no-op for a non-existent visit id (existing user)', async () => {
+    const u = await createTestAccount();
+    const survivorId = 'v-survivor';
+    await db.insert(schema.visits).values({
+      id: survivorId, username: u, date: VISIT_BODY.date,
+      startLat: 60, startLng: 25, destLat: 60.1, destLng: 25.1, distance: 5,
+    });
+
+    const res = await app.request(`/api/${u}/visits/does-not-exist`, { method: 'DELETE' });
+    expect(res.status).toBe(204);
+
+    // the unrelated existing row is untouched
+    const remaining = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].id).toBe(survivorId);
   });
 });
 
