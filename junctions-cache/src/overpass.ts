@@ -58,6 +58,11 @@ async function getStatusWaitSec(): Promise<number> {
 export async function fetchJunctionsFromOverpass(bbox: Bbox, exclude: ExcludePreset): Promise<LatLng[]> {
     const query = buildQuery(bbox, exclude);
     let lastErr: Error | null = null;
+    // Track the last retryable status (429/504) so an all-retries-exhausted
+    // failure surfaces *which* upstream condition exhausted us rather than the
+    // generic 'overpass exhausted' — the 429/504 branch `continue`s and would
+    // otherwise leave lastErr null, swallowing the status (audit #3158).
+    let lastRetryStatus: number | null = null;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (attempt > 0) {
@@ -74,7 +79,10 @@ export async function fetchJunctionsFromOverpass(bbox: Bbox, exclude: ExcludePre
                 },
                 body: 'data=' + encodeURIComponent(query)
             }, ATTEMPT_TIMEOUT_MS);
-            if (res.status === 429 || res.status === 504) continue;
+            if (res.status === 429 || res.status === 504) {
+                lastRetryStatus = res.status;
+                continue;
+            }
             if (!res.ok) throw new Error(`overpass http ${res.status}`);
             const data = await res.json() as { elements: Array<{ type: string; nodes?: number[]; id: number; lat?: number; lon?: number }> };
             return parseJunctions(data.elements);
@@ -83,7 +91,14 @@ export async function fetchJunctionsFromOverpass(bbox: Bbox, exclude: ExcludePre
             log('WARN', { event: 'overpass_attempt_failed', attempt, err: lastErr.message });
         }
     }
-    throw lastErr ?? new Error('overpass exhausted');
+    // A caught exception (e.g. http 400, network/timeout) already carries a clear
+    // message, so prefer it; otherwise every attempt was a retryable 429/504 and
+    // we surface that status explicitly instead of swallowing it.
+    throw lastErr ?? new Error(
+        lastRetryStatus != null
+            ? `overpass retries exhausted (http ${lastRetryStatus})`
+            : 'overpass exhausted'
+    );
 }
 
 function parseJunctions(elements: Array<{ type: string; nodes?: number[]; id: number; lat?: number; lon?: number }>): LatLng[] {

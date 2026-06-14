@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Tests for junctions-cache/src/overpass.ts — Overpass query/retry + parseJunctions.
 // Audit finding #1563: parseJunctions and the retry/timeout path had zero coverage.
 //
@@ -190,23 +191,41 @@ describe('fetchJunctionsFromOverpass — request + retry/timeout', () => {
         expect(urlCalls(fetchMock)).toBe(2);
     });
 
-    test('three consecutive 429s exhaust the 3-attempt cap → throws "overpass exhausted"', async () => {
+    // Audit #3158: an all-retries-exhausted 429/504 used to throw the status-less
+    // 'overpass exhausted' (the 429/504 branch `continue`s, never touching lastErr),
+    // so the caller couldn't tell "upstream is rate-limiting us" from any other
+    // failure. The terminal error must now preserve the final status.
+    test('three consecutive 429s exhaust the 3-attempt cap → throws status-bearing "retries exhausted (http 429)"', async () => {
         const fetchMock = installFetch({ interpreter: [errStatus(429)], statusBody: '' });
         const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
         await vi.runAllTimersAsync();
         const err = await errP;
         expect(err).toBeInstanceOf(Error);
-        expect((err as Error).message).toBe('overpass exhausted');
+        expect((err as Error).message).toBe('overpass retries exhausted (http 429)');
         expect(urlCalls(fetchMock)).toBe(3);
     });
 
-    test('504 is retryable too → three 504s throw "overpass exhausted"', async () => {
+    test('504 is retryable too → three 504s throw status-bearing "retries exhausted (http 504)"', async () => {
         const fetchMock = installFetch({ interpreter: [errStatus(504)], statusBody: '' });
         const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
         await vi.runAllTimersAsync();
         const err = await errP;
-        expect((err as Error).message).toBe('overpass exhausted');
+        expect((err as Error).message).toBe('overpass retries exhausted (http 504)');
         expect(urlCalls(fetchMock)).toBe(3);
+    });
+
+    // Audit #3158 regression: the terminal failure is observable, not swallowed.
+    // Pins that the rate-limit status survives all the way to the thrown Error —
+    // distinguishable from the generic, status-less exhaustion sentinel.
+    test('the exhausted 429 failure is distinguishable, not the generic "overpass exhausted"', async () => {
+        installFetch({ interpreter: [errStatus(429)], statusBody: '' });
+        const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
+        await vi.runAllTimersAsync();
+        const err = await errP;
+        const msg = (err as Error).message;
+        expect(msg).toContain('429');           // final upstream status preserved
+        expect(msg).toContain('exhausted');      // signals retries were exhausted
+        expect(msg).not.toBe('overpass exhausted'); // no longer swallowed
     });
 
     // SUT vs finding #1563: a non-retry status does NOT throw immediately. The
