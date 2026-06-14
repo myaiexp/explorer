@@ -1,9 +1,12 @@
+// @vitest-environment node
 /**
  * Tests for novelty.js — rankByNovelty.
  *
  * Loading: novelty.js is a non-module browser script. We load its source
  * and run it in the current realm via Node's vm module; the script's
- * explicit globalThis assignments expose the helpers.
+ * explicit globalThis assignments expose the helpers. The vm/fs loader needs
+ * Node built-ins, so this file runs under the node environment (the repo-root
+ * vitest config defaults to jsdom, which stubs Node built-ins).
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';

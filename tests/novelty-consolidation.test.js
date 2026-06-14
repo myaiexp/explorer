@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for audit #1796 — pickMostNovelDestination now delegates to
  * rankByNovelty instead of re-implementing the scoring/selection.
