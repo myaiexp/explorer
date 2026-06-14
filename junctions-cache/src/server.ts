@@ -48,8 +48,24 @@ app.get('/junctions', async c => {
     const bbox: Bbox = { minLat, minLng, maxLat, maxLng };
     const bboxLog = `${minLat.toFixed(4)},${minLng.toFixed(4)},${maxLat.toFixed(4)},${maxLng.toFixed(4)}`;
 
+    // Anchor params are all-or-nothing: startLat, startLng and maxKm must be
+    // supplied together. A partial set is a malformed request — silently falling
+    // through to bbox mode would look like success while ignoring the intended
+    // anchoring (audit #3159).
+    const anchorEntries: [string, string | undefined][] = [
+        ['startLat', startLatStr],
+        ['startLng', startLngStr],
+        ['maxKm', maxKmStr],
+    ];
+    const presentAnchorCount = anchorEntries.filter(([, v]) => v != null).length;
+    if (presentAnchorCount > 0 && presentAnchorCount < anchorEntries.length) {
+        const missing = anchorEntries.filter(([, v]) => v == null).map(([k]) => k);
+        return c.json({ error: `incomplete anchor: missing ${missing.join(', ')} (startLat, startLng, maxKm must be supplied together)` }, 400);
+    }
+
     // Start-anchored mode: cache once per (start, maxKm, exclude). Used when
-    // the client supplies all three. Falls through to legacy bbox mode otherwise.
+    // the client supplies all three. Falls through to legacy bbox mode when none
+    // are supplied.
     if (startLatStr != null && startLngStr != null && maxKmStr != null) {
         const startLat = parseFloat(startLatStr);
         const startLng = parseFloat(startLngStr);

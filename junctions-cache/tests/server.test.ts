@@ -1,7 +1,10 @@
+// @vitest-environment node
 // Integration tests for junctions-cache/src/server.ts — the Hono route layer.
 // Audit finding #1565: /health, /logs and the /junctions request validation
 // (bbox parsing/range/area caps, start-anchored coord/maxKm caps, partial-param
-// fallthrough, Overpass-error → 502) had zero coverage.
+// handling, Overpass-error → 502) had zero coverage.
+// Audit finding #3159: partial anchor params (some-but-not-all of
+// startLat/startLng/maxKm) now 400 instead of silently falling through to bbox.
 //
 // server.ts is import-for-side-effect: it builds a non-exported Hono `app`,
 // `await loadCache()`s, then `serve({ fetch: app.fetch, ... })`. To reach the
@@ -259,37 +262,70 @@ describe('GET /junctions — start-anchored validation', () => {
     });
 });
 
-// ── GET /junctions — partial start params fall through to legacy mode ──────────
-// The anchored branch requires ALL of startLat/startLng/maxKm to be non-null;
-// any subset silently falls through to legacy bbox mode. This matches the
-// finding's claim — asserted here via the legacy-only response shape (no total).
+// ── GET /junctions — partial start params → 400 (all-or-nothing) ───────────────
+// Anchor params are all-or-nothing: the anchored branch needs ALL of
+// startLat/startLng/maxKm. A partial subset used to silently fall through to
+// legacy bbox mode (audit #3159) — making a malformed client request look like a
+// successful no-anchor lookup. It now 400s, naming the missing param(s). Zero
+// anchor params (legacy) and a full set (anchored) are unchanged — covered above.
 
-describe('GET /junctions — partial start params fall through to legacy', () => {
-    test('only startLat supplied → legacy mode (200, no total)', async () => {
+describe('GET /junctions — partial start params → 400', () => {
+    const partial = (q: string) => `/junctions?bbox=${OK_BBOX}&${q}`;
+
+    test('only startLat → 400 naming the missing startLng and maxKm', async () => {
         const { fetch, fetchMock } = await loadServer();
-        fetchMock.mockResolvedValue([{ lat: 60.2, lng: 24.2 }]);
-        const { status, body } = await get(fetch, `/junctions?bbox=${OK_BBOX}&startLat=60.2`);
-        expect(status).toBe(200);
-        expect(body.total).toBeUndefined();
-        // Anchored validation never runs: startLat=60.2 is fine, but a partial set
-        // would NOT be rejected even if it were out of range (proves fallthrough).
+        const { status, body } = await get(fetch, partial('startLat=60.2'));
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/incomplete anchor/);
+        expect(body.error).toMatch(/startLng/);
+        expect(body.error).toMatch(/maxKm/);
+        expect(body.error).not.toMatch(/missing startLat/); // startLat WAS supplied
+        expect(fetchMock).not.toHaveBeenCalled();            // no lookup happens
     });
 
-    test('startLat + startLng but no maxKm → legacy mode (200, no total)', async () => {
-        const { fetch, fetchMock } = await loadServer();
-        fetchMock.mockResolvedValue([{ lat: 60.2, lng: 24.2 }]);
-        const { status, body } = await get(fetch, `/junctions?bbox=${OK_BBOX}&startLat=60.2&startLng=24.2`);
-        expect(status).toBe(200);
-        expect(body.total).toBeUndefined();
+    test('only startLng → 400 naming the missing startLat and maxKm', async () => {
+        const { fetch } = await loadServer();
+        const { status, body } = await get(fetch, partial('startLng=24.2'));
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/startLat/);
+        expect(body.error).toMatch(/maxKm/);
     });
 
-    // Stronger fallthrough proof: an out-of-range startLat that WOULD 400 in
-    // anchored mode is ignored when maxKm is absent — the request still succeeds.
-    test('partial set with an out-of-range startLat is NOT validated (falls through)', async () => {
+    test('only maxKm → 400 naming the missing startLat and startLng', async () => {
+        const { fetch } = await loadServer();
+        const { status, body } = await get(fetch, partial('maxKm=10'));
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/startLat/);
+        expect(body.error).toMatch(/startLng/);
+    });
+
+    test('startLat + startLng but no maxKm → 400 naming the missing maxKm', async () => {
+        const { fetch } = await loadServer();
+        const { status, body } = await get(fetch, partial('startLat=60.2&startLng=24.2'));
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/incomplete anchor/);
+        expect(body.error).toMatch(/maxKm/);
+    });
+
+    // The completeness gate runs BEFORE the per-param range checks, so an
+    // out-of-range value in a partial set is reported as incomplete, not bogus.
+    test('partial set with an out-of-range startLat → 400 incomplete (not range error)', async () => {
+        const { fetch, fetchMock } = await loadServer();
+        const { status, body } = await get(fetch, partial('startLat=999&startLng=24.2'));
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/incomplete anchor/);
+        expect(body.error).not.toMatch(/out of range/);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    // Zero anchor params is the legacy path, untouched by the completeness gate:
+    // a plain bbox request must still succeed (and carry no `total`).
+    test('no anchor params at all → legacy mode, not a 400', async () => {
         const { fetch, fetchMock } = await loadServer();
         fetchMock.mockResolvedValue([{ lat: 60.2, lng: 24.2 }]);
-        const { status } = await get(fetch, `/junctions?bbox=${OK_BBOX}&startLat=999&startLng=24.2`);
-        expect(status).toBe(200); // 999 never reaches the anchored range check
+        const { status, body } = await get(fetch, `/junctions?bbox=${OK_BBOX}`);
+        expect(status).toBe(200);
+        expect(body.total).toBeUndefined();
     });
 });
 
