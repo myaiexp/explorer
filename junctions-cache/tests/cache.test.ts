@@ -265,6 +265,82 @@ describe('getJunctionsAnchored', () => {
     });
 });
 
+// ── filterToBbox — boundary inclusivity (audit #3175) ────────────────────────
+//
+// filterToBbox keeps a point when:
+//   j.lat >= minLat && j.lat <= maxLat && j.lng >= minLng && j.lng <= maxLng
+// i.e. all FOUR edges are inclusive (>= on the mins, <= on the maxes), applied
+// uniformly — no edge uses a strict comparison. The existing getJunctionsAnchored
+// tests above only cover strictly-interior / strictly-exterior points, leaving the
+// edge behaviour unpinned. These tests close that gap via getJunctionsAnchored
+// (which returns filterToBbox(all, requested)): a point lying exactly on each edge,
+// and on a corner, is KEPT; a point one small step outside any edge is DROPPED, so
+// the boundary sits precisely on the edge rather than inside a tolerance band.
+// (Confirmed against the source: inclusivity is consistent across all four edges —
+// there is no off-by-one to encode here.)
+
+describe('filterToBbox boundary inclusivity', () => {
+    // `start` is irrelevant to the filtering: the fetch is mocked to return our
+    // exact set regardless of the wide bbox, so only `requested` drives filterToBbox.
+    const start = { startLat: 60.5, startLng: 24.5, maxKm: 50 };
+    const requested: Bbox = { minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 };
+
+    test('points exactly on each edge (min/max lat, min/max lng) and on the corners are KEPT — every edge is inclusive', async () => {
+        vi.useFakeTimers();
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        const onBoundary = [
+            { lat: 60, lng: 24.5 },   // exactly on the min-lat edge
+            { lat: 61, lng: 24.5 },   // exactly on the max-lat edge
+            { lat: 60.5, lng: 24 },   // exactly on the min-lng edge
+            { lat: 60.5, lng: 25 },   // exactly on the max-lng edge
+            { lat: 60, lng: 24 },     // min-lat / min-lng corner
+            { lat: 61, lng: 25 },     // max-lat / max-lng corner
+        ];
+        fetchMock.mockResolvedValue(onBoundary);
+
+        const r = await cache.getJunctionsAnchored(start, 'default', requested);
+
+        // >= / <= on every edge → no on-edge point is filtered out.
+        expect(r.junctions).toEqual(onBoundary);
+        expect(r.total).toBe(6);
+    });
+
+    test('points one small step OUTSIDE each edge are DROPPED — the boundary is exactly on the edge, not a tolerance band', async () => {
+        vi.useFakeTimers();
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        const justOutside = [
+            { lat: 59.9999, lng: 24.5 },  // just below min-lat → fails j.lat >= minLat
+            { lat: 61.0001, lng: 24.5 },  // just above max-lat → fails j.lat <= maxLat
+            { lat: 60.5, lng: 23.9999 },  // just left of min-lng → fails j.lng >= minLng
+            { lat: 60.5, lng: 25.0001 },  // just right of max-lng → fails j.lng <= maxLng
+        ];
+        fetchMock.mockResolvedValue(justOutside);
+
+        const r = await cache.getJunctionsAnchored(start, 'default', requested);
+
+        // Each point fails exactly one comparison → all four are excluded.
+        expect(r.junctions).toEqual([]);
+        expect(r.total).toBe(4);   // the full set is still stored; only the window is empty
+    });
+
+    test('on-edge points survive alongside out-of-window points, preserving input order', async () => {
+        vi.useFakeTimers();
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        const mixed = [
+            { lat: 60, lng: 24 },       // min corner → kept
+            { lat: 62, lng: 24 },       // lat above max → dropped
+            { lat: 61, lng: 25 },       // max corner → kept
+            { lat: 60.5, lng: 26 },     // lng above max → dropped
+        ];
+        fetchMock.mockResolvedValue(mixed);
+
+        const r = await cache.getJunctionsAnchored(start, 'default', requested);
+
+        expect(r.junctions).toEqual([{ lat: 60, lng: 24 }, { lat: 61, lng: 25 }]);
+        expect(r.total).toBe(4);
+    });
+});
+
 // ── loadCache — ENOENT / corrupt JSON / valid roundtrip ──────────────────────
 
 describe('loadCache', () => {
