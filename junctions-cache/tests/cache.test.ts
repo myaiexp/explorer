@@ -1,4 +1,7 @@
+// @vitest-environment node
 // Tests for junctions-cache/src/cache.ts — in-memory cache, persistence, dedup.
+// Node env (not the repo-root jsdom default): these tests use node:fs + os.tmpdir,
+// which jsdom stubs out under vite7 (TypeError: tmpdir is not a function).
 // Audit finding #1564: the inflight-dedup correctness property and the helpers
 // (wideBboxFromStart pole/cos handling, loadCache ENOENT/corrupt, saveCache
 // atomic write-rename, scheduleSave debounce + re-save loop, filterToBbox) had
@@ -294,6 +297,47 @@ describe('loadCache', () => {
         const r = await cache.getJunctions(BBOX, 'default');
         expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    // Audit #3173: corrupt individual rows were stored as-is (a later
+    // getJunctions/filterToBbox would crash on them) with no signal. They must
+    // be dropped on load AND surfaced via a WARN naming the count.
+    test('corrupt individual entries are dropped, not stored, and a WARN names the count', async () => {
+        const file = tmpCacheFile();
+        const goodKey = '60.0000,24.0000,61.0000,25.0000|default';
+        writeFileSync(file, JSON.stringify({
+            [goodKey]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: 123 },
+            'bad:junctions-not-array': { junctions: 'nope', cachedAt: 1 },
+            'bad:missing-cachedAt': { junctions: [] },
+            'bad:cachedAt-not-number': { junctions: [], cachedAt: 'soon' },
+            'bad:null-entry': null,
+        }));
+        const { cache, log } = await loadFresh(file);
+
+        await cache.loadCache();
+
+        // Only the well-formed row survives — the four malformed ones are gone.
+        expect(cache.cacheSize()).toBe(1);
+        // The loss is surfaced, not silently swallowed.
+        expect(log).toHaveBeenCalledWith('WARN', expect.objectContaining({
+            event: 'cache_entries_dropped', dropped: 4, kept: 1,
+        }));
+        // The happy-path summary still fires with the survivor count.
+        expect(log).toHaveBeenCalledWith('INFO', expect.objectContaining({ event: 'cache_loaded', entries: 1 }));
+    });
+
+    // Guards the byte-for-byte happy path: a clean snapshot must not emit a
+    // spurious cache_entries_dropped WARN.
+    test('a fully valid snapshot drops nothing and logs no cache_entries_dropped WARN', async () => {
+        const file = tmpCacheFile();
+        const key = '60.0000,24.0000,61.0000,25.0000|default';
+        writeFileSync(file, JSON.stringify({ [key]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: 123 } }));
+        const { cache, log } = await loadFresh(file);
+
+        await cache.loadCache();
+
+        expect(cache.cacheSize()).toBe(1);
+        expect(log).not.toHaveBeenCalledWith('WARN', expect.objectContaining({ event: 'cache_entries_dropped' }));
     });
 });
 

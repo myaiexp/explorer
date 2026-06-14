@@ -67,17 +67,39 @@ function filterToBbox(junctions: LatLng[], bbox: Bbox): LatLng[] {
     return out;
 }
 
+// A persisted row is only usable if it has the Entry shape: a junctions array
+// and a numeric cachedAt. Anything else (hand-edited file, partial write, schema
+// drift) would crash a later getJunctions/filterToBbox, so it's dropped on load
+// rather than stored as a landmine.
+function isValidEntry(v: unknown): v is Entry {
+    return typeof v === 'object' && v !== null
+        && Array.isArray((v as Entry).junctions)
+        && typeof (v as Entry).cachedAt === 'number';
+}
+
 export async function loadCache(): Promise<void> {
     try {
         const raw = await readFile(CACHE_PATH, 'utf8');
-        const obj = JSON.parse(raw) as Record<string, Entry>;
-        for (const [k, v] of Object.entries(obj)) store.set(k, v);
+        const obj = JSON.parse(raw) as Record<string, unknown>;
+        let dropped = 0;
+        for (const [k, v] of Object.entries(obj)) {
+            if (isValidEntry(v)) store.set(k, v);
+            else dropped++;
+        }
+        if (dropped > 0) {
+            // Graceful degradation: skip the bad rows and rebuild them from
+            // Overpass on demand — but surface the loss so it isn't silent.
+            log('WARN', { event: 'cache_entries_dropped', dropped, kept: store.size, path: CACHE_PATH });
+        }
         log('INFO', { event: 'cache_loaded', entries: store.size, path: CACHE_PATH });
     } catch (e) {
         const err = e as NodeJS.ErrnoException;
         if (err.code === 'ENOENT') {
             log('INFO', { event: 'cache_empty', path: CACHE_PATH });
         } else {
+            // Includes JSON.parse SyntaxError when the whole snapshot is
+            // unparseable: tolerate it (rebuild from Overpass) but log so the
+            // dropped cache isn't silent.
             log('WARN', { event: 'cache_load_failed', err: err.message });
         }
     }
