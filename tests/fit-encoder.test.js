@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for fit-encoder.js — Garmin FIT course-file binary encoder.
  * Audit finding #1562: this file had zero test coverage.

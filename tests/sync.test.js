@@ -10,12 +10,9 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import SYNC_SRC from '../sync.js?raw';
 
 // ── Load sync.js source once ─────────────────────────────────────────────────
-
-const SYNC_SRC = readFileSync(resolve(__dirname, '../sync.js'), 'utf8');
 
 // Execute the IIFE in the jsdom global scope. new Function() is used here
 // deliberately to bootstrap a non-module browser script in the test environment.

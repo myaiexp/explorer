@@ -14,11 +14,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const APP_SRC = readFileSync(resolve(__dirname, '../app.js'), 'utf8');
+import APP_SRC from '../app.js?raw';
 
 // Pull out the `async function fetchCorridorJunctions(...) { ... }` block by
 // brace-matching from the signature. Template literals here are brace-balanced
@@ -40,10 +36,12 @@ let fetchCorridorJunctions;
 
 beforeAll(() => {
     const src = extractFn('fetchCorridorJunctions');
-    // Evaluate the declaration and hand back a reference. `fetch` resolves to
-    // globalThis.fetch (faked per test) through the realm scope chain.
-    fetchCorridorJunctions = vm.runInThisContext(
-        `(function () { ${src}\n return fetchCorridorJunctions; })`
+    // Evaluate the declaration and hand back a reference. new Function() bootstraps
+    // the extracted source in the global scope (static local file content, not
+    // user input); `fetch` resolves to globalThis.fetch (faked per test) through
+    // the scope chain.
+    fetchCorridorJunctions = new Function( // eslint-disable-line no-new-func
+        `${src}\n return fetchCorridorJunctions;`
     )();
 });
 

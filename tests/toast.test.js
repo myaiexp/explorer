@@ -16,14 +16,13 @@
  * only that variant's tests RED.
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const SRC = readFileSync(resolve(__dirname, '../toast.js'), 'utf8');
+import SRC from '../toast.js?raw';
 
 beforeAll(() => {
-    new vm.Script(SRC).runInThisContext(); // exposes globalThis.showToast + wrappers
+    // Execute toast.js in the jsdom global scope. new Function() bootstraps a
+    // non-module browser script (static local file, not user input); toast.js's
+    // explicit globalThis assignments expose showToast + the wrappers.
+    new Function(SRC).call(window); // eslint-disable-line no-new-func
 });
 
 // A fake #error element that records every mutation in order.

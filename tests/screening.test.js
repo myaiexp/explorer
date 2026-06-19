@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Tests for screening.js — water-aware reachability filtering.
  *
