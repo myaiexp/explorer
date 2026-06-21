@@ -1036,26 +1036,21 @@ function renderElevationChart(elevations) {
 
 // ─── Google Maps directions URL ──────────────────────────────────────────────
 
-function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, outboundVias, returnVias) {
+function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
     const base = 'https://www.google.com/maps/dir/?api=1&travelmode=walking';
     if (tripMode === 'one-way') {
         return `${base}&origin=${startLat},${startLng}&destination=${destLat},${destLng}`;
     }
 
-    // Use provided vias if available, otherwise fall back to geometric computation
-    let outVias, retVias;
-    if (outboundVias && returnVias) {
-        outVias = outboundVias;
-        retVias = returnVias;
-    } else {
-        const { offsetMult, viaTs } = getSpreadParams();
-        const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-        const offsetKm = Math.max(0.1, straightDist * offsetMult);
-        outVias = viaTs.map(t =>
-            envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-        retVias = viaTs.slice().reverse().map(t =>
-            envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-    }
+    // Round-trip: synthesize the loop's via points geometrically so the Google
+    // Maps link traces the same oval the in-app route does.
+    const { offsetMult, viaTs } = getSpreadParams();
+    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+    const offsetKm = Math.max(0.1, straightDist * offsetMult);
+    const outVias = viaTs.map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+    const retVias = viaTs.slice().reverse().map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
 
     const waypoints = [
         ...outVias.map(p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`),
@@ -1069,8 +1064,7 @@ function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, outb
 // ─── Display route results on map ────────────────────────────────────────────
 
 function displayRoute(startLat, startLng, destLat, destLng, straightMax, straightMin,
-                      outboundRoute, returnRoute, locationInput, destName, tripMode,
-                      outboundVias, returnVias) {
+                      outboundRoute, returnRoute, locationInput, destName, tripMode) {
     // Markers
     const routeColor = getRouteColor();
     const startMarker = L.marker([startLat, startLng], { icon: createHereDotIcon() })
@@ -1143,7 +1137,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
     updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
     document.getElementById('directionsLink').href =
-        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, outboundVias, returnVias);
+        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
     document.getElementById('streetViewLink').href =
         `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${destLat},${destLng}`;
 
@@ -1175,8 +1169,6 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         returnRouteDistance: returnRoute   ? returnRoute.distance / 1000 : null,
         returnRouteDuration: returnRoute   ? returnRoute.duration    : null,
         returnRouteSteps:    returnRoute   ? returnRoute.steps       : null,
-        outboundVias:        outboundVias  || null,
-        returnVias:          returnVias    || null
     };
 
     updateFavoriteBtn();
@@ -1379,8 +1371,7 @@ async function generateDestination() {
         }
 
         displayRoute(startLat, startLng, dest.lat, dest.lng,
-                     straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode,
-                     null, null);
+                     straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode);
         if (currentSession) currentSession.junctions = junctions;
 
         if (waterLocked) {
@@ -1473,8 +1464,7 @@ function togglePickMode() {
             returnRoute = r.return;
             junctions = r.junctions;
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                         outboundRoute, returnRoute, locInput, null, tripMode,
-                         null, null);
+                         outboundRoute, returnRoute, locInput, null, tripMode);
             if (currentSession) currentSession.junctions = junctions;
         } catch (error) {
             showError(error.message || 'An error occurred. Please try again.');
@@ -1860,8 +1850,7 @@ async function restoreFromHash() {
         returnRoute = r.return;
         junctions = r.junctions;
         displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                     outboundRoute, returnRoute, s, n, m,
-                     null, null);
+                     outboundRoute, returnRoute, s, n, m);
         if (currentSession) currentSession.junctions = junctions;
 
         loadingEl.classList.remove('active');
@@ -2087,7 +2076,7 @@ async function rerouteWithCurrentSpread() {
         updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
         document.getElementById('directionsLink').href =
-            buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode, null, null);
+            buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
 
         // Update session
         currentSession = {
@@ -2101,8 +2090,6 @@ async function rerouteWithCurrentSpread() {
             returnRouteDistance: ret      ? ret.distance / 1000 : null,
             returnRouteDuration: ret      ? ret.duration       : null,
             returnRouteSteps:    ret      ? ret.steps          : null,
-            outboundVias:        null,
-            returnVias:          null,
             junctions
         };
 
