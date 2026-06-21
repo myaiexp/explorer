@@ -1,12 +1,13 @@
 /**
- * Tests for fetchCorridorJunctions (app.js) — the start-anchored junction
+ * Tests for fetchCorridorJunctions (osrm.js) — the start-anchored junction
  * cache fetch.
  *
- * fetchCorridorJunctions lives inside app.js, which can't be imported wholesale
- * (it touches Leaflet `L` at top level). The function is self-contained — it
- * only uses Math / URLSearchParams / Number / String / fetch and an optional
- * onProgress callback — so we extract just its source and instantiate it in the
- * current realm via vm, with a faked global `fetch`.
+ * fetchCorridorJunctions lives inside osrm.js, which can't be imported wholesale
+ * (its other functions reference cross-module globals like calculateDistance).
+ * The function is self-contained — it only uses Math / URLSearchParams / Number
+ * / String / fetch and an optional onProgress callback — so we extract just its
+ * source and instantiate it in the current realm via vm, with a faked global
+ * `fetch`.
  *
  * Guards the audit #1268 invariant: maxKm is an explicit parameter, NOT read
  * from the DOM. The "no DOM read" test fails RED if anyone reverts to reading
@@ -14,22 +15,22 @@
  */
 
 import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
-import APP_SRC from '../app.js?raw';
+import OSRM_SRC from '../osrm.js?raw';
 
 // Pull out the `async function fetchCorridorJunctions(...) { ... }` block by
 // brace-matching from the signature. Template literals here are brace-balanced
 // (`${...}`) and no string literal contains a stray brace, so a naive counter
 // is correct for this function.
 function extractFn(name) {
-    const start = APP_SRC.indexOf(`async function ${name}(`);
-    if (start === -1) throw new Error(`${name} not found in app.js`);
-    let i = APP_SRC.indexOf('{', start);
+    const start = OSRM_SRC.indexOf(`async function ${name}(`);
+    if (start === -1) throw new Error(`${name} not found in osrm.js`);
+    let i = OSRM_SRC.indexOf('{', start);
     let depth = 0;
-    for (; i < APP_SRC.length; i++) {
-        if (APP_SRC[i] === '{') depth++;
-        else if (APP_SRC[i] === '}' && --depth === 0) { i++; break; }
+    for (; i < OSRM_SRC.length; i++) {
+        if (OSRM_SRC[i] === '{') depth++;
+        else if (OSRM_SRC[i] === '}' && --depth === 0) { i++; break; }
     }
-    return APP_SRC.slice(start, i);
+    return OSRM_SRC.slice(start, i);
 }
 
 let fetchCorridorJunctions;

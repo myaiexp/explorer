@@ -10,16 +10,20 @@ Frontend is a vanilla static app, no build step. Source files served as-is from 
 
 - `index.html` — structure
 - `style.css` — styles
-- `geo-utils.js` — canonical Haversine distance, km + meters (pure, globalThis-exposed; loaded first — used by fit-encoder.js, loop-quality.js, screening.js, novelty.js, app.js)
+- `geo-utils.js` — canonical Haversine distance, km + meters (pure, globalThis-exposed; loaded first — used by geometry.js, fit-encoder.js, loop-quality.js, screening.js, novelty.js, app.js)
+- `geometry.js` — pure geometry: calculateDistance (haversineKm alias), bearingRad, envelopeOffsetPoint, generateRandomPointAnnulus, computeSpreadParams (globalThis-exposed; loaded after geo-utils.js)
 - `fit-encoder.js` — Garmin FIT course-file encoder (used by `exportFIT()` in app.js)
 - `sync.js` — cloud-backup sync engine (outbox + per-row upserts to `/explorer/api`)
 - `bbox.js` — Finland bounding box helpers (pure, globalThis-exposed)
 - `loop-quality.js` — loop overlap detection (pure, globalThis-exposed)
 - `novelty.js` — novelty ranking helpers (pure, globalThis-exposed)
 - `screening.js` — water-aware reachability filtering (pure, globalThis-exposed)
-- `route-dispatch.js` — route-build dispatch by trip mode (globalThis-exposed; calls buildOneWay/buildJunctionLoop/buildLoop)
-- `toast.js` — transient #error toast (globalThis-exposed; showToast + showError/showSuccess/showWarning wrappers)
-- `app.js` — main application logic (orchestration, DOM, OSRM/Overpass calls)
+- `overpass.js` — Overpass querying: queryOverpass, fetchPOIsInRadius, fetchRoadsInRadius (+ sleep, HIGHWAY_EXCLUDE_*; no DOM, globalThis-exposed; loaded after geometry.js)
+- `osrm.js` — OSRM routing + loop building: tryOsrm/fetchRouteThrough/tryNearest/snapToRoad/screeningTableFn + buildLoopSetup/buildLoop/buildJunctionLoop/buildOneWay/fetchCorridorJunctions/snapToJunction/pickBetterLoop (DOM-free — callers pass a precomputed spread; globalThis-exposed; loaded after geometry.js + loop-quality.js)
+- `storage.js` — localStorage accessors: readStoredArray + getVisits/getSavedLocations/getFavorites/getHistory and their keys (globalThis-exposed)
+- `route-dispatch.js` — route-build dispatch by trip mode (globalThis-exposed; calls buildOneWay/buildJunctionLoop/buildLoop from osrm.js)
+- `toast.js` — transient #notification toast (globalThis-exposed; showToast + showError/showSuccess/showWarning wrappers)
+- `app.js` — main application logic (orchestration, DOM, Leaflet; consumes the geometry/overpass/osrm/storage modules as globals)
 
 Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom (`pnpm vitest run tests/sync.test.js`); backend tests run with `cd server && pnpm test`.
 

@@ -102,24 +102,12 @@ function maybeRequestConsent() {
 }
 
 // ─── localStorage ─────────────────────────────────────────────────────────────
+// readStoredArray + the array accessors (getVisits, getSavedLocations,
+// getFavorites, getHistory) and their storage keys (STORAGE_KEY,
+// SAVED_LOCATIONS_KEY, FAVORITES_KEY, HISTORY_KEY) live in storage.js (loaded
+// before app.js); used here as globals.
 
-const STORAGE_KEY = 'walk_visits';
 const SETTINGS_KEY = 'walk_settings';
-
-// Parse a JSON array from localStorage, returning [] on missing/corrupt data.
-// Shared by every array-backed accessor (visits, saved locations, favorites,
-// history) so the parse-or-default contract lives in exactly one place.
-function readStoredArray(key) {
-    try {
-        return JSON.parse(localStorage.getItem(key) || '[]');
-    } catch {
-        return [];
-    }
-}
-
-function getVisits() {
-    return readStoredArray(STORAGE_KEY);
-}
 
 // ─── Settings persistence ────────────────────────────────────────────────────
 
@@ -171,12 +159,7 @@ function initSettingsListeners() {
 }
 
 // ─── Saved locations ─────────────────────────────────────────────────────────
-
-const SAVED_LOCATIONS_KEY = 'walk_saved_locations';
-
-function getSavedLocations() {
-    return readStoredArray(SAVED_LOCATIONS_KEY);
-}
+// SAVED_LOCATIONS_KEY + getSavedLocations live in storage.js; used here as globals.
 
 function toggleSaveLocation() {
     const input = document.getElementById('location').value.trim();
@@ -363,45 +346,10 @@ function useMyLocation() {
     );
 }
 
-// ─── Random point generation ──────────────────────────────────────────────────
-
-function generateRandomPointAnnulus(centerLat, centerLng, minKm, maxKm) {
-    const minDeg = minKm / 111;
-    const maxDeg = maxKm / 111;
-    const r = Math.sqrt(Math.random() * (maxDeg ** 2 - minDeg ** 2) + minDeg ** 2);
-    const theta = Math.random() * 2 * Math.PI;
-    const latOffset = r * Math.cos(theta);
-    const lngOffset = r * Math.sin(theta) / Math.cos(centerLat * Math.PI / 180);
-    return { lat: centerLat + latOffset, lng: centerLng + lngOffset };
-}
-
-// ─── Distance & geometry ─────────────────────────────────────────────────────
-
-// Haversine great-circle distance in km — canonical impl lives in geo-utils.js
-// (shared with novelty.js); geo-utils.js loads before app.js per index.html.
-const calculateDistance = globalThis.haversineKm;
-
-function bearingRad(lat1, lng1, lat2, lng2) {
-    const toRad = Math.PI / 180;
-    const dLng = (lng2 - lng1) * toRad;
-    const y = Math.sin(dLng) * Math.cos(lat2 * toRad);
-    const x = Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) -
-              Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos(dLng);
-    return Math.atan2(y, x);
-}
-
-// Point at fraction t along A→B, offset perpendicular by a sin-envelope.
-// Peaks at t=0.5 (midpoint), zero at t=0 and t=1 (endpoints).
-function envelopeOffsetPoint(aLat, aLng, bLat, bLng, t, maxOffsetKm, side) {
-    const lat0 = aLat + t * (bLat - aLat);
-    const lng0 = aLng + t * (bLng - aLng);
-    const brng = bearingRad(aLat, aLng, bLat, bLng);
-    const perpBrng = brng + side * (Math.PI / 2);
-    const envelope = Math.sin(Math.PI * t) * maxOffsetKm / 111;
-    const lat = lat0 + envelope * Math.cos(perpBrng);
-    const lng = lng0 + envelope * Math.sin(perpBrng) / Math.cos(lat0 * Math.PI / 180);
-    return { lat, lng };
-}
+// ─── Geometry ─────────────────────────────────────────────────────────────────
+// calculateDistance, bearingRad, envelopeOffsetPoint, generateRandomPointAnnulus
+// and computeSpreadParams live in geometry.js (loaded before app.js); used here
+// as globals.
 
 // ─── Novelty helpers ──────────────────────────────────────────────────────────
 
@@ -418,370 +366,20 @@ function pickMostNovelDestination(candidates, existingDests) {
     return rankByNovelty(candidates, existingDests)[0];
 }
 
-// ─── Overpass helpers ────────────────────────────────────────────────────────
+// ─── Overpass / OSRM ──────────────────────────────────────────────────────────
+// Overpass querying (queryOverpass, fetchPOIsInRadius, fetchRoadsInRadius +
+// HIGHWAY_EXCLUDE_*) lives in overpass.js. OSRM routing + loop building (tryOsrm,
+// fetchRouteThrough, snapToRoad, screeningTableFn, buildLoopSetup, buildLoop,
+// fetchCorridorJunctions, snapToJunction, pickBetterLoop, buildJunctionLoop,
+// buildOneWay) lives in osrm.js. Both load before app.js; used here as globals.
 
-async function queryOverpass(query, onProgress) {
-    const maxAttempts = 3;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        if (attempt > 0) {
-            // Check status endpoint for actual wait time
-            try {
-                const status = await fetch('https://overpass-api.de/api/status').then(r => r.text());
-                const match = status.match(/Slot available after: .+, in (\d+) seconds/);
-                const waitSec = match ? Math.min(parseInt(match[1]) + 2, 60) : 15;
-                if (onProgress) onProgress(`POI search is busy, retrying in ${waitSec}s…`);
-                await sleep(waitSec * 1000);
-            } catch {
-                await sleep(15000);
-            }
-        }
-        const response = await fetch('https://overpass-api.de/api/interpreter', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'data=' + encodeURIComponent(query)
-        });
-        if (response.ok) return response.json();
-        if (response.status === 429 || response.status === 504) continue;
-        throw new Error('Failed to fetch POI data. Please try again.');
-    }
-    throw new Error('POI search is busy. Please wait a moment and try again.');
-}
+// ─── Spread slider (UI) ───────────────────────────────────────────────────────
 
-// ─── POIs (Overpass) ─────────────────────────────────────────────────────────
-
-async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter, onProgress) {
-    const latOffset = maxKm / 111;
-    const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
-    const bbox = `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
-    const filters = Array.isArray(filter) ? filter : [filter];
-    const unionBody = filters.map(f => `node${f}(${bbox});\nway${f}(${bbox});`).join('\n');
-    const query = `
-        [out:json][timeout:20];
-        (
-          ${unionBody}
-        );
-        out center tags;
-    `;
-    const data = await queryOverpass(query, onProgress);
-    const pois = [];
-    for (const el of data.elements) {
-        let lat, lng;
-        if (el.type === 'node') {
-            lat = el.lat; lng = el.lon;
-        } else if (el.type === 'way' && el.center) {
-            lat = el.center.lat; lng = el.center.lon;
-        } else {
-            continue;
-        }
-        const dist = calculateDistance(centerLat, centerLng, lat, lng);
-        if (dist >= minKm && dist <= maxKm) {
-            pois.push({ lat, lng, name: el.tags?.name || null });
-        }
-    }
-    return pois;
-}
-
-// ─── Roads (Overpass) ────────────────────────────────────────────────────────
-
-const HIGHWAY_EXCLUDE_DEFAULT = 'motorway|motorway_link|trunk|trunk_link|service|steps';
-const HIGHWAY_EXCLUDE_WINTER  = 'motorway|motorway_link|trunk|trunk_link|service|steps|path|track|footway|bridleway|cycleway|pedestrian';
-
-async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress, winterMode = false) {
-    const latOffset = maxKm / 111;
-    const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
-    const exclude = winterMode ? HIGHWAY_EXCLUDE_WINTER : HIGHWAY_EXCLUDE_DEFAULT;
-    const query = `
-        [out:json][timeout:15];
-        way["highway"]["highway"!~"${exclude}"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
-        out center;
-    `;
-    const data = await queryOverpass(query, onProgress);
-    const points = [];
-    for (const el of data.elements) {
-        if (el.type === 'way' && el.center) {
-            const dist = calculateDistance(centerLat, centerLng, el.center.lat, el.center.lon);
-            if (dist >= minKm && dist <= maxKm) {
-                points.push({ lat: el.center.lat, lng: el.center.lon });
-            }
-        }
-    }
-    return points;
-}
-
-// ─── OSRM routing ─────────────────────────────────────────────────────────────
-
-// Self-hosted OSRM-foot for Finland.
-const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
-const OSRM_FI_NEAREST = 'https://mase.fi/api/osrm-fi/nearest/v1/foot';
-const OSRM_FI_TABLE   = 'https://mase.fi/api/osrm-fi/table/v1/foot';
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// Internal: fetch + parse OSRM /route response. Returns null on any failure.
-async function tryOsrm(url) {
-    try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (!data.routes || data.routes.length === 0) return null;
-        const r = data.routes[0];
-        const steps = r.legs ? r.legs.flatMap(leg => leg.steps || []) : null;
-        return {
-            coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
-            duration: r.duration,
-            distance: r.distance,
-            steps: steps
-        };
-    } catch { return null; }
-}
-
-// Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance, steps} or null.
-async function fetchRouteThrough(waypoints) {
-    const coordStr = waypoints.map(p => `${p.lng},${p.lat}`).join(';');
-    const query = `${coordStr}?overview=full&geometries=geojson&steps=true&continue_straight=true`;
-    return tryOsrm(`${OSRM_FI_BASE}/${query}`);
-}
-
-// Map a spread-slider value (0-100) to a continuous offset multiplier. Pure —
-// no DOM — so the routing layer can be exercised in isolation. Always uses 3
-// via points at fixed t positions for consistent loop shape; the slider only
-// changes HOW FAR the vias are pushed sideways.
-//   0% → offsetMult ~0.03 (nearly straight, barely any loop)
-// 50% → offsetMult ~0.15 (gentle oval, default)
-// 100% → offsetMult ~0.40 (wide exploratory loop)
-function computeSpreadParams(sliderValue) {
-    const raw = Number.isFinite(sliderValue) ? sliderValue : 50;
-    const pct = raw / 100;
-    // Quadratic curve: gentle changes near middle, steeper at extremes
-    const offsetMult = 0.03 + pct * pct * 0.37;
-    return { offsetMult, viaTs: [0.25, 0.5, 0.75] };
-}
-
-// UI-layer wrapper: read the spread slider and compute its params. Call sites
-// pass the result into the routing layer so the routing functions stay DOM-free.
+// UI-layer wrapper: read the spread slider and compute its params (the pure
+// computeSpreadParams lives in geometry.js). Call sites pass the result into the
+// routing layer so the routing functions stay DOM-free.
 function getSpreadParams() {
     return computeSpreadParams(parseInt(document.getElementById('spreadSlider').value, 10));
-}
-
-// Internal: OSRM /nearest call. Returns {lat, lng} or null on any failure.
-async function tryNearest(url) {
-    try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (!data.waypoints || !data.waypoints.length) return null;
-        return { lat: data.waypoints[0].location[1], lng: data.waypoints[0].location[0] };
-    } catch { return null; }
-}
-
-// Snap a geometric via to the nearest road point within maxKm.
-// Returns the snapped point, or the original if snapping fails or is too far.
-async function snapToRoad(via, maxKm = 0.5) {
-    const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
-    if (!snapped) return via;
-    const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
-    return dist <= maxKm ? snapped : via;
-}
-
-// Adapter for screenCandidates' tableFn contract: one OSRM /table call
-// returns snap distance + route distance for every candidate at once,
-// replacing N parallel /nearest + N parallel /route calls.
-//
-// `destinations[i].distance` is OSRM's snap distance for input coord i;
-// `distances[0][i]` is the route distance from source[0] to coord i.
-// Both arrays include source[0] at index 0, so candidate i lives at i+1.
-async function screeningTableFn(start, candidates) {
-    if (candidates.length === 0) return [];
-    const coords = [
-        `${start.lng},${start.lat}`,
-        ...candidates.map(c => `${c.lng},${c.lat}`)
-    ].join(';');
-    const url = `${OSRM_FI_TABLE}/${coords}?sources=0&annotations=distance`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`osrm table http ${res.status}`);
-    const data = await res.json();
-    if (data.code !== 'Ok') throw new Error(`osrm table ${data.code}`);
-    const dests = data.destinations;
-    const dists = data.distances && data.distances[0];
-    if (!Array.isArray(dests) || !Array.isArray(dists)) {
-        throw new Error('osrm table malformed');
-    }
-    return candidates.map((_, i) => {
-        const d = dests[i + 1];
-        const r = dists[i + 1];
-        const snapM = d && typeof d.distance === 'number' ? d.distance : null;
-        const routeM = typeof r === 'number' ? r : null;
-        return { snapM, routeM };
-    });
-}
-
-// Shared geometry for the two loop builders. Derives the per-side offset, the
-// A/B endpoints, the via t-positions, and the snap radius (half the offset,
-// floored at 0.3 km) from start/dest + the spread params. Pure — no DOM.
-function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    // Defensive default to the 50% params if a caller omits spread — keeps this
-    // pure (no DOM) while every real call path passes an explicit spread.
-    const { offsetMult, viaTs } = spread || computeSpreadParams(50);
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
-    return {
-        offsetKm,
-        viaTs,
-        A: { lat: startLat, lng: startLng },
-        B: { lat: destLat,  lng: destLng },
-        snapRadius: Math.max(0.3, offsetKm * 0.5),
-    };
-}
-
-// Build a full oval loop: A → (right vias) → B → (left vias) → A.
-// Returns { outbound, return } where each is {coords, duration, distance} or null.
-// Builds a single chirality (right-side out, left-side back); buildJunctionLoop
-// is the variant that tries both chiralities and picks the lower-overlap one.
-// `spread` is the precomputed { offsetMult, viaTs } from computeSpreadParams.
-async function buildLoop(startLat, startLng, destLat, destLng, spread) {
-    const { offsetKm, viaTs, A, B, snapRadius } = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
-
-    // Generate via points on each side using sin-envelope
-    const viasRight = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const viasLeftReturn = viaTs.slice().reverse().map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-
-    // Snap all 6 vias to nearest roads in parallel (threshold: half the offset distance)
-    const allVias = [...viasRight, ...viasLeftReturn];
-    const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
-    const snappedRight = snapped.slice(0, 3);
-    const snappedLeft = snapped.slice(3);
-
-    const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
-    const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
-    return { outbound, return: ret };
-}
-
-// Fetch OSM nodes referenced by ≥2 highway ways inside the corridor between
-// start/dest, expanded by offsetKm on each side. Goes through the
-// junctions-cache service on shelly (mase.fi/api/junctions) which handles
-// Overpass calls + persistent caching.
-//
-// startLat/startLng + maxKm are sent so the server can cache once per
-// (start, radius) instead of per destination bbox; it fetches a wide
-// start ± maxKm bbox once and filters to the requested corridor. maxKm is
-// the caller's max-distance budget (passed in, never read from the DOM here)
-// so this stays pure and the cache key matches the radius the caller works in.
-async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode = false) {
-    const minLat = Math.min(startLat, destLat);
-    const maxLat = Math.max(startLat, destLat);
-    const minLng = Math.min(startLng, destLng);
-    const maxLng = Math.max(startLng, destLng);
-    const midLat = (minLat + maxLat) / 2;
-    const latPad = offsetKm / 111;
-    const lngPad = offsetKm / (111 * Math.cos(midLat * Math.PI / 180));
-    const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
-    const exclude = winterMode ? 'winter' : 'default';
-    const params = new URLSearchParams({ bbox, exclude });
-    if (Number.isFinite(maxKm) && maxKm > 0) {
-        params.set('startLat', String(startLat));
-        params.set('startLng', String(startLng));
-        params.set('maxKm', String(maxKm));
-    }
-    const url = `/api/junctions/junctions?${params.toString()}`;
-    if (onProgress) onProgress('Searching for junctions…');
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error('POI search is busy. Please try again.');
-    }
-    const data = await response.json();
-    return data.junctions || [];
-}
-
-// Find the closest junction in the pool to `via` within maxKm. Returns the
-// junction, or the original `via` if no junction is in range.
-function snapToJunction(via, junctionPool, maxKm) {
-    if (!junctionPool || junctionPool.length === 0) return via;
-    let best = null, bestDist = Infinity;
-    for (const j of junctionPool) {
-        const d = calculateDistance(via.lat, via.lng, j.lat, j.lng);
-        if (d < bestDist) { bestDist = d; best = j; }
-    }
-    return bestDist <= maxKm ? best : via;
-}
-
-// Pick lower-overlap of two candidate (outbound, return) pairs. Falls back
-// gracefully if one chirality fully failed. Used by buildJunctionLoop's
-// both-chirality success path.
-function pickBetterLoop(outA, retA, outB, retB) {
-    const aOk = outA && retA;
-    const bOk = outB && retB;
-    if (aOk && bOk) {
-        const ovA = loopOverlapFraction(outA.coords, retA.coords);
-        const ovB = loopOverlapFraction(outB.coords, retB.coords);
-        return ovA <= ovB
-            ? { outbound: outA, return: retA, overlap: ovA }
-            : { outbound: outB, return: retB, overlap: ovB };
-    }
-    if (aOk) {
-        const ovA = loopOverlapFraction(outA.coords, retA.coords);
-        return { outbound: outA, return: retA, overlap: ovA };
-    }
-    if (bOk) {
-        const ovB = loopOverlapFraction(outB.coords, retB.coords);
-        return { outbound: outB, return: retB, overlap: ovB };
-    }
-    return { outbound: null, return: null, overlap: null };
-}
-
-// Junction-snap variant of buildLoop: same envelope vias, same snap radius,
-// but snaps each via to the closest OSM junction in a corridor pool instead
-// of OSRM nearest-snap. Builds both chiralities in parallel and returns the
-// lower-overlap one. Falls back to buildLoop on Overpass/OSRM failure.
-// cachedJunctions: pass a previously returned `junctions` to skip Overpass.
-// maxKm: the caller's max-distance budget — forwarded to fetchCorridorJunctions
-// for the start-anchored cache key (replaces a former DOM read in that helper).
-async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions = null, winterMode = false, spread = undefined) {
-    const { offsetKm, viaTs, A, B, snapRadius } = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
-
-    // Forward-order vias on each side. Reversal happens at call time on the
-    // leg that needs it (return-direction leg).
-    const viasRight = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const viasLeft = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-
-    let junctions = cachedJunctions;
-    if (!junctions) {
-        try {
-            onProgress('Searching for junctions…');
-            junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode);
-        } catch {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);
-            return { outbound: loop.outbound, return: loop.return, overlap: null, junctions: null };
-        }
-    }
-
-    const snappedRight = viasRight.map(v => snapToJunction(v, junctions, snapRadius));
-    const snappedLeft  = viasLeft .map(v => snapToJunction(v, junctions, snapRadius));
-
-    onProgress('Building both chiralities…');
-    const [outA, retA, outB, retB] = await Promise.all([
-        fetchRouteThrough([A, ...snappedRight, B]),
-        fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
-        fetchRouteThrough([A, ...snappedLeft, B]),
-        fetchRouteThrough([B, ...snappedRight.slice().reverse(), A]),
-    ]);
-    const picked = pickBetterLoop(outA, retA, outB, retB);
-    if (!picked.outbound || !picked.return) {
-        const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);
-        return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
-    }
-    return { ...picked, junctions };
-}
-
-// Build a single routed leg A → B. Returns {coords, duration, distance} or null.
-async function buildOneWay(startLat, startLng, destLat, destLng) {
-    return fetchRouteThrough([
-        { lat: startLat, lng: startLng },
-        { lat: destLat,  lng: destLng }
-    ]);
 }
 
 // ─── Duration badges ──────────────────────────────────────────────────────────
@@ -1687,12 +1285,7 @@ function buildListItem(label, meta, onSelect, onDelete) {
 }
 
 // ─── Favorites ───────────────────────────────────────────────────────────────
-
-const FAVORITES_KEY = 'walk_favorites';
-
-function getFavorites() {
-    return readStoredArray(FAVORITES_KEY);
-}
+// FAVORITES_KEY + getFavorites live in storage.js; used here as globals.
 
 function toggleFavorite() {
     if (!currentSession) return;
@@ -2205,15 +1798,11 @@ document.addEventListener('click', (e) => {
 });
 
 // ─── History ─────────────────────────────────────────────────────────────────
+// HISTORY_KEY + getHistory live in storage.js; used here as globals.
 
-const HISTORY_KEY = 'walk_history';
 const HISTORY_MAX = 20;
 const HISTORY_VISIBLE = 3;
 let historyExpanded = false;
-
-function getHistory() {
-    return readStoredArray(HISTORY_KEY);
-}
 
 function saveToHistory(session) {
     const entry = {
