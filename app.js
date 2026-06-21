@@ -799,6 +799,24 @@ function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
 // showToast + the showError/showSuccess/showWarning wrappers live in toast.js
 // (loaded before app.js); call them directly as globals.
 
+// Run an async task with the global loading spinner active and the generate
+// button disabled. Restores both and resets the loading caption in a finally,
+// so every caller gets identical setup/teardown even when the task throws.
+// Callers keep their own error handling (showError) inside fn.
+async function withLoading(fn) {
+    const loadingEl = document.getElementById('loading');
+    const genBtn = document.getElementById('generateBtn');
+    loadingEl.classList.add('active');
+    genBtn.disabled = true;
+    try {
+        return await fn();
+    } finally {
+        loadingEl.classList.remove('active');
+        loadingEl.querySelector('p').textContent = 'Finding your random destination…';
+        genBtn.disabled = false;
+    }
+}
+
 // ─── Cloud-backup UI ──────────────────────────────────────────────────────────
 
 function showConsentToast() {
@@ -1412,6 +1430,44 @@ function surpriseMe() {
 
 // ─── Pick destination mode ───────────────────────────────────────────────────
 
+// Map-click handler installed while "pick on map" mode is active: resolve the
+// start, build a route to the clicked point, and render it. Hoisted to module
+// scope (was an inline closure in togglePickMode) so the two function scopes
+// read independently. Stored in the module-level `pickHandler` so exitPickMode
+// can detach it.
+async function handlePickClick(e) {
+    exitPickMode();
+    const destLat = e.latlng.lat;
+    const destLng = e.latlng.lng;
+    currentSession = null;
+    resetMarkVisitedBtn();
+    const loadingEl = document.getElementById('loading');
+    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+
+    await withLoading(async () => {
+        try {
+            const { startLat, startLng, locationInput: locInput } = await resolveStart();
+            clearMap();
+            const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
+            const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
+            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+                tripMode,
+                smartRouting,
+                winterMode: smartRouting && document.getElementById('winterMode').checked,
+                maxKm: parseFloat(document.getElementById('maxDistance').value),
+                onProgress,
+                cachedJunctions: null,
+                buildingMessage: 'Building route…',
+            });
+            displayRoute(startLat, startLng, destLat, destLng, 0, 0,
+                         r.outbound, r.return, locInput, null, tripMode);
+            if (currentSession) currentSession.junctions = r.junctions;
+        } catch (error) {
+            showError(error.message || 'An error occurred. Please try again.');
+        }
+    });
+}
+
 function togglePickMode() {
     const btn = document.getElementById('pickDestBtn');
     if (pickMode) {
@@ -1432,48 +1488,7 @@ function togglePickMode() {
     map.getContainer().style.cursor = 'crosshair';
     showSuccess('Click anywhere on the map to set your destination');
 
-    pickHandler = async function (e) {
-        exitPickMode();
-        const destLat = e.latlng.lat;
-        const destLng = e.latlng.lng;
-
-        const loadingEl = document.getElementById('loading');
-        const genBtn = document.getElementById('generateBtn');
-        loadingEl.classList.add('active');
-        genBtn.disabled = true;
-        currentSession = null;
-        resetMarkVisitedBtn();
-
-        try {
-            const { startLat, startLng, locationInput: locInput } = await resolveStart();
-            clearMap();
-            const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
-            let outboundRoute, returnRoute, junctions = null;
-            const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-            const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
-            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-                tripMode,
-                smartRouting,
-                winterMode: smartRouting && document.getElementById('winterMode').checked,
-                maxKm: parseFloat(document.getElementById('maxDistance').value),
-                onProgress,
-                cachedJunctions: null,
-                buildingMessage: 'Building route…',
-            });
-            outboundRoute = r.outbound;
-            returnRoute = r.return;
-            junctions = r.junctions;
-            displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                         outboundRoute, returnRoute, locInput, null, tripMode);
-            if (currentSession) currentSession.junctions = junctions;
-        } catch (error) {
-            showError(error.message || 'An error occurred. Please try again.');
-        } finally {
-            loadingEl.classList.remove('active');
-            loadingEl.querySelector('p').textContent = 'Finding your random destination…';
-            genBtn.disabled = false;
-        }
-    };
+    pickHandler = handlePickClick;
     map.on('click', pickHandler);
 }
 
@@ -1809,6 +1824,11 @@ function copyRouteLink() {
 async function restoreFromHash() {
     const hash = location.hash.slice(1);
     if (!hash) return;
+
+    // Only hash PARSING is guarded: a malformed shared link should silently
+    // no-op. Routing/display failures below are NOT swallowed — they surface
+    // via showError so a broken shared link is visible to the user.
+    let parsed;
     try {
         const params = new URLSearchParams(hash);
         const s = params.get('s');
@@ -1820,46 +1840,44 @@ async function restoreFromHash() {
         const [startLat, startLng] = s.split(',').map(Number);
         const [destLat, destLng] = d.split(',').map(Number);
         if ([startLat, startLng, destLat, destLng].some(isNaN)) return;
+        parsed = { s, m, n, startLat, startLng, destLat, destLng };
+    } catch {
+        return;
+    }
 
-        // Set UI state
-        document.getElementById('location').value = s;
-        if (m === 'one-way') document.getElementById('oneWay').checked = true;
-        else document.getElementById('roundTrip').checked = true;
+    const { s, m, n, startLat, startLng, destLat, destLng } = parsed;
 
-        const loadingEl = document.getElementById('loading');
-        const genBtn = document.getElementById('generateBtn');
-        loadingEl.classList.add('active');
-        loadingEl.querySelector('p').textContent = 'Loading shared route…';
-        genBtn.disabled = true;
+    // Set UI state
+    document.getElementById('location').value = s;
+    if (m === 'one-way') document.getElementById('oneWay').checked = true;
+    else document.getElementById('roundTrip').checked = true;
 
-        clearMap();
-        let outboundRoute, returnRoute, junctions = null;
-        const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-        onProgress('Loading shared route…');
-        const smartRouting = m !== 'one-way' && document.getElementById('smartRouting').checked;
-        const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-            tripMode: m,
-            smartRouting,
-            winterMode: smartRouting && document.getElementById('winterMode').checked,
-            maxKm: parseFloat(document.getElementById('maxDistance').value),
-            onProgress,
-            cachedJunctions: null,
-            buildingMessage: null,
+    const loadingEl = document.getElementById('loading');
+    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
+
+    try {
+        await withLoading(async () => {
+            clearMap();
+            onProgress('Loading shared route…');
+            const smartRouting = m !== 'one-way' && document.getElementById('smartRouting').checked;
+            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+                tripMode: m,
+                smartRouting,
+                winterMode: smartRouting && document.getElementById('winterMode').checked,
+                maxKm: parseFloat(document.getElementById('maxDistance').value),
+                onProgress,
+                cachedJunctions: null,
+                buildingMessage: null,
+            });
+            displayRoute(startLat, startLng, destLat, destLng, 0, 0,
+                         r.outbound, r.return, s, n, m);
+            if (currentSession) currentSession.junctions = r.junctions;
         });
-        outboundRoute = r.outbound;
-        returnRoute = r.return;
-        junctions = r.junctions;
-        displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                     outboundRoute, returnRoute, s, n, m);
-        if (currentSession) currentSession.junctions = junctions;
-
-        loadingEl.classList.remove('active');
-        loadingEl.querySelector('p').textContent = 'Finding your random destination…';
-        genBtn.disabled = false;
-
-        // Clear hash after restoring so it doesn't re-trigger
+        // Clear hash after a successful restore so it doesn't re-trigger.
         history.replaceState(null, '', location.pathname);
-    } catch {}
+    } catch (error) {
+        showError(error.message || 'Could not load the shared route.');
+    }
 }
 
 // ─── GPX export ──────────────────────────────────────────────────────────────
@@ -2020,95 +2038,89 @@ let spreadDebounce = null;
 // Only re-fetches routes, does NOT pick a new destination.
 async function rerouteWithCurrentSpread() {
     if (!currentSession) return;
-    const { startLat, startLng, destLat, destLng, startLabel } = currentSession;
+    const { startLat, startLng, destLat, destLng } = currentSession;
     const loadingEl = document.getElementById('loading');
-    const genBtn = document.getElementById('generateBtn');
-
-    loadingEl.classList.add('active');
-    loadingEl.querySelector('p').textContent = 'Adjusting route…';
-    genBtn.disabled = true;
+    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
     resetMarkVisitedBtn();
 
     try {
-        // Keep markers and circles, only clear route lines
-        routeLines.forEach(l => map.removeLayer(l));
-        routeLines = [];
+        await withLoading(async () => {
+            onProgress('Adjusting route…');
+            // Keep markers and circles, only clear route lines
+            routeLines.forEach(l => map.removeLayer(l));
+            routeLines = [];
 
-        const { tripMode } = currentSession;
-        let outbound, ret, junctions = currentSession.junctions || null;
-        const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-        const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
-        const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-            tripMode,
-            smartRouting,
-            winterMode: smartRouting && document.getElementById('winterMode').checked,
-            maxKm: parseFloat(document.getElementById('maxDistance').value),
-            onProgress,
-            cachedJunctions: junctions,
-            buildingMessage: null,
+            const { tripMode } = currentSession;
+            let junctions = currentSession.junctions || null;
+            const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
+            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+                tripMode,
+                smartRouting,
+                winterMode: smartRouting && document.getElementById('winterMode').checked,
+                maxKm: parseFloat(document.getElementById('maxDistance').value),
+                onProgress,
+                cachedJunctions: junctions,
+                buildingMessage: null,
+            });
+            const outbound = r.outbound;
+            const ret = r.return;
+            if (tripMode !== 'one-way') junctions = r.junctions;
+
+            // Redraw routes (glow style, single color)
+            const retryColor = getRouteColor();
+            const allCoords = [];
+            if (outbound) {
+                drawRouteGlow(outbound.coords, retryColor);
+                allCoords.push(...outbound.coords);
+            }
+            if (ret) {
+                drawRouteGlow(ret.coords, retryColor);
+                allCoords.push(...ret.coords);
+            }
+            if (allCoords.length > 0) {
+                map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
+            }
+
+            // Update badges
+            const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+            const outDist = outbound ? outbound.distance / 1000 : straightDist;
+            const retDist = ret      ? ret.distance      / 1000 : (tripMode === 'one-way' ? 0 : straightDist);
+            const totalWalkKm = outDist + retDist;
+            const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
+
+            updateDurationBadges(totalWalkKm, totalDuration, tripMode);
+
+            document.getElementById('directionsLink').href =
+                buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
+
+            // Update session
+            currentSession = {
+                ...currentSession,
+                distance: totalWalkKm,
+                routeCoords:         outbound ? outbound.coords    : null,
+                routeDistance:       outbound ? outbound.distance / 1000 : null,
+                routeDuration:       outbound ? outbound.duration  : null,
+                routeSteps:          outbound ? outbound.steps     : null,
+                returnRouteCoords:   ret      ? ret.coords         : null,
+                returnRouteDistance: ret      ? ret.distance / 1000 : null,
+                returnRouteDuration: ret      ? ret.duration       : null,
+                returnRouteSteps:    ret      ? ret.steps          : null,
+                junctions
+            };
+
+            // Re-fetch elevation for new route
+            const rerouteCoords = [
+                ...(outbound ? outbound.coords : []),
+                ...(ret ? ret.coords : [])
+            ];
+            if (rerouteCoords.length > 0) {
+                fetchElevations(rerouteCoords)
+                    .then(renderElevationChart)
+                    .catch(() => {});
+            }
         });
-        outbound = r.outbound;
-        ret = r.return;
-        if (tripMode !== 'one-way') junctions = r.junctions;
-
-        // Redraw routes (glow style, single color)
-        const retryColor = getRouteColor();
-        const allCoords = [];
-        if (outbound) {
-            drawRouteGlow(outbound.coords, retryColor);
-            allCoords.push(...outbound.coords);
-        }
-        if (ret) {
-            drawRouteGlow(ret.coords, retryColor);
-            allCoords.push(...ret.coords);
-        }
-        if (allCoords.length > 0) {
-            map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
-        }
-
-        // Update badges
-        const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-        const outDist = outbound ? outbound.distance / 1000 : straightDist;
-        const retDist = ret      ? ret.distance      / 1000 : (tripMode === 'one-way' ? 0 : straightDist);
-        const totalWalkKm = outDist + retDist;
-        const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
-
-        updateDurationBadges(totalWalkKm, totalDuration, tripMode);
-
-        document.getElementById('directionsLink').href =
-            buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
-
-        // Update session
-        currentSession = {
-            ...currentSession,
-            distance: totalWalkKm,
-            routeCoords:         outbound ? outbound.coords    : null,
-            routeDistance:       outbound ? outbound.distance / 1000 : null,
-            routeDuration:       outbound ? outbound.duration  : null,
-            routeSteps:          outbound ? outbound.steps     : null,
-            returnRouteCoords:   ret      ? ret.coords         : null,
-            returnRouteDistance: ret      ? ret.distance / 1000 : null,
-            returnRouteDuration: ret      ? ret.duration       : null,
-            returnRouteSteps:    ret      ? ret.steps          : null,
-            junctions
-        };
-
-        // Re-fetch elevation for new route
-        const rerouteCoords = [
-            ...(outbound ? outbound.coords : []),
-            ...(ret ? ret.coords : [])
-        ];
-        if (rerouteCoords.length > 0) {
-            fetchElevations(rerouteCoords)
-                .then(renderElevationChart)
-                .catch(() => {});
-        }
     } catch (error) {
         showError(error.message || 'Failed to adjust route.');
-    } finally {
-        loadingEl.classList.remove('active');
-        loadingEl.querySelector('p').textContent = 'Finding your random destination…';
-        genBtn.disabled = false;
     }
 }
 
