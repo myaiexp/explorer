@@ -590,3 +590,158 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
     });
 });
+
+// ── init/flush coverage gaps (audit) ──────────────────────────────────────────
+// Closes untested branches flagged by the audit: init Case 1 accepted-restore,
+// Case 2/3 server non-ok early-exits, Case 4/5 switching-message cancel path,
+// the window 'online' recovery handler, deleteAccount error/no-op paths, the
+// scheduleFlush single-flight guard, and isLocalStorageEmpty's parse-error catch.
+
+describe('ExplorerSync coverage gaps (audit)', () => {
+    // Finding 1: init Case 1, accepted flag + no URL segment → silently restore
+    // accepted state/username/token with NO network call.
+    test('init: accepted flag with no URL segment restores state and username without fetching', async () => {
+        setLocation('/explorer/');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+        });
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(window.ExplorerSync.getState()).toMatchObject({
+            state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
+        });
+    });
+
+    // Finding 2a: init Case 2 (URL matches stored user) — server returns 500.
+    // State is set BEFORE the fetch, so a non-ok GET must leave it 'accepted',
+    // skip the merge, and not throw.
+    test('init Case 2: server 500 during merge keeps accepted state and leaves local data untouched', async () => {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-1' }]),
+        });
+        mockFetch({ '/explorer/api/rugged-pine-42': { status: 500 } });
+        loadSync();
+        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
+        // merge runs only inside the res.ok branch → local row survives unchanged
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-1' }]);
+    });
+
+    // Finding 2b: init Case 3 (no flag, empty storage, URL + token) — server 500.
+    // _token is set before the fetch; a non-ok GET must reset it to null, stay
+    // anonymous, populate nothing, and not throw.
+    test('init Case 3: server 500 during auto-load resets token, stays anonymous, populates nothing', async () => {
+        setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
+        setLocalStorage({});
+        mockFetch({ '/explorer/api/rugged-pine-42': { status: 500 } });
+        loadSync();
+        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
+        expect(localStorage.getItem('walk_visits')).toBeNull();
+        expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
+    });
+
+    // Finding 3: the window 'online' handler resets backoff and reschedules a flush.
+    // Uses a unique username so only THIS instance's handler can satisfy the
+    // assertion (the test harness re-runs the IIFE per loadSync(), leaving stale
+    // 'online' listeners bound to other usernames on the shared window).
+    test('online event triggers a flush of the pending outbox', async () => {
+        await setupAccepted('windy-creek-9');
+        // Stale 'online' listeners from prior loadSync() instances also fire and
+        // flush the shared outbox to their own (404) paths — silence that noise.
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        localStorage.setItem('walk_sync_outbox', JSON.stringify([
+            { section: 'visits', op: 'put', id: 'uuid-on', data: { id: 'uuid-on' }, attempts: 0 },
+        ]));
+        mockFetch({ 'PUT /explorer/api/windy-creek-9/visits/uuid-on': { status: 204 } });
+        window.dispatchEvent(new Event('online'));
+        await flushPromises();
+        const putCall = global.fetch.mock.calls.find(
+            c => (c[1] && c[1].method) === 'PUT' && c[0] === '/explorer/api/windy-creek-9/visits/uuid-on'
+        );
+        expect(putCall).toBeTruthy();
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
+    });
+
+    // Finding 4: deleteAccount rejects when the server returns non-ok, and leaves
+    // the local flag/state intact (no partial teardown).
+    test('deleteAccount: rejects on server 500 and does not clear local state', async () => {
+        await setupAccepted('rugged-pine-42');
+        mockFetch({ 'DELETE /explorer/api/rugged-pine-42': { status: 500 } });
+        await expect(window.ExplorerSync.deleteAccount()).rejects.toThrow();
+        expect(localStorage.getItem('walk_cloud_backup')).not.toBeNull();
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
+    });
+
+    // Finding 5: init Case 4/5 with a DIFFERENT stored user builds the
+    // 'Switching to account X from Y' confirm message. The accept variant is
+    // covered by '#1566 account switch'; this pins the message via the
+    // (otherwise-untested) cancel path.
+    test('init Case 4/5: switching accounts shows both usernames; cancel strips URL and loads nothing', async () => {
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+        });
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        const replaceSpy = vi.spyOn(history, 'replaceState');
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(confirmSpy.mock.calls[0][0]).toContain('Switching to account mossy-fern-7 from rugged-pine-42');
+        // cancel: URL reset, no GET issued, local data preserved, state falls back
+        expect(replaceSpy).toHaveBeenCalledWith(null, '', '/explorer/');
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
+        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+    });
+
+    // Finding 6: deleteAccount is a no-op that resolves without a request when
+    // anonymous (no _username).
+    test('deleteAccount: resolves without fetching when anonymous', async () => {
+        setupAnonymous();
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        await expect(window.ExplorerSync.deleteAccount()).resolves.toBeUndefined();
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    // Finding 7: two back-to-back mutations must not double-flush the first entry.
+    // A never-resolving fetch keeps the first flush in-flight; the doFlush
+    // _flushing guard collapses the duplicate schedule to a single request.
+    test('back-to-back mutations issue only one in-flight request for the first entry', async () => {
+        await setupAccepted('rugged-pine-42');
+        global.fetch = vi.fn(() => new Promise(() => {})); // hangs → flush stays in-flight
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-2', { id: 'uuid-2' });
+        await flushPromises();
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(global.fetch.mock.calls[0][0]).toBe('/explorer/api/rugged-pine-42/visits/uuid-1');
+    });
+
+    // Finding 8: isLocalStorageEmpty swallows JSON.parse errors and treats a
+    // corrupt section as empty (NOT as non-empty — the audit suggestion's
+    // "returns false" misreads the catch). Exercised via init Case 3, which only
+    // auto-loads when isLocalStorageEmpty() returns true. A throwing parse would
+    // propagate out of init and reject this await.
+    test('isLocalStorageEmpty treats a corrupt-JSON section as empty (catch branch) → Case 3 auto-loads', async () => {
+        setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
+        setLocalStorage({ walk_visits: '{ not valid json' });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [{ id: 'server-1' }], favorites: [], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'server-1' }]);
+    });
+});
