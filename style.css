@@ -893,9 +893,9 @@ input[type="range"]::-moz-range-thumb {
     50% { opacity: 1; transform: scale(1.2); }
 }
 
-/* ── Error / Success ───────────────────────────────────────────────────── */
+/* ── Notification (error / success / warning) ──────────────────────────── */
 
-.error {
+.notification {
     display: none;
     padding: 8px 10px;
     border-radius: var(--radius);
@@ -905,7 +905,7 @@ input[type="range"]::-moz-range-thumb {
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
-.error.active {
+.notification.active {
     display: block;
     animation: slideDownFade 0.18s ease-out both;
 }

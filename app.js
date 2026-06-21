@@ -1216,7 +1216,7 @@ async function generateDestination() {
 
     loadingEl.classList.add('active');
     btn.disabled = true;
-    document.getElementById('error').classList.remove('active');
+    document.getElementById('notification').classList.remove('active');
     currentSession = null;
     resetMarkVisitedBtn();
     const onProgress = msg => loadingEl.querySelector('p').textContent = msg;

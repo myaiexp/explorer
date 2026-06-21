@@ -5,7 +5,7 @@
  * it in the current realm via Node's vm module; its explicit globalThis
  * assignments expose the helpers.
  *
- * The #error element is replaced with a recording fake (via a document.getElementById
+ * The #notification element is replaced with a recording fake (via a document.getElementById
  * stub) so we capture the EXACT raw style writes / classList toggles / textContent
  * in order — independent of jsdom's color normalization (it rewrites #hex → rgb()).
  * That gives precise per-variant DOM-mutation-set parity with the original three
@@ -25,7 +25,7 @@ beforeAll(() => {
     new Function(SRC).call(window); // eslint-disable-line no-new-func
 });
 
-// A fake #error element that records every mutation in order.
+// A fake #notification element that records every mutation in order.
 function makeFakeError() {
     const writes = [];      // ordered [prop, value] style writes
     const classOps = [];    // ordered ['add'|'remove', name] classList ops
@@ -56,7 +56,7 @@ beforeEach(() => {
     vi.useFakeTimers();
     fakeEl = makeFakeError();
     origGetById = document.getElementById;
-    document.getElementById = (id) => (id === 'error' ? fakeEl : null);
+    document.getElementById = (id) => (id === 'notification' ? fakeEl : null);
 });
 
 afterEach(() => {

@@ -1,4 +1,4 @@
-// Transient #error toast — single showToast helper + named variant wrappers.
+// Transient #notification toast — single showToast helper + named variant wrappers.
 // Loaded before app.js; the ~30 call sites call showError/showSuccess/showWarning.
 
 // Per-variant config. `styles` is the exact set of inline style writes applied
@@ -34,7 +34,7 @@ const TOAST_VARIANTS = {
 
 function showToast(message, { variant = 'error' } = {}) {
     const config = TOAST_VARIANTS[variant];
-    const el = document.getElementById('error');
+    const el = document.getElementById('notification');
     el.textContent = message;
     for (const [prop, value] of Object.entries(config.styles)) {
         el.style[prop] = value;
