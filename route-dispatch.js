@@ -20,12 +20,16 @@
 //   buildingMessage  if set, emitted via onProgress before the one-way / plain
 //                    loop builds; smart loops report their own progress from
 //                    buildJunctionLoop, so the message is skipped there. default null
+//   spread           precomputed { offsetMult, viaTs } (computeSpreadParams);
+//                    forwarded to buildLoop / buildJunctionLoop so the routing
+//                    layer stays DOM-free. default undefined (those builders
+//                    fall back to the 50% params).
 //
 // Returns { outbound, return, junctions }. junctions is null except for the
 // smart-loop branch, which returns the pool buildJunctionLoop used or fetched.
 async function buildRouteForMode(startLat, startLng, destLat, destLng, {
     tripMode, smartRouting, winterMode, maxKm, onProgress,
-    cachedJunctions = null, buildingMessage = null,
+    cachedJunctions = null, buildingMessage = null, spread = undefined,
 } = {}) {
     if (tripMode === 'one-way') {
         if (buildingMessage && onProgress) onProgress(buildingMessage);
@@ -34,11 +38,11 @@ async function buildRouteForMode(startLat, startLng, destLat, destLng, {
     }
     if (smartRouting) {
         const result = await buildJunctionLoop(
-            startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode);
+            startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode, spread);
         return { outbound: result.outbound, return: result.return, junctions: result.junctions };
     }
     if (buildingMessage && onProgress) onProgress(buildingMessage);
-    const loop = await buildLoop(startLat, startLng, destLat, destLng);
+    const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);
     return { outbound: loop.outbound, return: loop.return, junctions: null };
 }
 

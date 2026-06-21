@@ -75,13 +75,14 @@ describe('buildRouteForMode dispatch', () => {
     test('round-trip + smartRouting → buildJunctionLoop with exact arg order', async () => {
         const onProgress = vi.fn();
         const cached = [{ lat: 60, lng: 24 }];
+        const spread = { offsetMult: 0.2, viaTs: [0.25, 0.5, 0.75] };
         const r = await globalThis.buildRouteForMode(60, 24, 61, 25, {
             tripMode: 'round', smartRouting: true, winterMode: true, maxKm: 12, onProgress,
-            cachedJunctions: cached, buildingMessage: 'Building route…',
+            cachedJunctions: cached, buildingMessage: 'Building route…', spread,
         });
         expect(buildJunctionLoop).toHaveBeenCalledTimes(1);
-        // signature: (startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode)
-        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, 12, onProgress, cached, true);
+        // signature: (startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode, spread)
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, 12, onProgress, cached, true, spread);
         expect(buildOneWay).not.toHaveBeenCalled();
         expect(buildLoop).not.toHaveBeenCalled();
         expect(r).toEqual({
@@ -97,8 +98,8 @@ describe('buildRouteForMode dispatch', () => {
         await globalThis.buildRouteForMode(60, 24, 61, 25, {
             tripMode: 'round', smartRouting: true, winterMode: false, onProgress: vi.fn(),
         });
-        // maxKm omitted from opts → forwarded as undefined
-        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, expect.any(Function), null, false);
+        // maxKm + spread omitted from opts → forwarded as undefined
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, expect.any(Function), null, false, undefined);
     });
 
     // ── Branch: plain loop ───────────────────────────────────────────────────
@@ -109,7 +110,8 @@ describe('buildRouteForMode dispatch', () => {
             buildingMessage: 'Building route…',
         });
         expect(buildLoop).toHaveBeenCalledTimes(1);
-        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25);
+        // signature: (startLat, startLng, destLat, destLng, spread); spread omitted → undefined
+        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined);
         expect(buildOneWay).not.toHaveBeenCalled();
         expect(buildJunctionLoop).not.toHaveBeenCalled();
         expect(r).toEqual({

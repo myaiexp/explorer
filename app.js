@@ -542,18 +542,25 @@ async function fetchRouteThrough(waypoints) {
     return tryOsrm(`${OSRM_FI_BASE}/${query}`);
 }
 
-// Read the spread slider (0-100) and return a continuous offset multiplier.
-// Always uses 3 via points at fixed t positions for consistent loop shape.
-// The slider only changes HOW FAR the vias are pushed sideways.
+// Map a spread-slider value (0-100) to a continuous offset multiplier. Pure —
+// no DOM — so the routing layer can be exercised in isolation. Always uses 3
+// via points at fixed t positions for consistent loop shape; the slider only
+// changes HOW FAR the vias are pushed sideways.
 //   0% → offsetMult ~0.03 (nearly straight, barely any loop)
 // 50% → offsetMult ~0.15 (gentle oval, default)
 // 100% → offsetMult ~0.40 (wide exploratory loop)
-function getSpreadParams() {
-    const raw = parseInt(document.getElementById('spreadSlider').value, 10) || 50;
+function computeSpreadParams(sliderValue) {
+    const raw = Number.isFinite(sliderValue) ? sliderValue : 50;
     const pct = raw / 100;
     // Quadratic curve: gentle changes near middle, steeper at extremes
     const offsetMult = 0.03 + pct * pct * 0.37;
     return { offsetMult, viaTs: [0.25, 0.5, 0.75] };
+}
+
+// UI-layer wrapper: read the spread slider and compute its params. Call sites
+// pass the result into the routing layer so the routing functions stay DOM-free.
+function getSpreadParams() {
+    return computeSpreadParams(parseInt(document.getElementById('spreadSlider').value, 10));
 }
 
 // Internal: OSRM /nearest call. Returns {lat, lng} or null on any failure.
@@ -608,16 +615,31 @@ async function screeningTableFn(start, candidates) {
     });
 }
 
+// Shared geometry for the two loop builders. Derives the per-side offset, the
+// A/B endpoints, the via t-positions, and the snap radius (half the offset,
+// floored at 0.3 km) from start/dest + the spread params. Pure — no DOM.
+function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
+    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+    // Defensive default to the 50% params if a caller omits spread — keeps this
+    // pure (no DOM) while every real call path passes an explicit spread.
+    const { offsetMult, viaTs } = spread || computeSpreadParams(50);
+    const offsetKm = Math.max(0.1, straightDist * offsetMult);
+    return {
+        offsetKm,
+        viaTs,
+        A: { lat: startLat, lng: startLng },
+        B: { lat: destLat,  lng: destLng },
+        snapRadius: Math.max(0.3, offsetKm * 0.5),
+    };
+}
+
 // Build a full oval loop: A → (right vias) → B → (left vias) → A.
 // Returns { outbound, return } where each is {coords, duration, distance} or null.
 // Builds a single chirality (right-side out, left-side back); buildJunctionLoop
 // is the variant that tries both chiralities and picks the lower-overlap one.
-async function buildLoop(startLat, startLng, destLat, destLng) {
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    const { offsetMult, viaTs } = getSpreadParams();
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
-    const A = { lat: startLat, lng: startLng };
-    const B = { lat: destLat,  lng: destLng };
+// `spread` is the precomputed { offsetMult, viaTs } from computeSpreadParams.
+async function buildLoop(startLat, startLng, destLat, destLng, spread) {
+    const { offsetKm, viaTs, A, B, snapRadius } = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
 
     // Generate via points on each side using sin-envelope
     const viasRight = viaTs.map(t =>
@@ -626,7 +648,6 @@ async function buildLoop(startLat, startLng, destLat, destLng) {
         envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
 
     // Snap all 6 vias to nearest roads in parallel (threshold: half the offset distance)
-    const snapRadius = Math.max(0.3, offsetKm * 0.5);
     const allVias = [...viasRight, ...viasLeftReturn];
     const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
     const snappedRight = snapped.slice(0, 3);
@@ -716,12 +737,8 @@ function pickBetterLoop(outA, retA, outB, retB) {
 // cachedJunctions: pass a previously returned `junctions` to skip Overpass.
 // maxKm: the caller's max-distance budget — forwarded to fetchCorridorJunctions
 // for the start-anchored cache key (replaces a former DOM read in that helper).
-async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions = null, winterMode = false) {
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    const { offsetMult, viaTs } = getSpreadParams();
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
-    const A = { lat: startLat, lng: startLng };
-    const B = { lat: destLat,  lng: destLng };
+async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions = null, winterMode = false, spread = undefined) {
+    const { offsetKm, viaTs, A, B, snapRadius } = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
 
     // Forward-order vias on each side. Reversal happens at call time on the
     // leg that needs it (return-direction leg).
@@ -736,12 +753,11 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, on
             onProgress('Searching for junctions…');
             junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode);
         } catch {
-            const loop = await buildLoop(startLat, startLng, destLat, destLng);
+            const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);
             return { outbound: loop.outbound, return: loop.return, overlap: null, junctions: null };
         }
     }
 
-    const snapRadius = Math.max(0.3, offsetKm * 0.5);
     const snappedRight = viasRight.map(v => snapToJunction(v, junctions, snapRadius));
     const snappedLeft  = viasLeft .map(v => snapToJunction(v, junctions, snapRadius));
 
@@ -754,7 +770,7 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, on
     ]);
     const picked = pickBetterLoop(outA, retA, outB, retB);
     if (!picked.outbound || !picked.return) {
-        const loop = await buildLoop(startLat, startLng, destLat, destLng);
+        const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);
         return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };
     }
     return { ...picked, junctions };
@@ -1302,7 +1318,7 @@ async function screenCandidatePool(startLat, startLng, candidatePool, dest, dest
 // keeping the lowest-overlap result. Stops early once a loop beats the overlap
 // threshold. Returns the best { dest, destName, outbound, return, overlap,
 // junctions } seen, or null if nothing was built.
-async function findBestLoop(startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, onProgress) {
+async function findBestLoop(startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress) {
     const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
     const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
 
@@ -1317,7 +1333,7 @@ async function findBestLoop(startLat, startLng, candidatePool, dest, existingDes
             ? `Building route… (attempt ${i + 1}/${retryBudget})`
             : 'Building route…');
         const result = await buildJunctionLoop(startLat, startLng,
-            tryDest.lat, tryDest.lng, maxKm, onProgress, cachedJunctions, winterMode);
+            tryDest.lat, tryDest.lng, maxKm, onProgress, cachedJunctions, winterMode, spread);
         if (cachedJunctions === null) cachedJunctions = result.junctions;
 
         const candidate = {
@@ -1386,12 +1402,14 @@ async function generateDestination() {
             const waterLocked = screened.waterLocked;
 
             // Build route. Smart round-trips run the novelty-retry loop; one-way
-            // and plain loops dispatch straight through buildRouteForMode.
+            // and plain loops dispatch straight through buildRouteForMode. The
+            // spread is read from the DOM here (UI layer) and passed down.
+            const spread = getSpreadParams();
             let outboundRoute, returnRoute, junctions = null, overlap = null;
             if (tripMode !== 'one-way' && document.getElementById('smartRouting').checked) {
                 const winterMode = document.getElementById('winterMode').checked;
                 const best = await findBestLoop(
-                    startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, onProgress);
+                    startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress);
                 if (best) {
                     dest = best.dest;
                     destName = best.destName;
@@ -1403,7 +1421,7 @@ async function generateDestination() {
             } else {
                 const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
                     tripMode, smartRouting: false, winterMode: false, onProgress,
-                    buildingMessage: 'Building route…',
+                    buildingMessage: 'Building route…', spread,
                 });
                 outboundRoute = r.outbound;
                 returnRoute = r.return;
@@ -1475,6 +1493,7 @@ async function handlePickClick(e) {
                 onProgress,
                 cachedJunctions: null,
                 buildingMessage: 'Building route…',
+                spread: getSpreadParams(),
             });
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                          r.outbound, r.return, locInput, null, tripMode);
@@ -1885,6 +1904,7 @@ async function restoreFromHash() {
                 onProgress,
                 cachedJunctions: null,
                 buildingMessage: null,
+                spread: getSpreadParams(),
             });
             displayRoute(startLat, startLng, destLat, destLng, 0, 0,
                          r.outbound, r.return, s, n, m);
@@ -2078,6 +2098,7 @@ async function rerouteWithCurrentSpread() {
                 onProgress,
                 cachedJunctions: junctions,
                 buildingMessage: null,
+                spread: getSpreadParams(),
             });
             const outbound = r.outbound;
             const ret = r.return;
