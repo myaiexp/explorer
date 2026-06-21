@@ -1212,199 +1212,216 @@ async function resolveStart() {
     return { startLat, startLng, locationInput };
 }
 
+// ─── Destination resolution ──────────────────────────────────────────────────
+
+// A pool of fully random points in the annulus — the fallback when Overpass
+// fails or returns nothing, and the pool for 'any' (random-point-anywhere).
+function randomCandidatePool(startLat, startLng, straightMin, straightMax) {
+    return Array.from({ length: RANDOM_POOL_SIZE }, () =>
+        generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+}
+
+// Resolve the destination candidate pool for the chosen locationType. POI/road
+// strategies hit Overpass and fall back to a random annulus pool on failure or
+// empty result; 'any' goes straight to a random pool. Returns the full pool plus
+// an initial novelty pick: { candidatePool, dest, destName }.
+async function resolveCandidatePool(locationType, locationTypeVal, startLat, startLng, straightMin, straightMax, onProgress, existingDests) {
+    if (locationType === 'roads') {
+        onProgress('Searching for roads in the area…');
+        try {
+            const winterMode = document.getElementById('winterMode').checked;
+            const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
+            if (roads.length === 0) throw new Error('empty');
+            const candidatePool = capPool(roads);
+            return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+        } catch {
+            onProgress('Overpass unavailable, using random point…');
+            const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
+            return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+        }
+    }
+    if (locationType === 'any_poi' || locationType === 'poi') {
+        const filters = locationType === 'any_poi'
+            ? POI_TYPES.map(p => p.filter)
+            : [POI_TYPES.find(p => p.key === locationTypeVal)?.filter].filter(Boolean);
+        const label = locationType === 'any_poi'
+            ? 'any POI'
+            : POI_TYPES.find(p => p.key === locationTypeVal)?.label || 'places';
+        onProgress(`Searching for ${label}…`);
+        try {
+            const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
+            if (pois.length === 0) throw new Error('empty');
+            const candidatePool = capPool(pois);
+            const dest = pickMostNovelDestination(candidatePool, existingDests);
+            return { candidatePool, dest, destName: dest.name };
+        } catch {
+            onProgress('Overpass unavailable, using random point…');
+            const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
+            return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+        }
+    }
+    // locationType === 'any': a fully random point anywhere in the annulus.
+    const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
+    return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+}
+
+// Screen the candidate pool for water-reachability before route building.
+// Survivors replace the pool and get a fresh novelty pick; if none survive, the
+// best-rejected candidate is used and waterLocked is flagged. On screening
+// failure (or no screened result) the unscreened pool/dest/destName pass through
+// unchanged. Returns { candidatePool, dest, destName, waterLocked }.
+async function screenCandidatePool(startLat, startLng, candidatePool, dest, destName, existingDests, onProgress) {
+    try {
+        onProgress('Checking reachability…');
+        const screened = await screenCandidates(
+            { lat: startLat, lng: startLng },
+            candidatePool,
+            { tableFn: screeningTableFn }
+        );
+        if (screened.survivors.length > 0) {
+            const pool = screened.survivors;
+            const pick = pickMostNovelDestination(pool, existingDests);
+            return { candidatePool: pool, dest: pick, destName: pick.name || destName, waterLocked: false };
+        }
+        if (screened.bestRejected) {
+            return {
+                candidatePool: [screened.bestRejected],
+                dest: screened.bestRejected,
+                destName: screened.bestRejected.name || destName,
+                waterLocked: true,
+            };
+        }
+    } catch (err) {
+        console.warn('Screening failed, falling back to unscreened pool:', err);
+    }
+    return { candidatePool, dest, destName, waterLocked: false };
+}
+
+// Smart-routing retry loop: rank the pool by novelty and build a junction loop
+// for each candidate (reusing the corridor junction pool across attempts),
+// keeping the lowest-overlap result. Stops early once a loop beats the overlap
+// threshold. Returns the best { dest, destName, outbound, return, overlap,
+// junctions } seen, or null if nothing was built.
+async function findBestLoop(startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, onProgress) {
+    const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
+    const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
+
+    let cachedJunctions = null;
+    let bestSeen = null;
+
+    for (let i = 0; i < retryBudget; i++) {
+        const tryDest = ranked[i];
+        if (!tryDest) break;
+
+        onProgress(retryBudget > 1
+            ? `Building route… (attempt ${i + 1}/${retryBudget})`
+            : 'Building route…');
+        const result = await buildJunctionLoop(startLat, startLng,
+            tryDest.lat, tryDest.lng, maxKm, onProgress, cachedJunctions, winterMode);
+        if (cachedJunctions === null) cachedJunctions = result.junctions;
+
+        const candidate = {
+            dest: tryDest,
+            destName: tryDest.name || null,
+            outbound: result.outbound,
+            return: result.return,
+            overlap: result.overlap,
+            junctions: result.junctions,
+        };
+        if (!bestSeen
+            || (candidate.overlap !== null
+                && (bestSeen.overlap === null || candidate.overlap < bestSeen.overlap))) {
+            bestSeen = candidate;
+        }
+
+        if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
+    }
+    return bestSeen;
+}
+
 // ─── Main: generate random destination ───────────────────────────────────────
 
 async function generateDestination() {
     const minKm = parseFloat(document.getElementById('minDistance').value) || 0;
     const maxKm = parseFloat(document.getElementById('maxDistance').value);
-    const loadingEl = document.getElementById('loading');
-    const btn = document.getElementById('generateBtn');
 
     if (isNaN(maxKm) || maxKm <= 0) { showError('Please enter a valid maximum distance greater than 0.'); return; }
     if (minKm < 0) { showError('Minimum distance cannot be negative.'); return; }
     if (minKm >= maxKm) { showError('Minimum distance must be less than maximum distance.'); return; }
 
-    loadingEl.classList.add('active');
-    btn.disabled = true;
     document.getElementById('notification').classList.remove('active');
     currentSession = null;
     resetMarkVisitedBtn();
+    const loadingEl = document.getElementById('loading');
     const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
 
-    try {
-        const { startLat, startLng, locationInput } = await resolveStart();
-        clearMap();
-
-        const existingDests = getAllExistingDestinations();
-
-        const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
-        const locationTypeVal = document.getElementById('locationTypeSelect').value;
-        // Map the dropdown value to a routing strategy. Every case is listed
-        // explicitly so 'any' is visible: it routes to the final else branch
-        // below (a fully random point anywhere), not to roads or POIs.
-        const locationType =
-            locationTypeVal === 'roads' ? 'roads'
-            : locationTypeVal === 'any_poi' ? 'any_poi'
-            : locationTypeVal === 'any' ? 'any'
-            : 'poi';
-
-        // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
-        const scale = tripMode === 'one-way' ? 1.3 : 2.6;
-        const straightMin = minKm / scale;
-        const straightMax = maxKm / scale;
-        let dest;
-        let destName = null;
-        // Phase 2: capture the candidate pool that produced `dest` so the
-        // smart-routing branch can re-rank it for retries without re-fetching.
-        let candidatePool = null;
-
-        if (locationType === 'roads') {
-            onProgress('Searching for roads in the area…');
-            try {
-                const winterMode = document.getElementById('winterMode').checked;
-                const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
-                if (roads.length === 0) throw new Error('empty');
-                candidatePool = capPool(roads);
-                dest = pickMostNovelDestination(candidatePool, existingDests);
-            } catch {
-                onProgress('Overpass unavailable, using random point…');
-                const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
-                    generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
-                candidatePool = candidates;
-                dest = pickMostNovelDestination(candidates, existingDests);
-            }
-        } else if (locationType === 'any_poi' || locationType === 'poi') {
-            const filters = locationType === 'any_poi'
-                ? POI_TYPES.map(p => p.filter)
-                : [POI_TYPES.find(p => p.key === locationTypeVal)?.filter].filter(Boolean);
-            const label = locationType === 'any_poi'
-                ? 'any POI'
-                : POI_TYPES.find(p => p.key === locationTypeVal)?.label || 'places';
-            onProgress(`Searching for ${label}…`);
-            try {
-                const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
-                if (pois.length === 0) throw new Error('empty');
-                candidatePool = capPool(pois);
-                dest = pickMostNovelDestination(candidatePool, existingDests);
-                destName = dest.name;
-            } catch {
-                onProgress('Overpass unavailable, using random point…');
-                const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
-                    generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
-                candidatePool = candidates;
-                dest = pickMostNovelDestination(candidates, existingDests);
-            }
-        } else {
-            // locationType === 'any': a fully random point anywhere in the annulus.
-            const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
-                generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
-            candidatePool = candidates;
-            dest = pickMostNovelDestination(candidates, existingDests);
-        }
-
-        // Screen candidates for water-reachability before route building.
-        let waterLocked = false;
+    await withLoading(async () => {
         try {
-            onProgress('Checking reachability…');
-            const screened = await screenCandidates(
-                { lat: startLat, lng: startLng },
-                candidatePool,
-                { tableFn: screeningTableFn }
-            );
-            if (screened.survivors.length > 0) {
-                candidatePool = screened.survivors;
-                dest = pickMostNovelDestination(candidatePool, existingDests);
-                destName = dest.name || destName;
-            } else if (screened.bestRejected) {
-                candidatePool = [screened.bestRejected];
-                dest = screened.bestRejected;
-                destName = dest.name || destName;
-                waterLocked = true;
-            }
-        } catch (err) {
-            console.warn('Screening failed, falling back to unscreened pool:', err);
-        }
+            const { startLat, startLng, locationInput } = await resolveStart();
+            clearMap();
 
-        // Build route
-        let outboundRoute, returnRoute, junctions = null;
-        let overlap = null;
-        if (tripMode === 'one-way') {
-            const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
-                tripMode, smartRouting: false, winterMode: false, onProgress,
-                buildingMessage: 'Building route…',
-            });
-            outboundRoute = r.outbound;
-            returnRoute = r.return;
-        } else if (document.getElementById('smartRouting').checked) {
-            const winterMode = document.getElementById('winterMode').checked;
-            const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
-            const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
+            const existingDests = getAllExistingDestinations();
+            const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
+            const locationTypeVal = document.getElementById('locationTypeSelect').value;
+            // Map the dropdown value to a routing strategy. Every case is listed
+            // explicitly so 'any' is visible: it resolves to a fully random point
+            // anywhere, not to roads or POIs.
+            const locationType =
+                locationTypeVal === 'roads' ? 'roads'
+                : locationTypeVal === 'any_poi' ? 'any_poi'
+                : locationTypeVal === 'any' ? 'any'
+                : 'poi';
 
-            let cachedJunctions = null;
-            let bestSeen = null;
+            // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
+            const scale = tripMode === 'one-way' ? 1.3 : 2.6;
+            const straightMin = minKm / scale;
+            const straightMax = maxKm / scale;
 
-            for (let i = 0; i < retryBudget; i++) {
-                const tryDest = ranked[i];
-                if (!tryDest) break;
+            // Resolve a candidate pool, then screen it for water-reachability.
+            const resolved = await resolveCandidatePool(
+                locationType, locationTypeVal, startLat, startLng, straightMin, straightMax, onProgress, existingDests);
+            const screened = await screenCandidatePool(
+                startLat, startLng, resolved.candidatePool, resolved.dest, resolved.destName, existingDests, onProgress);
+            let { candidatePool, dest, destName } = screened;
+            const waterLocked = screened.waterLocked;
 
-                onProgress(retryBudget > 1
-                    ? `Building route… (attempt ${i + 1}/${retryBudget})`
-                    : 'Building route…');
-                const result = await buildJunctionLoop(startLat, startLng,
-                    tryDest.lat, tryDest.lng, maxKm, onProgress, cachedJunctions, winterMode);
-                if (cachedJunctions === null) cachedJunctions = result.junctions;
-
-                const candidate = {
-                    dest: tryDest,
-                    destName: tryDest.name || null,
-                    outbound: result.outbound,
-                    return: result.return,
-                    overlap: result.overlap,
-                    junctions: result.junctions,
-                };
-                if (!bestSeen
-                    || (candidate.overlap !== null
-                        && (bestSeen.overlap === null || candidate.overlap < bestSeen.overlap))) {
-                    bestSeen = candidate;
+            // Build route. Smart round-trips run the novelty-retry loop; one-way
+            // and plain loops dispatch straight through buildRouteForMode.
+            let outboundRoute, returnRoute, junctions = null, overlap = null;
+            if (tripMode !== 'one-way' && document.getElementById('smartRouting').checked) {
+                const winterMode = document.getElementById('winterMode').checked;
+                const best = await findBestLoop(
+                    startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, onProgress);
+                if (best) {
+                    dest = best.dest;
+                    destName = best.destName;
+                    outboundRoute = best.outbound;
+                    returnRoute = best.return;
+                    junctions = best.junctions;
+                    overlap = best.overlap;
                 }
-
-                if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
+            } else {
+                const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
+                    tripMode, smartRouting: false, winterMode: false, onProgress,
+                    buildingMessage: 'Building route…',
+                });
+                outboundRoute = r.outbound;
+                returnRoute = r.return;
             }
 
-            if (bestSeen) {
-                dest = bestSeen.dest;
-                destName = bestSeen.destName;
-                outboundRoute = bestSeen.outbound;
-                returnRoute = bestSeen.return;
-                junctions = bestSeen.junctions;
-                overlap = bestSeen.overlap;
+            displayRoute(startLat, startLng, dest.lat, dest.lng,
+                         straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode);
+            if (currentSession) currentSession.junctions = junctions;
+
+            if (waterLocked) {
+                showWarning('This area is mostly water — try a different start or larger radius.');
+            } else if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
+                showWarning('This area has limited routing options — the loop overlaps significantly.');
             }
-        } else {
-            const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
-                tripMode, smartRouting: false, winterMode: false, onProgress,
-                buildingMessage: 'Building route…',
-            });
-            outboundRoute = r.outbound;
-            returnRoute = r.return;
+        } catch (error) {
+            showError(error.message || 'An error occurred. Please try again.');
         }
-
-        displayRoute(startLat, startLng, dest.lat, dest.lng,
-                     straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode);
-        if (currentSession) currentSession.junctions = junctions;
-
-        if (waterLocked) {
-            showWarning('This area is mostly water — try a different start or larger radius.');
-        } else if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
-            showWarning('This area has limited routing options — the loop overlaps significantly.');
-        }
-
-    } catch (error) {
-        showError(error.message || 'An error occurred. Please try again.');
-    } finally {
-        loadingEl.classList.remove('active');
-        loadingEl.querySelector('p').textContent = 'Finding your random destination…';
-        btn.disabled = false;
-    }
+    });
 }
 
 // ─── Surprise me ─────────────────────────────────────────────────────────────
