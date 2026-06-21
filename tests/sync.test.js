@@ -139,7 +139,7 @@ describe('ExplorerSync.init', () => {
         expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
     });
 
-    test('URL segment + token fragment with empty localStorage auto-loads without confirm', async () => {
+    test('URL segment + token fragment with empty localStorage loads after consent', async () => {
         setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({});
         mockFetch({
@@ -148,15 +148,39 @@ describe('ExplorerSync.init', () => {
                 favorites: [], savedLocations: [], history: [],
             },
         });
-        const confirmSpy = vi.spyOn(window, 'confirm');
+        // Adopting a URL-sourced account binds this browser to it, so it requires
+        // explicit consent even on an empty device (shared-link hijack guard).
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
         loadSync();
         await window.ExplorerSync.init();
-        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(confirmSpy.mock.calls[0][0]).toContain('Load shared backup account rugged-pine-42');
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toHaveLength(1);
         expect(window.ExplorerSync.getState().state).toBe('accepted');
-        // The token from the fragment is captured and persisted to the flag.
+        // The token from the fragment is captured and persisted to the record.
         expect(window.ExplorerSync.getState().token).toBe('tok-rp42');
         expect(JSON.parse(localStorage.getItem('walk_cloud_backup')).token).toBe('tok-rp42');
+    });
+
+    test('URL segment + token on a fresh device: declining consent stays anonymous and uploads nothing', async () => {
+        // Security regression (audit): opening someone else's shared link must not
+        // silently bind a fresh browser to their account. Declining the prompt
+        // issues no request, strips the URL, and leaves the browser anonymous so
+        // no future mutation can sync to the link owner's account.
+        setLocation('/explorer/evil-acct-1', '#t=tok-evil');
+        setLocalStorage({});
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        const replaceSpy = vi.spyOn(history, 'replaceState');
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(confirmSpy).toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(replaceSpy).toHaveBeenCalledWith(null, '', '/explorer/');
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
+        expect(localStorage.getItem('walk_visits')).toBeNull();
+        expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
     });
 
     test('URL segment WITHOUT token fragment on a fresh device does NOT auto-load', async () => {
@@ -589,6 +613,26 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         ]);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
     });
+
+    test('_outbox.flush() resolves once the queue drains (event-based, not polled)', async () => {
+        await setupAccepted('rugged-pine-42');
+        mockFetch({
+            'PUT /explorer/api/rugged-pine-42/visits/uuid-1': { status: 204 },
+            'PUT /explorer/api/rugged-pine-42/visits/uuid-2': { status: 204 },
+        });
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-2', { id: 'uuid-2' });
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(2);
+        // Awaiting the returned promise must resolve when settleFlushWaiters fires
+        // on the fully-drained outbox — no 10 ms polling tick involved.
+        await window.ExplorerSync._outbox.flush();
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
+    });
+
+    test('_outbox.flush() resolves immediately when the outbox is already empty', async () => {
+        await setupAccepted('rugged-pine-42');
+        await expect(window.ExplorerSync._outbox.flush()).resolves.toBeUndefined();
+    });
 });
 
 // ── init/flush coverage gaps (audit) ──────────────────────────────────────────
@@ -638,6 +682,7 @@ describe('ExplorerSync coverage gaps (audit)', () => {
     test('init Case 3: server 500 during auto-load resets token, stays anonymous, populates nothing', async () => {
         setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({});
+        vi.spyOn(window, 'confirm').mockReturnValue(true);   // consent to adopt, then fetch 500s
         mockFetch({ '/explorer/api/rugged-pine-42': { status: 500 } });
         loadSync();
         await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
@@ -734,6 +779,7 @@ describe('ExplorerSync coverage gaps (audit)', () => {
     test('isLocalStorageEmpty treats a corrupt-JSON section as empty (catch branch) → Case 3 auto-loads', async () => {
         setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({ walk_visits: '{ not valid json' });
+        vi.spyOn(window, 'confirm').mockReturnValue(true);   // Case 3 now consent-gated
         mockFetch({
             '/explorer/api/rugged-pine-42': {
                 visits: [{ id: 'server-1' }], favorites: [], savedLocations: [], history: [],

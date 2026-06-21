@@ -29,11 +29,15 @@
     var _flushing = false;
     var _backoffMs = 0;
     var _backoffTimer = null;
+    var _flushWaiters = [];     // resolve callbacks awaiting a fully-drained outbox
     var BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 60000];
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
-    function readFlag() {
+    // The consent record persisted under BACKUP_KEY is not a boolean: it is
+    // { state: 'accepted'|'declined', username?, token? } — the user's
+    // backup-consent decision plus the account it is bound to.
+    function readConsentRecord() {
         try {
             var raw = localStorage.getItem(BACKUP_KEY);
             return raw ? JSON.parse(raw) : null;
@@ -42,11 +46,11 @@
         }
     }
 
-    function writeFlag(obj) {
+    function writeConsentRecord(obj) {
         localStorage.setItem(BACKUP_KEY, JSON.stringify(obj));
     }
 
-    function clearFlag() {
+    function clearConsentRecord() {
         localStorage.removeItem(BACKUP_KEY);
     }
 
@@ -125,9 +129,9 @@
             if (!existing) {
                 byId[row.id] = row;
             } else {
-                var et = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-                var rt = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
-                if (rt >= et) { byId[row.id] = row; }
+                var existingTs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+                var rowTs = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+                if (rowTs >= existingTs) { byId[row.id] = row; }
             }
         });
         var merged = Object.keys(byId).map(function (id) { return byId[id]; });
@@ -181,11 +185,35 @@
         return BACKOFF_STEPS[BACKOFF_STEPS.length - 1];
     }
 
+    // Resolve any pending _outbox.flush() promises once the queue is fully
+    // drained and no flush is in flight. The event-based completion signal that
+    // replaces the old 10 ms polling loop.
+    function settleFlushWaiters() {
+        if (_flushing) { return; }
+        if (parseOutbox().length > 0) { return; }
+        var waiters = _flushWaiters;
+        _flushWaiters = [];
+        for (var i = 0; i < waiters.length; i++) { waiters[i](); }
+    }
+
+    // Drop the head entry just processed (re-reading the outbox so a concurrent
+    // mutate() enqueued during the in-flight request is preserved), persist, and
+    // either reschedule for the next entry or signal flush completion.
+    function consumeOutboxHead() {
+        var remaining = parseOutbox();
+        remaining.shift();
+        saveOutbox(remaining);
+        if (remaining.length > 0) {
+            scheduleFlush(0);
+        }
+        settleFlushWaiters();
+    }
+
     function doFlush() {
         if (_flushing) { return; }
-        if (_state !== 'accepted' || !_username) { return; }
+        if (_state !== 'accepted' || !_username) { settleFlushWaiters(); return; }
         var outbox = parseOutbox();
-        if (outbox.length === 0) { return; }
+        if (outbox.length === 0) { settleFlushWaiters(); return; }
 
         _flushing = true;
         var entry = outbox[0];
@@ -198,12 +226,7 @@
             _backoffMs = 0;
 
             if (res.status >= 200 && res.status < 300) {
-                var current = parseOutbox();
-                current.shift();
-                saveOutbox(current);
-                if (current.length > 0) {
-                    scheduleFlush(0);
-                }
+                consumeOutboxHead();
                 return;
             }
 
@@ -215,12 +238,7 @@
 
             if (res.status >= 400 && res.status < 500) {
                 console.warn('[ExplorerSync] Dropping outbox entry due to ' + res.status, entry);
-                var current2 = parseOutbox();
-                current2.shift();
-                saveOutbox(current2);
-                if (current2.length > 0) {
-                    scheduleFlush(0);
-                }
+                consumeOutboxHead();
                 return;
             }
 
@@ -251,7 +269,7 @@
     var ExplorerSync = {
 
         init: function () {
-            var flag = readFlag();
+            var flag = readConsentRecord();
             var urlUser = parseUrlUsername();
             var urlToken = parseUrlToken();
 
@@ -301,8 +319,25 @@
                 return Promise.resolve();
             }
 
-            // Case 3: URL segment + token, no flag, localStorage empty → auto-load
+            // Case 3: URL segment + token, no flag, localStorage empty.
+            // Loading a URL-sourced account binds this browser to it: every
+            // future walk, favourite, and saved location syncs there, and anyone
+            // holding the link can read it back. Even on an empty device this
+            // must be consented to — otherwise a shared link silently hijacks a
+            // fresh browser into uploading the visitor's data to a foreign
+            // account. Gate it with the same confirm used for Cases 4/5.
             if (!flag && isLocalStorageEmpty()) {
+                var adoptConfirmed = window.confirm(
+                    'Load shared backup account ' + urlUser + '?\n\n' +
+                    'Your walks, favourites, and saved locations on this device will ' +
+                    'be backed up to this account, which anyone holding its link can read.\n\n' +
+                    '[Continue / Cancel]'
+                );
+                if (!adoptConfirmed) {
+                    history.replaceState(null, '', '/explorer/');
+                    _state = 'anonymous';
+                    return Promise.resolve();
+                }
                 _token = urlToken;
                 return apiFetch('GET', '/' + urlUser).then(function (res) {
                     if (!res.ok) { _token = null; return; }
@@ -310,7 +345,7 @@
                         ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
                             if (Array.isArray(data[s])) { populateSection(s, data[s]); }
                         });
-                        writeFlag({ state: 'accepted', username: urlUser, token: urlToken });
+                        writeConsentRecord({ state: 'accepted', username: urlUser, token: urlToken });
                         _state = 'accepted';
                         _username = urlUser;
                         fireStateChange();
@@ -340,7 +375,7 @@
                     ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
                         if (Array.isArray(data[s])) { populateSection(s, data[s]); }
                     });
-                    writeFlag({ state: 'accepted', username: urlUser, token: urlToken });
+                    writeConsentRecord({ state: 'accepted', username: urlUser, token: urlToken });
                     _state = 'accepted';
                     _username = urlUser;
                     fireStateChange();
@@ -413,7 +448,7 @@
 
                 return apiFetch('POST', '/' + username + '/import', payload).then(function (res2) {
                     if (!res2.ok) { throw new Error('POST /import failed: ' + res2.status); }
-                    writeFlag({ state: 'accepted', username: username, token: token });
+                    writeConsentRecord({ state: 'accepted', username: username, token: token });
                     _state = 'accepted';
                     _username = username;
                     // Carry the secret in the fragment so the link itself is the credential.
@@ -427,7 +462,7 @@
         },
 
         decline: function () {
-            writeFlag({ state: 'declined' });
+            writeConsentRecord({ state: 'declined' });
             _state = 'declined';
             fireStateChange();
         },
@@ -437,7 +472,7 @@
             var usernameToDelete = _username;
             return apiFetch('DELETE', '/' + usernameToDelete).then(function (res) {
                 if (!res.ok) { throw new Error('DELETE account failed: ' + res.status); }
-                clearFlag();
+                clearConsentRecord();
                 clearOutbox();
                 _state = 'anonymous';
                 _username = null;
@@ -458,16 +493,15 @@
         _outbox: {
             peek: function () { return parseOutbox(); },
             flush: function () {
+                // Resolves when the outbox is fully drained. Completion is signalled
+                // through the flush machinery (settleFlushWaiters) rather than polled.
                 return new Promise(function (resolve) {
-                    var check = function () {
-                        if (!_flushing && parseOutbox().length === 0) {
-                            resolve();
-                        } else {
-                            setTimeout(check, 10);
-                        }
-                    };
+                    if (!_flushing && parseOutbox().length === 0) {
+                        resolve();
+                        return;
+                    }
+                    _flushWaiters.push(resolve);
                     doFlush();
-                    check();
                 });
             }
         }
