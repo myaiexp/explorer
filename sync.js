@@ -25,6 +25,7 @@
 
     var _state = 'anonymous';   // 'anonymous' | 'accepted' | 'declined'
     var _username = null;
+    var _token = null;          // per-account secret; sent as Bearer on every request
     var _flushing = false;
     var _backoffMs = 0;
     var _backoffTimer = null;
@@ -72,6 +73,14 @@
         if (!m) { return null; }
         var candidate = m[1];
         return USERNAME_RE.test(candidate) ? candidate : null;
+    }
+
+    function parseUrlToken() {
+        // Secret token carried in the URL fragment as #t=<token>. Fragments are
+        // never sent to the server, so the token stays out of access logs and
+        // Referer headers — the full link is the private capability.
+        var m = (location.hash || '').match(/[#&]t=([^&]+)/);
+        return m ? decodeURIComponent(m[1]) : null;
     }
 
     function fireStateChange() {
@@ -138,9 +147,11 @@
     // ── Fetch helpers ────────────────────────────────────────────────────────────
 
     function apiFetch(method, path, body) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (_token) { headers['Authorization'] = 'Bearer ' + _token; }
         var opts = {
             method: method,
-            headers: { 'Content-Type': 'application/json' }
+            headers: headers
         };
         if (body !== undefined) {
             opts.body = JSON.stringify(body);
@@ -242,12 +253,14 @@
         init: function () {
             var flag = readFlag();
             var urlUser = parseUrlUsername();
+            var urlToken = parseUrlToken();
 
             // ── Case 1: no URL segment ──────────────────────────────────────────
             if (!urlUser) {
                 if (flag && flag.state === 'accepted') {
                     _state = 'accepted';
                     _username = flag.username;
+                    _token = flag.token || null;
                 } else if (flag && flag.state === 'declined') {
                     _state = 'declined';
                 } else {
@@ -258,10 +271,12 @@
 
             // ── Cases with URL segment ──────────────────────────────────────────
 
-            // Case 2: URL matches stored username
+            // Case 2: URL matches stored username — the credential comes from the
+            // stored flag (the user's own device), so a bare link still works here.
             if (flag && flag.state === 'accepted' && flag.username === urlUser) {
                 _state = 'accepted';
                 _username = urlUser;
+                _token = flag.token || urlToken || null;
                 return apiFetch('GET', '/' + urlUser).then(function (res) {
                     if (!res.ok) { return; }
                     return res.json().then(function (data) {
@@ -272,23 +287,38 @@
                 }).catch(function () { /* silent */ });
             }
 
-            // Case 3: URL segment present, no flag, localStorage empty → auto-load
+            // Loading a NEW/different account from the URL requires the secret
+            // token from the link fragment. A bare link on a fresh device has no
+            // credential, so there is nothing to load — keep current local state.
+            if (!urlToken) {
+                if (flag && flag.state === 'accepted') {
+                    _state = 'accepted';
+                    _username = flag.username;
+                    _token = flag.token || null;
+                } else {
+                    _state = flag && flag.state === 'declined' ? 'declined' : 'anonymous';
+                }
+                return Promise.resolve();
+            }
+
+            // Case 3: URL segment + token, no flag, localStorage empty → auto-load
             if (!flag && isLocalStorageEmpty()) {
+                _token = urlToken;
                 return apiFetch('GET', '/' + urlUser).then(function (res) {
-                    if (!res.ok) { return; }
+                    if (!res.ok) { _token = null; return; }
                     return res.json().then(function (data) {
                         ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
                             if (Array.isArray(data[s])) { populateSection(s, data[s]); }
                         });
-                        writeFlag({ state: 'accepted', username: urlUser });
+                        writeFlag({ state: 'accepted', username: urlUser, token: urlToken });
                         _state = 'accepted';
                         _username = urlUser;
                         fireStateChange();
                     });
-                }).catch(function () { /* silent */ });
+                }).catch(function () { _token = null; });
             }
 
-            // Case 4/5: URL segment with non-empty localStorage or different stored user
+            // Case 4/5: URL segment + token with non-empty localStorage or different stored user
             var storedUser = (flag && flag.state === 'accepted') ? flag.username : null;
             var msg = storedUser
                 ? 'Switching to account ' + urlUser + ' from ' + storedUser + ' — your local data will be replaced.'
@@ -302,25 +332,31 @@
             }
 
             // Confirmed — wipe and load
+            _token = urlToken;
             wipeSections();
             return apiFetch('GET', '/' + urlUser).then(function (res) {
-                if (!res.ok) { return; }
+                if (!res.ok) { _token = null; return; }
                 return res.json().then(function (data) {
                     ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
                         if (Array.isArray(data[s])) { populateSection(s, data[s]); }
                     });
-                    writeFlag({ state: 'accepted', username: urlUser });
+                    writeFlag({ state: 'accepted', username: urlUser, token: urlToken });
                     _state = 'accepted';
                     _username = urlUser;
                     fireStateChange();
                 });
-            }).catch(function () { /* silent */ });
+            }).catch(function () { _token = null; });
         },
 
         getState: function () {
             return {
                 state: _state,
                 username: _username,
+                token: _token,
+                // Full private link (with the secret in the fragment) for cross-device access.
+                link: (_state === 'accepted' && _username && _token)
+                    ? location.origin + '/explorer/' + _username + '#t=' + _token
+                    : null,
                 outboxLength: parseOutbox().length
             };
         },
@@ -350,6 +386,9 @@
                 return res.json();
             }).then(function (body) {
                 var username = body.username;
+                var token = body.token;
+                // Set the token before the import below — that request is now authenticated.
+                _token = token;
 
                 // Assign missing UUIDs to savedLocations
                 var locs = readSection('savedLocations');
@@ -374,11 +413,15 @@
 
                 return apiFetch('POST', '/' + username + '/import', payload).then(function (res2) {
                     if (!res2.ok) { throw new Error('POST /import failed: ' + res2.status); }
-                    writeFlag({ state: 'accepted', username: username });
+                    writeFlag({ state: 'accepted', username: username, token: token });
                     _state = 'accepted';
                     _username = username;
-                    history.replaceState(null, '', '/explorer/' + username);
+                    // Carry the secret in the fragment so the link itself is the credential.
+                    history.replaceState(null, '', '/explorer/' + username + '#t=' + token);
                     fireStateChange();
+                }).catch(function (e) {
+                    _token = null;   // roll back partial auth state if the import failed
+                    throw e;
                 });
             });
         },
@@ -398,6 +441,7 @@
                 clearOutbox();
                 _state = 'anonymous';
                 _username = null;
+                _token = null;
                 history.replaceState(null, '', '/explorer/');
                 fireStateChange();
             });

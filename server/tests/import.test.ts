@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, VISIT_BODY } from './helpers.js';
+import { app, db, truncateAll, createTestAccount, authHeaders, insertTestVisit, insertTestFavorite, resetRateLimiter, VISIT_BODY } from './helpers.js';
 import { schema } from '../src/db.js';
 
 beforeEach(async () => {
@@ -20,7 +20,7 @@ const makeVisit = (id: string) => ({
 
 describe('POST /api/:username/import', () => {
   test('replaces all sections atomically', async () => {
-    const u = await createTestAccount();
+    const { username: u, token } = await createTestAccount();
     await insertTestVisit(u, 'old-visit');
 
     const payload = {
@@ -33,7 +33,7 @@ describe('POST /api/:username/import', () => {
     const res = await app.request(`/api/${u}/import`, {
       method: 'POST',
       body: JSON.stringify(payload),
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
     });
     expect(res.status).toBe(204);
 
@@ -43,27 +43,27 @@ describe('POST /api/:username/import', () => {
     expect(ids).toEqual(['new-1', 'new-2', 'new-3']);
   });
 
-  test('returns 404 for missing user', async () => {
+  test('returns 401 when no matching account exists (no existence oracle)', async () => {
     const res = await app.request('/api/no-such-user-99/import', {
       method: 'POST',
       body: JSON.stringify({ visits: [], favorites: [], savedLocations: [], history: [] }),
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders('any-token') },
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
   test('returns 400 when unknown section is present', async () => {
-    const u = await createTestAccount();
+    const { username: u, token } = await createTestAccount();
     const res = await app.request(`/api/${u}/import`, {
       method: 'POST',
       body: JSON.stringify({ visits: [], favorites: [], savedLocations: [], history: [], unknownSection: [] }),
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
     });
     expect(res.status).toBe(400);
   });
 
   test('rolls back on partial failure — invalid visit row leaves DB unchanged', async () => {
-    const u = await createTestAccount();
+    const { username: u, token } = await createTestAccount();
     await insertTestVisit(u, 'existing');
 
     const payload = {
@@ -79,7 +79,7 @@ describe('POST /api/:username/import', () => {
     const res = await app.request(`/api/${u}/import`, {
       method: 'POST',
       body: JSON.stringify(payload),
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
     });
     expect(res.status).toBe(400);
 
@@ -90,13 +90,13 @@ describe('POST /api/:username/import', () => {
   });
 
   test('accepts empty body (all sections default to empty)', async () => {
-    const u = await createTestAccount();
+    const { username: u, token } = await createTestAccount();
     await insertTestVisit(u, 'old');
 
     const res = await app.request(`/api/${u}/import`, {
       method: 'POST',
       body: JSON.stringify({ visits: [], favorites: [], savedLocations: [], history: [] }),
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
     });
     expect(res.status).toBe(204);
 
@@ -105,7 +105,7 @@ describe('POST /api/:username/import', () => {
   });
 
   test('imports all four sections', async () => {
-    const u = await createTestAccount();
+    const { username: u, token } = await createTestAccount();
     const payload = {
       visits: [makeVisit('v-imp-1')],
       favorites: [{ id: 'f-imp-1', payload: { name: 'Park' } }],
@@ -116,7 +116,7 @@ describe('POST /api/:username/import', () => {
     const res = await app.request(`/api/${u}/import`, {
       method: 'POST',
       body: JSON.stringify(payload),
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
     });
     expect(res.status).toBe(204);
 
@@ -155,14 +155,14 @@ describe('POST /api/:username/import', () => {
     }
 
     test('only visits present — replaces visits, wipes the three omitted sections', async () => {
-      const u = await createTestAccount();
+      const { username: u, token } = await createTestAccount();
       await seedAllSections(u);
 
       // Body carries ONLY the visits key; favorites/savedLocations/history are absent.
       const res = await app.request(`/api/${u}/import`, {
         method: 'POST',
         body: JSON.stringify({ visits: [makeVisit('new-visit')] }),
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders(token) },
       });
       expect(res.status).toBe(204);
 
@@ -180,7 +180,7 @@ describe('POST /api/:username/import', () => {
     });
 
     test('two sections present — replaces that subset, wipes the two omitted sections', async () => {
-      const u = await createTestAccount();
+      const { username: u, token } = await createTestAccount();
       await seedAllSections(u);
 
       // Body carries favorites + history; visits and savedLocations are absent.
@@ -190,7 +190,7 @@ describe('POST /api/:username/import', () => {
           favorites: [{ id: 'new-fav', payload: { name: 'Lake' } }],
           history: [makeVisit('new-hist')],
         }),
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders(token) },
       });
       expect(res.status).toBe(204);
 

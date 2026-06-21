@@ -6,6 +6,7 @@ import type { PgTable, PgColumn, PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
+import { accountAuth } from '../middleware/auth.js';
 import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 import { isObject, type AnyRecord } from '../lib/type-guards.js';
 
@@ -38,9 +39,10 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
   app: Hono,
   db: Db,
   rl: ReturnType<typeof sectionWriteRateLimit>,
+  auth: ReturnType<typeof accountAuth>,
   { path, table, buildRow }: Section<T>
 ): void {
-  app.put(`/:username/${path}/:id`, rl, async (c) => {
+  app.put(`/:username/${path}/:id`, rl, auth, async (c) => {
     const username = c.req.param('username')!;
     const id = c.req.param('id')!;
 
@@ -72,7 +74,7 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
     return new Response(null, { status: 204 });
   });
 
-  app.delete(`/:username/${path}/:id`, rl, async (c) => {
+  app.delete(`/:username/${path}/:id`, rl, auth, async (c) => {
     const username = c.req.param('username')!;
     const id = c.req.param('id')!;
 
@@ -134,8 +136,9 @@ function buildTripBase(
 export function sectionsRoutes(db: Db): Hono {
   const app = new Hono();
   const rl = sectionWriteRateLimit();
+  const auth = accountAuth(db);
 
-  registerSection(app, db, rl, {
+  registerSection(app, db, rl, auth, {
     path: 'visits',
     table: schema.visits,
     buildRow: (id, username, body) => {
@@ -150,7 +153,7 @@ export function sectionsRoutes(db: Db): Hono {
     },
   });
 
-  registerSection(app, db, rl, {
+  registerSection(app, db, rl, auth, {
     path: 'favorites',
     table: schema.favorites,
     buildRow: (id, username, body) => ({
@@ -158,7 +161,7 @@ export function sectionsRoutes(db: Db): Hono {
     }),
   });
 
-  registerSection(app, db, rl, {
+  registerSection(app, db, rl, auth, {
     path: 'saved-locations',
     table: schema.savedLocations,
     buildRow: (id, username, body) => {
@@ -169,7 +172,7 @@ export function sectionsRoutes(db: Db): Hono {
     },
   });
 
-  registerSection(app, db, rl, {
+  registerSection(app, db, rl, auth, {
     path: 'history',
     table: schema.history,
     buildRow: (id, username, body) => {

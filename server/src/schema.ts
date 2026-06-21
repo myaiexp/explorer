@@ -11,6 +11,9 @@ import {
 
 export const accounts = pgTable('accounts', {
   username: text('username').primaryKey(),
+  // High-entropy secret (32 random bytes, base64url). The credential for all
+  // read+write access — the human-readable username is only a public handle.
+  token: text('token').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   ipFirstSeen: inet('ip_first_seen'),
 });

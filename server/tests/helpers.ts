@@ -25,11 +25,21 @@ export async function truncateAll(): Promise<void> {
   await db.delete(schema.accounts);
 }
 
-export async function createTestAccount(): Promise<string> {
+export interface TestAccount {
+  username: string;
+  token: string;
+}
+
+export async function createTestAccount(): Promise<TestAccount> {
   const res = await app.request('/api/accounts', { method: 'POST' });
   if (res.status !== 201) throw new Error(`createTestAccount failed: ${res.status}`);
-  const { username } = await res.json() as { username: string };
-  return username;
+  const { username, token } = await res.json() as TestAccount;
+  return { username, token };
+}
+
+// Bearer auth header for a token-protected request.
+export function authHeaders(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}` };
 }
 
 export const VISIT_BODY = {

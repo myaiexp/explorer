@@ -41,8 +41,11 @@ describe('createAccount catch-branch contract', () => {
       return Promise.resolve();
     });
 
-    const username = await createAccount(db, null);
+    const { username, token } = await createAccount(db, null);
     expect(calls).toBe(2);
     expect(username).toMatch(/^[a-z]+-[a-z]+-\d{1,2}$/);
+    // The secret token is generated alongside the username.
+    expect(typeof token).toBe('string');
+    expect(token.length).toBeGreaterThanOrEqual(40);
   });
 });

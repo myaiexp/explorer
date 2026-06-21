@@ -512,6 +512,17 @@ function enableCloudBackup() {
     ExplorerSync.requestConsent();
 }
 
+function copyBackupLink() {
+    closeOverflowMenuIfOpen();
+    if (typeof ExplorerSync === 'undefined') return;
+    const link = ExplorerSync.getState().link;
+    if (!link) { showError('No backup link available.'); return; }
+    navigator.clipboard.writeText(link).then(
+        () => showSuccess('Backup link copied — open it on any device to restore your data.'),
+        () => showError('Failed to copy link.')
+    );
+}
+
 function confirmDeleteCloudData() {
     closeOverflowMenuIfOpen();
     if (!confirm('Delete your cloud data permanently? Your local data will be kept.')) return;
@@ -534,17 +545,20 @@ function updateSyncMenu() {
     const status = document.getElementById('syncStatus');
     const usernameEl = document.getElementById('syncUsername');
     const enableBtn = document.getElementById('enableCloudBackupBtn');
+    const copyLinkBtn = document.getElementById('copyBackupLinkBtn');
     const deleteBtn = document.getElementById('deleteCloudDataBtn');
     if (!status || !enableBtn || !deleteBtn) return;
     if (s.state === 'accepted') {
         status.style.display = '';
         if (usernameEl) usernameEl.textContent = s.username || '';
         enableBtn.style.display = 'none';
+        if (copyLinkBtn) copyLinkBtn.style.display = '';
         deleteBtn.style.display = '';
     } else {
         status.style.display = 'none';
         if (usernameEl) usernameEl.textContent = '';
         enableBtn.style.display = '';
+        if (copyLinkBtn) copyLinkBtn.style.display = 'none';
         deleteBtn.style.display = 'none';
     }
 }

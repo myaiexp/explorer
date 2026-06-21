@@ -8,11 +8,13 @@ interface Bucket {
 const usernameBuckets = new Map<string, Bucket>();
 const ipWriteBuckets = new Map<string, Bucket>();
 const ipAccountBuckets = new Map<string, Bucket>();
+const ipReadBuckets = new Map<string, Bucket>();
 
 export function resetRateLimiter(): void {
   usernameBuckets.clear();
   ipWriteBuckets.clear();
   ipAccountBuckets.clear();
+  ipReadBuckets.clear();
 }
 
 function getIp(c: Context): string {
@@ -72,6 +74,20 @@ export function sectionWriteRateLimit() {
     }
     if (!consume(ipWriteBuckets, ip, 300, WINDOW)) {
       const secs = retryAfter(ipWriteBuckets, ip, WINDOW);
+      return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
+    }
+    await next();
+  };
+}
+
+/** 60 reads/min per IP — throttles probing of the account-fetch endpoint */
+export function readRateLimit() {
+  return async (c: Context, next: Next) => {
+    const ip = getIp(c);
+    const WINDOW = 60_000;
+
+    if (!consume(ipReadBuckets, ip, 60, WINDOW)) {
+      const secs = retryAfter(ipReadBuckets, ip, WINDOW);
       return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
     }
     await next();

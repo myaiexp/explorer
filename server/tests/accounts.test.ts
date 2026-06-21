@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter } from './helpers.js';
+import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders } from './helpers.js';
 import { schema } from '../src/db.js';
 
 beforeEach(async () => {
@@ -9,14 +9,18 @@ beforeEach(async () => {
 });
 
 describe('POST /api/accounts', () => {
-  test('returns 201 with a valid username and creates a DB row', async () => {
+  test('returns 201 with a valid username + secret token and creates a DB row', async () => {
     const res = await app.request('/api/accounts', { method: 'POST' });
     expect(res.status).toBe(201);
-    const { username } = await res.json() as { username: string };
+    const { username, token } = await res.json() as { username: string; token: string };
     expect(username).toMatch(/^[a-z]+-[a-z]+-\d{1,2}$/);
+    // base64url token of 32 random bytes ≈ 43 chars, high-entropy
+    expect(typeof token).toBe('string');
+    expect(token.length).toBeGreaterThanOrEqual(40);
     const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
     expect(rows).toHaveLength(1);
     expect(rows[0].username).toBe(username);
+    expect(rows[0].token).toBe(token);
   });
 
   test('each call returns a different username', async () => {
@@ -37,7 +41,7 @@ describe('POST /api/accounts', () => {
     // Force a collision by pre-inserting a username that will be generated
     const fixedName = 'brave-mountain-7';
     // Insert it directly to simulate collision
-    await db.insert(schema.accounts).values({ username: fixedName });
+    await db.insert(schema.accounts).values({ username: fixedName, token: 'preexisting-token' });
 
     // Spy: first call returns fixedName (collision), second call returns something new
     let callCount = 0;
@@ -49,7 +53,7 @@ describe('POST /api/accounts', () => {
     });
 
     // createAccount should skip the collision and return the unique one
-    const username = await createAccount(db, null);
+    const { username } = await createAccount(db, null);
     expect(username).not.toBe(fixedName);
     expect(username).toMatch(/^[a-z]+-[a-z]+-\d+$/);
 
@@ -93,7 +97,7 @@ describe('ipFirstSeen storage', () => {
     const { createAccount } = await import('../src/username.js');
     // Pre-insert the name the first attempt will generate, with no IP recorded.
     const fixedName = 'brave-mountain-7';
-    await db.insert(schema.accounts).values({ username: fixedName });
+    await db.insert(schema.accounts).values({ username: fixedName, token: 'preexisting-token' });
 
     let callCount = 0;
     vi.spyOn(await import('../src/username.js'), 'generateUsername').mockImplementation(() => {
@@ -102,7 +106,7 @@ describe('ipFirstSeen storage', () => {
       return `unique-word-${callCount}`;
     });
 
-    const username = await createAccount(db, '192.0.2.50');
+    const { username } = await createAccount(db, '192.0.2.50');
     expect(username).not.toBe(fixedName);
 
     // The IP is stored on the second (successful) insert, not lost during retry.
@@ -120,11 +124,11 @@ describe('ipFirstSeen storage', () => {
 
 describe('DELETE /api/:username', () => {
   test('cascades to all child tables', async () => {
-    const u = await createTestAccount();
+    const { username: u, token } = await createTestAccount();
     await insertTestVisit(u);
     await insertTestFavorite(u);
 
-    const res = await app.request(`/api/${u}`, { method: 'DELETE' });
+    const res = await app.request(`/api/${u}`, { method: 'DELETE', headers: authHeaders(token) });
     expect(res.status).toBe(204);
 
     const visitRows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
@@ -136,8 +140,25 @@ describe('DELETE /api/:username', () => {
     expect(accRows).toHaveLength(0);
   });
 
-  test('returns 404 for unknown user', async () => {
-    const res = await app.request('/api/no-such-user-99', { method: 'DELETE' });
-    expect(res.status).toBe(404);
+  test('returns 401 without a token', async () => {
+    const { username: u } = await createTestAccount();
+    const res = await app.request(`/api/${u}`, { method: 'DELETE' });
+    expect(res.status).toBe(401);
+    // The account must survive an unauthenticated delete attempt.
+    const accRows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, u));
+    expect(accRows).toHaveLength(1);
+  });
+
+  test('returns 401 with a wrong token (cannot delete another account)', async () => {
+    const { username: u } = await createTestAccount();
+    const res = await app.request(`/api/${u}`, { method: 'DELETE', headers: authHeaders('wrong') });
+    expect(res.status).toBe(401);
+    const accRows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, u));
+    expect(accRows).toHaveLength(1);
+  });
+
+  test('returns 401 (not 404) for an unknown user — no existence oracle', async () => {
+    const res = await app.request('/api/no-such-user-99', { method: 'DELETE', headers: authHeaders('any') });
+    expect(res.status).toBe(401);
   });
 });

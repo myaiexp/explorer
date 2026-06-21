@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import { app, db, truncateAll, createTestAccount, VISIT_BODY, resetRateLimiter } from './helpers.js';
+import { app, db, truncateAll, createTestAccount, VISIT_BODY, resetRateLimiter, authHeaders } from './helpers.js';
 import { schema } from '../src/db.js';
 
 beforeEach(async () => {
@@ -19,8 +19,8 @@ const visitPayload = (id: string) => JSON.stringify({
 
 describe('rate limiting', () => {
   test('60 writes/min per username — 61st returns 429', async () => {
-    const u = await createTestAccount();
-    const headers = { 'content-type': 'application/json' };
+    const { username: u, token } = await createTestAccount();
+    const headers = { 'content-type': 'application/json', ...authHeaders(token) };
 
     // First 60 requests should succeed
     for (let i = 0; i < 60; i++) {
@@ -42,8 +42,8 @@ describe('rate limiting', () => {
   });
 
   test('429 includes Retry-After header', async () => {
-    const u = await createTestAccount();
-    const headers = { 'content-type': 'application/json' };
+    const { username: u, token } = await createTestAccount();
+    const headers = { 'content-type': 'application/json', ...authHeaders(token) };
 
     for (let i = 0; i < 60; i++) {
       await app.request(`/api/${u}/visits/v-ra-${i}`, {
@@ -62,6 +62,22 @@ describe('rate limiting', () => {
     const retryAfter = res.headers.get('Retry-After');
     expect(retryAfter).toBeTruthy();
     expect(Number(retryAfter)).toBeGreaterThan(0);
+  });
+
+  test('60 reads/min per IP on GET /:username — 61st returns 429', async () => {
+    const { username: u, token } = await createTestAccount();
+    const headers = authHeaders(token);
+
+    // First 60 authenticated reads succeed
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request(`/api/${u}`, { headers });
+      expect(res.status).toBe(200);
+    }
+
+    // 61st is rate limited (the limiter runs before auth, keyed on IP)
+    const res = await app.request(`/api/${u}`, { headers });
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get('Retry-After'))).toBeGreaterThan(0);
   });
 
   test('10 account creations/hour per IP — 11th returns 429', async () => {

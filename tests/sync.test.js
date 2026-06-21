@@ -25,9 +25,9 @@ function loadSync() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function setLocation(pathname) {
+function setLocation(pathname, hash) {
     Object.defineProperty(window, 'location', {
-        value: { pathname, assign: vi.fn() },
+        value: { pathname, hash: hash || '', origin: 'https://mase.fi', assign: vi.fn() },
         writable: true,
         configurable: true,
     });
@@ -93,7 +93,7 @@ function setupAnonymous() {
 
 async function setupAccepted(username) {
     setLocation('/explorer/' + username);
-    setLocalStorage({ walk_cloud_backup: JSON.stringify({ state: 'accepted', username }) });
+    setLocalStorage({ walk_cloud_backup: JSON.stringify({ state: 'accepted', username, token: 'tok-' + username }) });
     mockFetch({
         ['/explorer/api/' + username]: { visits: [], favorites: [], savedLocations: [], history: [] },
     });
@@ -139,8 +139,8 @@ describe('ExplorerSync.init', () => {
         expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
     });
 
-    test('URL segment with empty localStorage auto-loads without confirm', async () => {
-        setLocation('/explorer/rugged-pine-42');
+    test('URL segment + token fragment with empty localStorage auto-loads without confirm', async () => {
+        setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({});
         mockFetch({
             '/explorer/api/rugged-pine-42': {
@@ -154,10 +154,27 @@ describe('ExplorerSync.init', () => {
         expect(confirmSpy).not.toHaveBeenCalled();
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toHaveLength(1);
         expect(window.ExplorerSync.getState().state).toBe('accepted');
+        // The token from the fragment is captured and persisted to the flag.
+        expect(window.ExplorerSync.getState().token).toBe('tok-rp42');
+        expect(JSON.parse(localStorage.getItem('walk_cloud_backup')).token).toBe('tok-rp42');
+    });
+
+    test('URL segment WITHOUT token fragment on a fresh device does NOT auto-load', async () => {
+        // No flag, empty localStorage, bare link (no #t=) → no credential, so the
+        // app cannot fetch the account. It must stay anonymous and issue no request.
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({});
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(localStorage.getItem('walk_visits')).toBeNull();
     });
 
     test('URL segment with non-empty localStorage prompts confirm; cancel strips URL', async () => {
-        setLocation('/explorer/rugged-pine-42');
+        setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({ walk_visits: '[{"id":"old"}]' });
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
         const replaceSpy = vi.spyOn(history, 'replaceState');
@@ -170,7 +187,7 @@ describe('ExplorerSync.init', () => {
     });
 
     test('URL segment with non-empty localStorage prompts confirm; accept loads server data', async () => {
-        setLocation('/explorer/rugged-pine-42');
+        setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({ walk_visits: '[{"id":"old"}]' });
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         mockFetch({
@@ -301,7 +318,7 @@ describe('ExplorerSync.accept', () => {
     test('generates UUID for legacy saved_locations missing id', async () => {
         localStorage.setItem('walk_saved_locations', JSON.stringify([{ label: 'home', value: 'Home St 1' }]));
         mockFetch({
-            'POST /explorer/api/accounts': { username: 'rugged-pine-42' },
+            'POST /explorer/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
             'POST /explorer/api/rugged-pine-42/import': { status: 204 },
         });
         loadSync();
@@ -313,7 +330,7 @@ describe('ExplorerSync.accept', () => {
 
     test('rewrites URL and fires state-change event on success', async () => {
         mockFetch({
-            'POST /explorer/api/accounts': { username: 'rugged-pine-42' },
+            'POST /explorer/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
             'POST /explorer/api/rugged-pine-42/import': { status: 204 },
         });
         const replaceSpy = vi.spyOn(history, 'replaceState');
@@ -321,15 +338,17 @@ describe('ExplorerSync.accept', () => {
         window.addEventListener('explorer-sync-state-change', eventSpy);
         loadSync();
         await window.ExplorerSync.accept();
-        expect(replaceSpy).toHaveBeenCalledWith(null, '', '/explorer/rugged-pine-42');
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
+        // The secret token rides in the URL fragment so the link itself is the credential.
+        expect(replaceSpy).toHaveBeenCalledWith(null, '', '/explorer/rugged-pine-42#t=tok-rp42');
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' });
+        expect(window.ExplorerSync.getState().link).toBe('https://mase.fi/explorer/rugged-pine-42#t=tok-rp42');
         expect(eventSpy).toHaveBeenCalled();
         window.removeEventListener('explorer-sync-state-change', eventSpy);
     });
 
     test('does not write flag if import POST fails', async () => {
         mockFetch({
-            'POST /explorer/api/accounts': { username: 'rugged-pine-42' },
+            'POST /explorer/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
             'POST /explorer/api/rugged-pine-42/import': { status: 500 },
         });
         loadSync();
@@ -369,7 +388,7 @@ describe('ExplorerSync.deleteAccount', () => {
         const eventSpy = vi.fn();
         window.addEventListener('explorer-sync-state-change', eventSpy);
         await window.ExplorerSync.deleteAccount();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null });
+        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
         expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
         expect(localStorage.getItem('walk_sync_outbox')).toBeNull();
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/explorer/');
@@ -385,7 +404,7 @@ describe('ExplorerSync.requestConsent', () => {
         setLocation('/explorer/');
         setLocalStorage({});
         mockFetch({
-            'POST /explorer/api/accounts': { username: 'rugged-pine-42' },
+            'POST /explorer/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
             'POST /explorer/api/rugged-pine-42/import': { status: 204 },
         });
         loadSync();
@@ -457,9 +476,9 @@ describe('#1566 mergeSection last-write-wins', () => {
     });
 
     test('account switch: different stored username wipes local sections before load', async () => {
-        setLocation('/explorer/mossy-fern-7');
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({
-            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
             walk_visits: JSON.stringify([{ id: 'local-v' }]),
             walk_history: JSON.stringify([{ id: 'local-h' }]),
         });

@@ -2,21 +2,16 @@ import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
+import { accountAuth } from '../middleware/auth.js';
+import { readRateLimit } from '../middleware/rate-limit.js';
 
 export function fetchRoutes(db: Db): Hono {
   const app = new Hono();
 
-  // GET /:username — return all four sections
-  app.get('/:username', async (c) => {
+  // GET /:username — return all four sections. IP rate limit runs first
+  // (throttles probing), then per-account token auth.
+  app.get('/:username', readRateLimit(), accountAuth(db), async (c) => {
     const username = c.req.param('username')!;
-
-    const accountRows = await db
-      .select({ username: schema.accounts.username })
-      .from(schema.accounts)
-      .where(eq(schema.accounts.username, username));
-    if (accountRows.length === 0) {
-      return c.json({ error: 'User not found' }, 404);
-    }
 
     const [visits, favorites, savedLocations, history] = await Promise.all([
       db.select().from(schema.visits).where(eq(schema.visits.username, username)),

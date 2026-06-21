@@ -24,7 +24,8 @@ function makeFakeDb(opts: { userExists: boolean }) {
         from() {
           return {
             where() {
-              return Promise.resolve(opts.userExists ? [{ username: 'alice' }] : []);
+              // Auth middleware reads `.token`; userExists reads `.length`.
+              return Promise.resolve(opts.userExists ? [{ username: 'alice', token: 'sekret' }] : []);
             },
           };
         },
@@ -54,10 +55,13 @@ function makeFakeDb(opts: { userExists: boolean }) {
   return { db: db as unknown as Db, ops };
 }
 
+// Valid auth for the fake account (its stored token is 'sekret').
+const AUTH = { Authorization: 'Bearer sekret' };
+
 function jsonReq(method: 'PUT', body: unknown) {
   return {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...AUTH },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   };
 }
@@ -82,12 +86,14 @@ beforeEach(() => {
 // ── shared factory-level behavior (exercised through each section) ───────────
 
 describe('section PUT — shared guards', () => {
-  it('returns 404 when the user does not exist (before touching the body)', async () => {
+  it('returns 401 when the account does not exist (auth blocks before the body)', async () => {
+    // A missing account has no token to match, so auth rejects with 401 before
+    // the handler's userExists/body checks ever run.
     const { db, ops } = makeFakeDb({ userExists: false });
     const app = sectionsRoutes(db);
     const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip()));
-    expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: 'User not found' });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
     expect(ops).toHaveLength(0);
   });
 
@@ -232,16 +238,16 @@ describe('visits DELETE', () => {
   it('deletes from the visits table and returns 204', async () => {
     const { db, ops } = makeFakeDb({ userExists: true });
     const app = sectionsRoutes(db);
-    const res = await app.request('/alice/visits/v1', { method: 'DELETE' });
+    const res = await app.request('/alice/visits/v1', { method: 'DELETE', headers: AUTH });
     expect(res.status).toBe(204);
     expect(ops).toEqual([{ op: 'delete', table: schema.visits }]);
   });
 
-  it('returns 404 when the user does not exist', async () => {
+  it('returns 401 when the account does not exist', async () => {
     const { db, ops } = makeFakeDb({ userExists: false });
     const app = sectionsRoutes(db);
-    const res = await app.request('/alice/visits/v1', { method: 'DELETE' });
-    expect(res.status).toBe(404);
+    const res = await app.request('/alice/visits/v1', { method: 'DELETE', headers: AUTH });
+    expect(res.status).toBe(401);
     expect(ops).toHaveLength(0);
   });
 });
@@ -272,7 +278,7 @@ describe('favorites DELETE', () => {
   it('deletes from the favorites table and returns 204', async () => {
     const { db, ops } = makeFakeDb({ userExists: true });
     const app = sectionsRoutes(db);
-    const res = await app.request('/alice/favorites/f1', { method: 'DELETE' });
+    const res = await app.request('/alice/favorites/f1', { method: 'DELETE', headers: AUTH });
     expect(res.status).toBe(204);
     expect(ops).toEqual([{ op: 'delete', table: schema.favorites }]);
   });
@@ -316,7 +322,7 @@ describe('saved-locations DELETE', () => {
   it('deletes from the savedLocations table and returns 204', async () => {
     const { db, ops } = makeFakeDb({ userExists: true });
     const app = sectionsRoutes(db);
-    const res = await app.request('/alice/saved-locations/s1', { method: 'DELETE' });
+    const res = await app.request('/alice/saved-locations/s1', { method: 'DELETE', headers: AUTH });
     expect(res.status).toBe(204);
     expect(ops).toEqual([{ op: 'delete', table: schema.savedLocations }]);
   });
@@ -376,16 +382,16 @@ describe('history DELETE', () => {
   it('deletes from the history table and returns 204', async () => {
     const { db, ops } = makeFakeDb({ userExists: true });
     const app = sectionsRoutes(db);
-    const res = await app.request('/alice/history/h1', { method: 'DELETE' });
+    const res = await app.request('/alice/history/h1', { method: 'DELETE', headers: AUTH });
     expect(res.status).toBe(204);
     expect(ops).toEqual([{ op: 'delete', table: schema.history }]);
   });
 
-  it('returns 404 when the user does not exist', async () => {
+  it('returns 401 when the account does not exist', async () => {
     const { db, ops } = makeFakeDb({ userExists: false });
     const app = sectionsRoutes(db);
-    const res = await app.request('/alice/history/h1', { method: 'DELETE' });
-    expect(res.status).toBe(404);
+    const res = await app.request('/alice/history/h1', { method: 'DELETE', headers: AUTH });
+    expect(res.status).toBe(401);
     expect(ops).toHaveLength(0);
   });
 });

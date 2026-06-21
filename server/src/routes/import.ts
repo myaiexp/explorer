@@ -4,6 +4,8 @@ import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 import { isObject, isArray } from '../lib/type-guards.js';
+import { accountAuth } from '../middleware/auth.js';
+import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
 
 // Shared validation + normalization for route-shaped rows. `visits` and `history` have an
 // identical column shape except `visits` also carries `poiCategory`, so both call sites reuse
@@ -72,17 +74,10 @@ export function validateHistoryRow(row: unknown, username: string): typeof schem
 export function importRoutes(db: Db): Hono {
   const app = new Hono();
 
-  // POST /:username/import — replace all four sections atomically
-  app.post('/:username/import', async (c) => {
+  // POST /:username/import — replace all four sections atomically. Auth (token)
+  // confirms account ownership; the write rate limit caps replace-all churn.
+  app.post('/:username/import', sectionWriteRateLimit(), accountAuth(db), async (c) => {
     const username = c.req.param('username')!;
-
-    const accountRows = await db
-      .select({ username: schema.accounts.username })
-      .from(schema.accounts)
-      .where(eq(schema.accounts.username, username));
-    if (accountRows.length === 0) {
-      return c.json({ error: 'User not found' }, 404);
-    }
 
     let body: unknown;
     try {
