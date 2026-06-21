@@ -106,12 +106,19 @@ function maybeRequestConsent() {
 const STORAGE_KEY = 'walk_visits';
 const SETTINGS_KEY = 'walk_settings';
 
-function getVisits() {
+// Parse a JSON array from localStorage, returning [] on missing/corrupt data.
+// Shared by every array-backed accessor (visits, saved locations, favorites,
+// history) so the parse-or-default contract lives in exactly one place.
+function readStoredArray(key) {
     try {
-        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        return JSON.parse(localStorage.getItem(key) || '[]');
     } catch {
         return [];
     }
+}
+
+function getVisits() {
+    return readStoredArray(STORAGE_KEY);
 }
 
 // ─── Settings persistence ────────────────────────────────────────────────────
@@ -168,7 +175,7 @@ function initSettingsListeners() {
 const SAVED_LOCATIONS_KEY = 'walk_saved_locations';
 
 function getSavedLocations() {
-    try { return JSON.parse(localStorage.getItem(SAVED_LOCATIONS_KEY) || '[]'); } catch { return []; }
+    return readStoredArray(SAVED_LOCATIONS_KEY);
 }
 
 function toggleSaveLocation() {
@@ -535,9 +542,6 @@ async function fetchRouteThrough(waypoints) {
     return tryOsrm(`${OSRM_FI_BASE}/${query}`);
 }
 
-// Build a full oval loop: A → (right vias) → B → (left vias) → A
-// Returns { outbound, return } where each is {coords, duration, distance} or null.
-// Tries both chiralities (right-then-left vs left-then-right), picks least overlap.
 // Read the spread slider (0-100) and return a continuous offset multiplier.
 // Always uses 3 via points at fixed t positions for consistent loop shape.
 // The slider only changes HOW FAR the vias are pushed sideways.
@@ -604,6 +608,10 @@ async function screeningTableFn(start, candidates) {
     });
 }
 
+// Build a full oval loop: A → (right vias) → B → (left vias) → A.
+// Returns { outbound, return } where each is {coords, duration, distance} or null.
+// Builds a single chirality (right-side out, left-side back); buildJunctionLoop
+// is the variant that tries both chiralities and picks the lower-overlap one.
 async function buildLoop(startLat, startLng, destLat, destLng) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
     const { offsetMult, viaTs } = getSpreadParams();
@@ -955,7 +963,6 @@ function renderElevationChart(elevations) {
     const h = 64;
     const pad = 1;
 
-    // Build SVG path for filled area
     const pts = elevations.map((e, i) => {
         const x = (i / (elevations.length - 1)) * w;
         const y = h - pad - ((e - min) / range) * (h - 2 * pad);
@@ -964,7 +971,6 @@ function renderElevationChart(elevations) {
     const linePath = pts.join(' L');
     const areaPath = `M0,${h} L${pts[0]} L${linePath} L${w},${h} Z`;
 
-    // Gain/loss calculation
     let gain = 0, loss = 0;
     for (let i = 1; i < elevations.length; i++) {
         const diff = elevations[i] - elevations[i - 1];
@@ -972,7 +978,6 @@ function renderElevationChart(elevations) {
         else loss -= diff;
     }
 
-    // Build SVG via DOM
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'elevation-chart');
@@ -1162,10 +1167,12 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         tripMode: tripMode || 'round',
         poiCategory: document.getElementById('locationTypeSelect')?.value || null,
         distance: totalWalkKm,
-        routeCoords:         outboundRoute ? outboundRoute.coords   : null,
+        routeCoords:         outboundRoute ? outboundRoute.coords    : null,
+        routeDistance:       outboundRoute ? outboundRoute.distance / 1000 : null,
         routeDuration:       outboundRoute ? outboundRoute.duration  : null,
         routeSteps:          outboundRoute ? outboundRoute.steps     : null,
         returnRouteCoords:   returnRoute   ? returnRoute.coords      : null,
+        returnRouteDistance: returnRoute   ? returnRoute.distance / 1000 : null,
         returnRouteDuration: returnRoute   ? returnRoute.duration    : null,
         returnRouteSteps:    returnRoute   ? returnRoute.steps       : null,
         outboundVias:        outboundVias  || null,
@@ -1222,8 +1229,14 @@ async function generateDestination() {
 
         const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
         const locationTypeVal = document.getElementById('locationTypeSelect').value;
-        const locationType = (locationTypeVal === 'any' || locationTypeVal === 'roads') ? locationTypeVal
-            : locationTypeVal === 'any_poi' ? 'any_poi' : 'poi';
+        // Map the dropdown value to a routing strategy. Every case is listed
+        // explicitly so 'any' is visible: it routes to the final else branch
+        // below (a fully random point anywhere), not to roads or POIs.
+        const locationType =
+            locationTypeVal === 'roads' ? 'roads'
+            : locationTypeVal === 'any_poi' ? 'any_poi'
+            : locationTypeVal === 'any' ? 'any'
+            : 'poi';
 
         // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
         const scale = tripMode === 'one-way' ? 1.3 : 2.6;
@@ -1231,7 +1244,6 @@ async function generateDestination() {
         const straightMax = maxKm / scale;
         let dest;
         let destName = null;
-        let usedFallback = false;
         // Phase 2: capture the candidate pool that produced `dest` so the
         // smart-routing branch can re-rank it for retries without re-fetching.
         let candidatePool = null;
@@ -1250,7 +1262,6 @@ async function generateDestination() {
                     generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
                 candidatePool = candidates;
                 dest = pickMostNovelDestination(candidates, existingDests);
-                usedFallback = true;
             }
         } else if (locationType === 'any_poi' || locationType === 'poi') {
             const filters = locationType === 'any_poi'
@@ -1272,9 +1283,9 @@ async function generateDestination() {
                     generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
                 candidatePool = candidates;
                 dest = pickMostNovelDestination(candidates, existingDests);
-                usedFallback = true;
             }
         } else {
+            // locationType === 'any': a fully random point anywhere in the annulus.
             const candidates = Array.from({ length: RANDOM_POOL_SIZE }, () =>
                 generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
             candidatePool = candidates;
@@ -1518,8 +1529,10 @@ function markAsVisited() {
         destLng:             currentSession.destLng,
         distance:            currentSession.distance,
         routeCoords:         currentSession.routeCoords         || null,
+        routeDistance:       currentSession.routeDistance       ?? null,
         routeDuration:       currentSession.routeDuration       || null,
         returnRouteCoords:   currentSession.returnRouteCoords   || null,
+        returnRouteDistance: currentSession.returnRouteDistance ?? null,
         returnRouteDuration: currentSession.returnRouteDuration || null,
         destName:            currentSession.destName            || null,
         poiCategory:         currentSession.poiCategory         || null,
@@ -1601,12 +1614,43 @@ function updateVisitedCounter() {
     }
 }
 
+// ─── List-item factory (history + favorites) ─────────────────────────────────
+
+// Build the shared .history-item skeleton used by both the history and the
+// favorites lists: a name line, a meta line, and a × delete button. Callers
+// supply the label/meta text plus the select and delete click handlers.
+function buildListItem(label, meta, onSelect, onDelete) {
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    item.addEventListener('click', onSelect);
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'history-item-name';
+    nameEl.textContent = label;
+    item.appendChild(nameEl);
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'history-item-meta';
+    metaEl.textContent = meta;
+    item.appendChild(metaEl);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'history-delete';
+    del.title = 'Remove';
+    del.textContent = '×';
+    del.addEventListener('click', onDelete);
+    item.appendChild(del);
+
+    return item;
+}
+
 // ─── Favorites ───────────────────────────────────────────────────────────────
 
 const FAVORITES_KEY = 'walk_favorites';
 
 function getFavorites() {
-    try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); } catch { return []; }
+    return readStoredArray(FAVORITES_KEY);
 }
 
 function toggleFavorite() {
@@ -1639,8 +1683,10 @@ function toggleFavorite() {
             tripMode:            currentSession.tripMode,
             distance:            currentSession.distance,
             routeCoords:         currentSession.routeCoords         || null,
+            routeDistance:       currentSession.routeDistance       ?? null,
             routeDuration:       currentSession.routeDuration       || null,
             returnRouteCoords:   currentSession.returnRouteCoords   || null,
+            returnRouteDistance: currentSession.returnRouteDistance ?? null,
             returnRouteDuration: currentSession.returnRouteDuration || null,
         };
         favs.unshift(newFav);
@@ -1690,32 +1736,9 @@ function renderFavoritesSection() {
         const label = entry.destName ||
             `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
         const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
-
-        const item = document.createElement('div');
-        item.className = 'history-item';
-        item.addEventListener('click', () => {
-            restoreResult(getFavorites()[i]);
-            updateFavoriteBtn();
-        });
-
-        const nameEl = document.createElement('div');
-        nameEl.className = 'history-item-name';
-        nameEl.textContent = label;
-        item.appendChild(nameEl);
-
-        const metaEl = document.createElement('div');
-        metaEl.className = 'history-item-meta';
-        metaEl.textContent = dist;
-        item.appendChild(metaEl);
-
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'history-delete';
-        del.title = 'Remove';
-        del.textContent = '\u00d7';
-        del.addEventListener('click', (e) => deleteFavorite(i, e));
-        item.appendChild(del);
-
+        const item = buildListItem(label, dist,
+            () => { restoreResult(getFavorites()[i]); updateFavoriteBtn(); },
+            (e) => deleteFavorite(i, e));
         list.appendChild(item);
     });
 }
@@ -1746,7 +1769,17 @@ function importVisits(event) {
             const existing = getVisits();
             const existingIds = new Set(existing.map(v => v.id));
             const newEntries = imported.filter(v => !existingIds.has(v.id));
+            // Give every imported entry a stable id, then mirror each to the
+            // cloud outbox exactly as markAsVisited does. Without this, imported
+            // visits live only in localStorage and silently never replicate to
+            // the cloud backup when sync is active.
+            for (const v of newEntries) {
+                if (!v.id) v.id = crypto.randomUUID();
+            }
             localStorage.setItem(STORAGE_KEY, JSON.stringify([...existing, ...newEntries]));
+            for (const v of newEntries) {
+                ExplorerSync.mutate('visits', 'put', v.id, v);
+            }
             maybeRequestConsent();
             showSuccess(`Added ${newEntries.length} new ${newEntries.length === 1 ? 'visit' : 'visits'}.`);
             updateVisitedCounter();
@@ -2060,10 +2093,12 @@ async function rerouteWithCurrentSpread() {
         currentSession = {
             ...currentSession,
             distance: totalWalkKm,
-            routeCoords:         outbound ? outbound.coords   : null,
+            routeCoords:         outbound ? outbound.coords    : null,
+            routeDistance:       outbound ? outbound.distance / 1000 : null,
             routeDuration:       outbound ? outbound.duration  : null,
             routeSteps:          outbound ? outbound.steps     : null,
             returnRouteCoords:   ret      ? ret.coords         : null,
+            returnRouteDistance: ret      ? ret.distance / 1000 : null,
             returnRouteDuration: ret      ? ret.duration       : null,
             returnRouteSteps:    ret      ? ret.steps          : null,
             outboundVias:        null,
@@ -2140,7 +2175,7 @@ const HISTORY_VISIBLE = 3;
 let historyExpanded = false;
 
 function getHistory() {
-    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+    return readStoredArray(HISTORY_KEY);
 }
 
 function saveToHistory(session) {
@@ -2156,8 +2191,10 @@ function saveToHistory(session) {
         tripMode:            session.tripMode,
         distance:            session.distance,
         routeCoords:         session.routeCoords         || null,
+        routeDistance:       session.routeDistance       ?? null,
         routeDuration:       session.routeDuration       || null,
         returnRouteCoords:   session.returnRouteCoords   || null,
+        returnRouteDistance: session.returnRouteDistance ?? null,
         returnRouteDuration: session.returnRouteDuration || null,
     };
     const history = getHistory();
@@ -2180,11 +2217,21 @@ function deleteHistoryEntry(index) {
 
 function restoreResult(entry) {
     clearMap();
+    // Prefer the real per-leg distances when the entry has them. Legacy entries
+    // (saved before per-leg distances existed, or pulled from the cloud where
+    // only the total is stored) fall back to assigning the whole total to the
+    // outbound leg — numerically correct for the displayed total, which is all
+    // displayRoute renders.
+    const hasLegDist = typeof entry.routeDistance === 'number';
     const outbound = entry.routeCoords
-        ? { coords: entry.routeCoords, distance: entry.distance * 1000, duration: entry.routeDuration || 0 }
+        ? { coords: entry.routeCoords,
+            distance: (hasLegDist ? entry.routeDistance : entry.distance) * 1000,
+            duration: entry.routeDuration || 0 }
         : null;
     const ret = entry.returnRouteCoords
-        ? { coords: entry.returnRouteCoords, distance: 0, duration: entry.returnRouteDuration || 0 }
+        ? { coords: entry.returnRouteCoords,
+            distance: (hasLegDist ? (entry.returnRouteDistance || 0) : 0) * 1000,
+            duration: entry.returnRouteDuration || 0 }
         : null;
     displayRoute(
         entry.startLat, entry.startLng,
@@ -2215,28 +2262,9 @@ function renderHistorySection() {
         const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
         const meta = [dist, date].filter(Boolean).join(' · ');
 
-        const item = document.createElement('div');
-        item.className = 'history-item';
-        item.addEventListener('click', () => restoreResult(getHistory()[i]));
-
-        const nameEl = document.createElement('div');
-        nameEl.className = 'history-item-name';
-        nameEl.textContent = label;
-        item.appendChild(nameEl);
-
-        const metaEl = document.createElement('div');
-        metaEl.className = 'history-item-meta';
-        metaEl.textContent = meta;
-        item.appendChild(metaEl);
-
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'history-delete';
-        del.title = 'Remove';
-        del.textContent = '\u00d7';
-        del.addEventListener('click', (e) => { e.stopPropagation(); deleteHistoryEntry(i); });
-        item.appendChild(del);
-
+        const item = buildListItem(label, meta,
+            () => restoreResult(getHistory()[i]),
+            (e) => { e.stopPropagation(); deleteHistoryEntry(i); });
         list.appendChild(item);
     });
 
