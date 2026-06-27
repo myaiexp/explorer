@@ -207,4 +207,72 @@ describe('POST /api/:username/import', () => {
       expect(savedLocations).toHaveLength(0);
     });
   });
+
+  // Per-section row validation rejects with 400 BEFORE the replace-all transaction runs,
+  // so a seeded visit must survive untouched (proves no deletes/writes happened). Only the
+  // invalid-visit path was covered before; these pin the favorites/savedLocations/history
+  // validators and the favorite null-payload guard (validateFavorite line `payload === null`).
+  describe('row validation rejections (400, no writes)', () => {
+    const rowCases: Array<[string, Record<string, unknown>]> = [
+      // validateFavorite: explicit `payload === null` guard.
+      ['favorite with payload: null', { favorites: [{ id: 'f-1', payload: null }] }],
+      // validateFavorite: missing/empty id.
+      ['favorite missing id', { favorites: [{ payload: { name: 'Park' } }] }],
+      // validateSavedLocation: missing required `value`.
+      ['savedLocation missing value', { savedLocations: [{ id: 'sl-1', label: 'Home' }] }],
+      // validateHistoryRow: missing required route-row fields.
+      ['history row missing required fields', { history: [{ id: 'bad', date: VISIT_BODY.date }] }],
+    ];
+    for (const [label, sectionBody] of rowCases) {
+      test(`${label} → 400, seeded visit survives`, async () => {
+        const { username: u, token } = await createTestAccount();
+        await insertTestVisit(u, 'survivor');
+
+        const res = await app.request(`/api/${u}/import`, {
+          method: 'POST',
+          body: JSON.stringify(sectionBody),
+          headers: { 'content-type': 'application/json', ...authHeaders(token) },
+        });
+        expect(res.status).toBe(400);
+
+        // Transaction never started — the pre-existing visit is untouched.
+        const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+        expect(rows.map((r) => r.id)).toEqual(['survivor']);
+      });
+    }
+  });
+
+  // Each section value must be an array. A `null`/`undefined` value defaults to [] via `?? []`,
+  // so these guards only fire for non-null, non-array values ({}, string, number, boolean).
+  describe('non-array section values → 400', () => {
+    const nonArrayCases: Array<[string, unknown]> = [
+      ['visits', {}],
+      ['favorites', 'string'],
+      ['savedLocations', 5],
+      ['history', true],
+    ];
+    for (const [key, value] of nonArrayCases) {
+      test(`${key} as ${typeof value === 'object' ? 'object' : typeof value} → 400`, async () => {
+        const { username: u, token } = await createTestAccount();
+        const res = await app.request(`/api/${u}/import`, {
+          method: 'POST',
+          body: JSON.stringify({ [key]: value }),
+          headers: { 'content-type': 'application/json', ...authHeaders(token) },
+        });
+        expect(res.status).toBe(400);
+      });
+    }
+  });
+
+  // The handler's own try/catch around c.req.json() (independent of sections.ts) returns 400
+  // on an unparseable body. Auth passes first, so a valid token is required to reach the catch.
+  test('non-JSON body → 400', async () => {
+    const { username: u, token } = await createTestAccount();
+    const res = await app.request(`/api/${u}/import`, {
+      method: 'POST',
+      body: 'not-json',
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+  });
 });
