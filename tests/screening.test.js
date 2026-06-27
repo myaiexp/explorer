@@ -57,6 +57,12 @@ test('detourRatio: zero straight → Infinity', () => {
     expect(globalThis.detourRatio(5000, 0)).toBe(Infinity);
 });
 
+test('detourRatio: zero route metres → Infinity (degenerate start==dest)', () => {
+    // 0-metre route means start == destination; !routeMeters is truthy for 0,
+    // so it returns the Infinity sentinel rather than dividing.
+    expect(globalThis.detourRatio(0, 1.0)).toBe(Infinity);
+});
+
 test('detourRatio: 3× route → 3.0', () => {
     expect(globalThis.detourRatio(15000, 5)).toBeCloseTo(3.0, 5);
 });
@@ -173,6 +179,82 @@ test('screenCandidates: input candidate objects are not mutated', async () => {
     const tableFn = async () => CANDS.map(() => ({snapM: 11, routeM: 6000}));
     await globalThis.screenCandidates(START, CANDS, {tableFn});
     expect(CANDS).toEqual(original);
+});
+
+test('screenCandidates: all rejects nearest-failed (null snapM) → bestRejected null', async () => {
+    // Every candidate fails Stage 1 with snapM null, so no reject has a snapM
+    // or a detour. The bestRejected scan finds nothing to pick → stays null.
+    const tableFn = async () => [
+        {snapM: null, routeM: null},
+        {snapM: null, routeM: null},
+        {snapM: null, routeM: null},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
+    expect(r.survivors).toHaveLength(0);
+    expect(r.bestRejected).toBeNull();
+    expect(r.diagnostics.every(d => d.reason === 'nearest-failed')).toBe(true);
+});
+
+test('screenCandidates: literal null table entry → nearest-failed (table[i] ?? {})', async () => {
+    // A literal null row (not {} or {snapM:null}) exercises the ?? {} fallback.
+    const tableFn = async () => [
+        {snapM: 11, routeM: 6000},
+        null,
+        {snapM: 11, routeM: 6000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
+    expect(r.survivors).toHaveLength(2);
+    const d = r.diagnostics[1];
+    expect(d.stage).toBe('stage1-reject');
+    expect(d.reason).toBe('nearest-failed');
+    expect(d.snapM).toBeNull();
+});
+
+test('screenCandidates: snapM Infinity → nearest-failed (isFinite guard)', async () => {
+    // OSRM can return Infinity for an unreachable node; isFinite() coerces it
+    // to null so the candidate is classified as nearest-failed, not snap-too-far.
+    const tableFn = async () => [
+        {snapM: 11,       routeM: 6000},
+        {snapM: Infinity, routeM: null},
+        {snapM: 11,       routeM: 6000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
+    expect(r.survivors).toHaveLength(2);
+    const d = r.diagnostics[1];
+    expect(d.stage).toBe('stage1-reject');
+    expect(d.reason).toBe('nearest-failed');
+    expect(d.snapM).toBeNull();
+});
+
+test('screenCandidates: stage-2 reject preferred over stage-1 rejects for bestRejected', async () => {
+    // c0 snap-too-far (stage-1, detour null), c1 detour-too-high (stage-2,
+    // detour ~3.3×), c2 nearest-failed (stage-1, detour null). The lone
+    // detour-bearing reject must win over both snap-only rejects.
+    const tableFn = async () => [
+        {snapM: 600,  routeM: null},   // stage-1 reject: snap > 500 m
+        {snapM: 11,   routeM: 20000},  // stage-2 reject: detour ~3.3×
+        {snapM: null, routeM: null},   // stage-1 reject: nearest-failed
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
+    expect(r.survivors).toHaveLength(0);
+    expect(r.bestRejected).toEqual(expect.objectContaining({lat: CANDS[1].lat, lng: CANDS[1].lng}));
+    expect(r.bestRejected.detour).toBeCloseTo(3.3, 1);
+});
+
+test('screenCandidates: routeM 0 (start==dest) → rejected at stage 2 with null detour', async () => {
+    // detourRatio(0, straightKm) returns Infinity → coerced to null detour →
+    // classified detour-too-high (stage-2 reject), never a survivor.
+    const tableFn = async () => [
+        {snapM: 11, routeM: 0},
+        {snapM: 11, routeM: 6000},
+        {snapM: 11, routeM: 6000},
+    ];
+    const r = await globalThis.screenCandidates(START, CANDS, {tableFn});
+    expect(r.survivors).toHaveLength(2);
+    const d = r.diagnostics[0];
+    expect(d.stage).toBe('stage2-reject');
+    expect(d.reason).toBe('detour-too-high');
+    expect(d.detour).toBeNull();
 });
 
 // ── capPool ────────────────────────────────────────────────────────────────

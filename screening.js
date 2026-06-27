@@ -31,6 +31,10 @@ function passesStage1(candidate, nearestResult) {
     ) <= STAGE1_NEAREST_MAX_M;
 }
 
+// Detour penalty = routed km / straight-line km. Returns Infinity when either
+// input is missing or zero: a 0-metre route (start == destination) or a 0-km
+// straight distance is a degenerate route, and Infinity > STAGE2_DETOUR_MAX
+// guarantees such a candidate is rejected at Stage 2 downstream.
 function detourRatio(routeMeters, straightKm) {
     if (!routeMeters || !straightKm) return Infinity;
     return (routeMeters / 1000) / straightKm;
