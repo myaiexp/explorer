@@ -22,10 +22,32 @@ export interface CreatedAccount {
   token: string;
 }
 
-export async function createAccount(db: Db, ip: string | null): Promise<CreatedAccount> {
+// Postgres SQLSTATE for unique_violation.
+const UNIQUE_VIOLATION = '23505';
+
+// drizzle-orm wraps the driver error in a DrizzleQueryError and puts the real
+// node-postgres DatabaseError (which carries the SQLSTATE `code`) on `.cause`,
+// so the code is not on the top-level error. Walk the cause chain to find it.
+// Depth-capped so a self-referential cause can't loop forever.
+function isUniqueViolation(err: unknown): boolean {
+  let e: unknown = err;
+  for (let depth = 0; e != null && typeof e === 'object' && depth < 8; depth++) {
+    if ((e as { code?: unknown }).code === UNIQUE_VIOLATION) return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+// `genUsername` is injectable so tests can force a deterministic collision
+// without mocking the ES-module namespace (which is fragile under module caching).
+export async function createAccount(
+  db: Db,
+  ip: string | null,
+  genUsername: () => string = generateUsername,
+): Promise<CreatedAccount> {
   const token = generateToken();
   for (let attempt = 0; attempt < 10; attempt++) {
-    const username = generateUsername();
+    const username = genUsername();
     try {
       await db.insert(schema.accounts).values({
         username,
@@ -34,9 +56,8 @@ export async function createAccount(db: Db, ip: string | null): Promise<CreatedA
       });
       return { username, token };
     } catch (err: unknown) {
-      // unique violation on PK — retry
-      const pgErr = err as { code?: string };
-      if (pgErr?.code === '23505') {
+      // unique violation on PK — retry with a freshly generated username
+      if (isUniqueViolation(err)) {
         continue;
       }
       throw err;

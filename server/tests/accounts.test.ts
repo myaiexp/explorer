@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders } from './helpers.js';
 import { schema } from '../src/db.js';
@@ -36,28 +36,28 @@ describe('POST /api/accounts', () => {
     expect(u2).toMatch(/^[a-z]+-[a-z]+-\d{1,2}$/);
   });
 
-  test('POST /accounts retries on collision — direct createAccount test', async () => {
-    const { generateUsername, createAccount } = await import('../src/username.js');
-    // Force a collision by pre-inserting a username that will be generated
+  test('createAccount skips a PK collision and creates a new, distinct account', async () => {
+    const { createAccount } = await import('../src/username.js');
+    // Pre-insert the name the first generator call will produce, to force a collision.
     const fixedName = 'brave-mountain-7';
-    // Insert it directly to simulate collision
     await db.insert(schema.accounts).values({ username: fixedName, token: 'preexisting-token' });
 
-    // Spy: first call returns fixedName (collision), second call returns something new
+    // Inject a deterministic generator: first call collides, second is unique.
     let callCount = 0;
-    const original = generateUsername;
-    vi.spyOn(await import('../src/username.js'), 'generateUsername').mockImplementation(() => {
+    const genUsername = () => {
       callCount++;
-      if (callCount === 1) return fixedName;
-      return `unique-word-${callCount}`;
-    });
+      return callCount === 1 ? fixedName : `unique-word-${callCount}`;
+    };
 
-    // createAccount should skip the collision and return the unique one
-    const { username } = await createAccount(db, null);
+    const { username } = await createAccount(db, null, genUsername);
+
+    // Observable behaviour: a new account exists under the retried name, distinct
+    // from the collision row, which is left untouched — two rows total.
     expect(username).not.toBe(fixedName);
-    expect(username).toMatch(/^[a-z]+-[a-z]+-\d+$/);
-
-    vi.restoreAllMocks();
+    const created = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
+    expect(created).toHaveLength(1);
+    const all = await db.select().from(schema.accounts);
+    expect(all).toHaveLength(2);
   });
 });
 
@@ -100,13 +100,12 @@ describe('ipFirstSeen storage', () => {
     await db.insert(schema.accounts).values({ username: fixedName, token: 'preexisting-token' });
 
     let callCount = 0;
-    vi.spyOn(await import('../src/username.js'), 'generateUsername').mockImplementation(() => {
+    const genUsername = () => {
       callCount++;
-      if (callCount === 1) return fixedName; // first attempt collides on the PK
-      return `unique-word-${callCount}`;
-    });
+      return callCount === 1 ? fixedName : `unique-word-${callCount}`; // first attempt collides on the PK
+    };
 
-    const { username } = await createAccount(db, '192.0.2.50');
+    const { username } = await createAccount(db, '192.0.2.50', genUsername);
     expect(username).not.toBe(fixedName);
 
     // The IP is stored on the second (successful) insert, not lost during retry.
@@ -117,8 +116,6 @@ describe('ipFirstSeen storage', () => {
     // a later creation attempt never overwrites an account's first-seen IP.
     const collided = await db.select().from(schema.accounts).where(eq(schema.accounts.username, fixedName));
     expect(collided[0].ipFirstSeen).toBeNull();
-
-    vi.restoreAllMocks();
   });
 });
 
