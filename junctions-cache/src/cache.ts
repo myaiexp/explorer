@@ -11,6 +11,7 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Bbox, ExcludePreset, LatLng } from './overpass.js';
 import { fetchJunctionsFromOverpass } from './overpass.js';
+import { runWithOverpassSlot } from './overpass-limit.js';
 import { log } from './log.js';
 
 const CACHE_PATH = process.env.CACHE_PATH ?? './data/cache.json';
@@ -144,8 +145,10 @@ export async function getJunctions(bbox: Bbox, exclude: ExcludePreset): Promise<
         return { cache: 'hit', junctions };
     }
 
+    // t0 spans any throttle-queue wait too, so overpassMs reflects total miss
+    // latency under contention (it equals raw fetch time when slots are free).
     const t0 = Date.now();
-    const promise = fetchJunctionsFromOverpass(bbox, exclude);
+    const promise = runWithOverpassSlot(() => fetchJunctionsFromOverpass(bbox, exclude));
     inflight.set(key, promise);
     try {
         const junctions = await promise;
@@ -191,7 +194,7 @@ export async function getJunctionsAnchored(
 
     const wide = wideBboxFromStart(start);
     const t0 = Date.now();
-    const promise = fetchJunctionsFromOverpass(wide, exclude);
+    const promise = runWithOverpassSlot(() => fetchJunctionsFromOverpass(wide, exclude));
     inflight.set(key, promise);
     try {
         const all = await promise;

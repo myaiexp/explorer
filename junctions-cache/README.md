@@ -10,7 +10,13 @@ pnpm dev                    # tsx watch
 pnpm build && pnpm start    # production
 ```
 
-Listens on `127.0.0.1:5001` (override with `PORT`). Persists cache to `./data/cache.json` (override with `CACHE_PATH`).
+Listens on `127.0.0.1:5001` (override with `PORT`/`HOST`). Persists cache to `./data/cache.json` (override with `CACHE_PATH`).
+
+## Abuse controls
+
+- **Per-IP rate limits** (token bucket, keyed on `X-Forwarded-For` then socket): `/junctions` 60/min, `/logs` 30/min, `/health` 120/min. These are defense-in-depth behind the nginx edge `limit_req` and also cover direct tailnet access that bypasses nginx.
+- **Global Overpass concurrency cap** (`overpass-limit.ts`): at most 2 outbound Overpass fetches run at once (with a bounded wait queue; overflow → 502). In-flight dedup only collapses identical bboxes, so this is what stops a burst of *distinct* misses from fanning out into many parallel Overpass queries and getting the shared public instance banned.
+- **`LOGS_TOKEN`** (optional env var): when set, `/logs` requires `Authorization: Bearer <LOGS_TOKEN>` (constant-time check). Unset ⇒ `/logs` stays open (default), since it's used for remote debugging and discloses only bbox lookups + cache stats.
 
 ## Endpoint
 

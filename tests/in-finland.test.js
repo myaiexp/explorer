@@ -54,5 +54,23 @@ describe('inFinland bbox helper', () => {
     test('just past maxLng is outside', () => {
         expect(globalThis.inFinland(60.0, 32.001)).toBe(false);
     });
+
+    // The remaining two box edges (maxLat 71.0, minLng 19.0) had no coverage, so
+    // an off-by-one shrinking either edge would pass unnoticed (audit).
+    test('exact maxLat boundary (71.0) is inside', () => {
+        expect(globalThis.inFinland(71.0, 25.0)).toBe(true);
+    });
+
+    test('just past maxLat is outside', () => {
+        expect(globalThis.inFinland(71.001, 25.0)).toBe(false);
+    });
+
+    test('exact minLng boundary (19.0) is inside', () => {
+        expect(globalThis.inFinland(60.0, 19.0)).toBe(true);
+    });
+
+    test('just below minLng is outside', () => {
+        expect(globalThis.inFinland(60.0, 18.999)).toBe(false);
+    });
 });
 

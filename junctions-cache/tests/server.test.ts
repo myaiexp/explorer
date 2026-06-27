@@ -72,8 +72,15 @@ async function get(fetch: FetchFn, path: string): Promise<{ status: number; body
 beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); });
 afterEach(() => {
     vi.useRealTimers();
+    delete process.env.LOGS_TOKEN; // never leak the /logs auth gate into other tests
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
+
+// get() with explicit request headers (e.g. an Authorization bearer for /logs).
+async function getWith(fetch: FetchFn, path: string, headers: Record<string, string>): Promise<{ status: number; body: any }> {
+    const res = await fetch(new Request('http://localhost' + path, { headers }));
+    return { status: res.status, body: await res.json() };
+}
 
 // A small, in-range, well-under-area-cap bbox used wherever a VALID bbox is just
 // a precondition (every request — including anchored mode — requires one).
@@ -366,5 +373,59 @@ describe('GET /logs', () => {
         const { status, body } = await get(fetch, '/logs?n=10');
         expect(status).toBe(200);
         expect(body).toEqual({ logs: [] });
+    });
+});
+
+// ── GET /logs — optional LOGS_TOKEN bearer gate ────────────────────────────────
+// Unset LOGS_TOKEN ⇒ /logs is open (default, covered above). When LOGS_TOKEN is
+// set, /logs requires Authorization: Bearer <LOGS_TOKEN> (constant-time check) and
+// 401s on a missing/wrong token without ever touching getRecentLogs.
+
+describe('GET /logs — LOGS_TOKEN auth gate', () => {
+    test('with LOGS_TOKEN set, a missing token → 401 and no log read', async () => {
+        process.env.LOGS_TOKEN = 'sekret';
+        const { fetch, getRecentLogs } = await loadServer();
+        const { status, body } = await get(fetch, '/logs');
+        expect(status).toBe(401);
+        expect(body).toEqual({ error: 'unauthorized' });
+        expect(getRecentLogs).not.toHaveBeenCalled();
+    });
+
+    test('with LOGS_TOKEN set, a wrong token → 401', async () => {
+        process.env.LOGS_TOKEN = 'sekret';
+        const { fetch, getRecentLogs } = await loadServer();
+        const { status } = await getWith(fetch, '/logs', { Authorization: 'Bearer nope' });
+        expect(status).toBe(401);
+        expect(getRecentLogs).not.toHaveBeenCalled();
+    });
+
+    test('with LOGS_TOKEN set, the correct bearer token → 200 and serves logs', async () => {
+        process.env.LOGS_TOKEN = 'sekret';
+        const { fetch, getRecentLogs } = await loadServer();
+        getRecentLogs.mockReturnValue([{ ts: 't', level: 'INFO', fields: {} }]);
+        const { status, body } = await getWith(fetch, '/logs?n=5', { Authorization: 'Bearer sekret' });
+        expect(status).toBe(200);
+        expect(getRecentLogs).toHaveBeenCalledWith(5);
+        expect(body).toEqual({ logs: [{ ts: 't', level: 'INFO', fields: {} }] });
+    });
+});
+
+// ── Per-IP rate limiting is wired onto the routes ─────────────────────────────
+// The token-bucket logic itself is unit-tested in rate-limit.test.ts; here we
+// only prove the middleware is actually attached to the live routes. All requests
+// from a captured app.fetch share one bucket (no X-Forwarded-For ⇒ key "unknown"),
+// so exhausting the /junctions budget (60/min) yields a 429 on the 61st call.
+
+describe('per-IP rate limiting', () => {
+    test('/junctions 429s once the per-IP budget is exhausted (cache hits still count)', async () => {
+        const { fetch, fetchMock } = await loadServer();
+        fetchMock.mockResolvedValue([{ lat: 60.2, lng: 24.2 }]); // first call misses, rest hit cache
+        const statuses: number[] = [];
+        for (let i = 0; i < 61; i++) {
+            statuses.push((await get(fetch, `/junctions?bbox=${OK_BBOX}`)).status);
+        }
+        expect(statuses.slice(0, 60).every(s => s === 200)).toBe(true); // budget = 60
+        expect(statuses[60]).toBe(429);                                  // 61st blocked
+        expect(fetchMock).toHaveBeenCalledTimes(1);                      // only the first miss fetched
     });
 });

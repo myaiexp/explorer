@@ -40,6 +40,68 @@ describe('GET /api/:username', () => {
     expect(visit).toHaveProperty('username');
   });
 
+  // A fully-populated visit pins the COMPLETE response shape: every column in
+  // schema.ts's visits table round-trips with its stored value, and the row has
+  // exactly those keys — so a DB column rename or a dropped select() field fails
+  // here instead of silently shipping a partial row (audit).
+  test('a visit row returns every schema.visits column with the stored value', async () => {
+    const { username: u, token } = await createTestAccount();
+    const full = {
+      id: 'full-visit-1',
+      username: u,
+      date: '2026-04-27T10:00:00.000Z',
+      startLat: 60.1699,
+      startLng: 24.9384,
+      startLabel: 'Home',
+      destLat: 60.2055,
+      destLng: 24.6559,
+      destName: 'Forest trail',
+      poiCategory: 'nature',
+      tripMode: 'loop',
+      distance: 7.5,
+      routeCoords: [[60.1699, 24.9384], [60.2055, 24.6559]],
+      routeDuration: 5400,
+      returnRouteCoords: [[60.2055, 24.6559], [60.1699, 24.9384]],
+      returnRouteDuration: 5200,
+    };
+    await db.insert(schema.visits).values(full);
+
+    const res = await app.request(`/api/${u}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { visits: Record<string, unknown>[] };
+    expect(body.visits).toHaveLength(1);
+    const v = body.visits[0];
+
+    expect(v.id).toBe(full.id);
+    expect(v.username).toBe(u);
+    // date/updatedAt are timestamptz columns — compare by instant, not by the
+    // exact string the pg driver formats them as.
+    expect(new Date(v.date as string).getTime()).toBe(new Date(full.date).getTime());
+    expect(v.startLat).toBe(full.startLat);
+    expect(v.startLng).toBe(full.startLng);
+    expect(v.startLabel).toBe(full.startLabel);
+    expect(v.destLat).toBe(full.destLat);
+    expect(v.destLng).toBe(full.destLng);
+    expect(v.destName).toBe(full.destName);
+    expect(v.poiCategory).toBe(full.poiCategory);
+    expect(v.tripMode).toBe(full.tripMode);
+    expect(v.distance).toBe(full.distance);
+    expect(v.routeCoords).toEqual(full.routeCoords);
+    expect(v.routeDuration).toBe(full.routeDuration);
+    expect(v.returnRouteCoords).toEqual(full.returnRouteCoords);
+    expect(v.returnRouteDuration).toBe(full.returnRouteDuration);
+    expect(typeof v.updatedAt).toBe('string');
+    expect(Number.isNaN(new Date(v.updatedAt as string).getTime())).toBe(false);
+
+    // Exact key set — adding/renaming/dropping a visits column breaks this.
+    expect(Object.keys(v).sort()).toEqual([
+      'date', 'destLat', 'destLng', 'destName', 'distance', 'id',
+      'poiCategory', 'returnRouteCoords', 'returnRouteDuration', 'routeCoords',
+      'routeDuration', 'startLabel', 'startLat', 'startLng', 'tripMode',
+      'updatedAt', 'username',
+    ]);
+  });
+
   test('returns empty arrays when user has no data', async () => {
     const { username: u, token } = await createTestAccount();
     const res = await app.request(`/api/${u}`, { headers: authHeaders(token) });

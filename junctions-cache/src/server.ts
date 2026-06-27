@@ -1,8 +1,11 @@
 // Hono entrypoint — single GET /junctions endpoint backed by the cache.
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { serve } from '@hono/node-server';
+import { timingSafeEqual } from 'node:crypto';
 import { getJunctions, getJunctionsAnchored, loadCache, cacheSize } from './cache.js';
+import { ipRateLimit } from './rate-limit.js';
 import { log, getRecentLogs } from './log.js';
 import type { Bbox, ExcludePreset } from './overpass.js';
 
@@ -11,16 +14,37 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const MAX_AREA_DEG2 = 4;     // hard cap on bbox area to prevent abuse (~ 444km × 222km in Finland)
 const MAX_RADIUS_KM = 50;    // sanity cap on start-anchored radius
 
+// Per-IP rate limiters (defense-in-depth behind the nginx edge limiter; also
+// guards the direct-tailnet path that bypasses nginx). /junctions is generous
+// since re-rolls are mostly cache hits — the global Overpass concurrency cap in
+// cache.ts is the real upstream protection.
+const junctionsRateLimit = ipRateLimit(60);
+const logsRateLimit = ipRateLimit(30);
+const healthRateLimit = ipRateLimit(120);
+
+// /logs serves recent request events back to a remote caller (debugging). It is
+// open by default to keep that workflow frictionless; setting LOGS_TOKEN gates it
+// behind a constant-time bearer-token check (audit: unauthenticated log dump).
+function logsTokenOk(c: Context): boolean {
+    const expected = process.env.LOGS_TOKEN;
+    if (!expected) return true;
+    const got = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    const a = Buffer.from(got);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+}
+
 const app = new Hono();
 
-app.get('/health', c => c.json({ ok: true, cacheEntries: cacheSize() }));
+app.get('/health', healthRateLimit, c => c.json({ ok: true, cacheEntries: cacheSize() }));
 
-app.get('/logs', c => {
+app.get('/logs', logsRateLimit, c => {
+    if (!logsTokenOk(c)) return c.json({ error: 'unauthorized' }, 401);
     const n = parseInt(c.req.query('n') ?? '100', 10);
     return c.json({ logs: getRecentLogs(Number.isNaN(n) ? 100 : n) });
 });
 
-app.get('/junctions', async c => {
+app.get('/junctions', junctionsRateLimit, async c => {
     const bboxStr = c.req.query('bbox');
     const excludeStr = (c.req.query('exclude') ?? 'default') as string;
     const startLatStr = c.req.query('startLat');
