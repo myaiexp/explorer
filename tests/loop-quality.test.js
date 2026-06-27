@@ -51,8 +51,16 @@ describe('loopOverlapFraction', () => {
             [60.1818, 24.95], [60.1718, 24.94], // offset ~200 m north
         ];
         const overlap = globalThis.loopOverlapFraction(out, ret);
-        expect(overlap).toBeGreaterThan(0.4);
-        expect(overlap).toBeLessThan(0.7);
+        // Exact derivation (OVERLAP_PROXIMITY_M = 25 m):
+        //   out→ret: out[2]/out[3] coincide with ret[1]/ret[0] (0 m apart);
+        //            out[0]/out[1] sit ~200 m from their nearest ret point
+        //            (> 25 m) → 2 of 4 near = 0.50
+        //   ret→out: symmetric by the same coordinates → 2 of 4 = 0.50
+        //   max(0.50, 0.50) = 0.50 — a genuine half-shared loop.
+        // Tight bound: an implementation drifting to 0.41 (just over
+        // OVERLAP_BAD_THRESHOLD) or 0.69 now fails instead of sliding through
+        // the old 0.4–0.7 window.
+        expect(overlap).toBeCloseTo(0.5, 5);
     });
 
     test('empty outbound → 0', () => {

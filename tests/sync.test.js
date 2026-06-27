@@ -79,10 +79,23 @@ function mockFetchOffline() {
     global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
 }
 
+// Drain the async pipeline so assertions run after sync.js has fully settled.
+// sync.js flushes its outbox one entry per setTimeout(0) "tick" — each
+// successful upsert reschedules the next via scheduleFlush(0) — so a fixed
+// handful of awaits is fragile: adding an async hop (or draining one more
+// entry) could let a test resolve before the flush completes and pass
+// vacuously. Instead we yield a generous, bounded number of real-timer
+// macrotask turns; each turn fires one pending setTimeout(0) and drains all
+// microtasks around it, advancing the reschedule chain by exactly one hop.
+// FLUSH_TURNS is far above any realistic chain depth (current max ~2 hops),
+// so the helper stays correct as the pipeline grows.
+// Safe only under real timers — every caller runs without fake timers (the
+// fake-timer tests drive the clock explicitly via advanceTimersByTimeAsync).
+const FLUSH_TURNS = 20;
 async function flushPromises() {
-    await new Promise(r => setTimeout(r, 0));
-    await new Promise(r => setTimeout(r, 0));
-    await new Promise(r => setTimeout(r, 0));
+    for (let i = 0; i < FLUSH_TURNS; i++) {
+        await new Promise(r => setTimeout(r, 0));
+    }
 }
 
 function setupAnonymous() {

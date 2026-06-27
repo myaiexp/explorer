@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders } from './helpers.js';
 import { schema } from '../src/db.js';
@@ -58,6 +58,53 @@ describe('POST /api/accounts', () => {
     expect(created).toHaveLength(1);
     const all = await db.select().from(schema.accounts);
     expect(all).toHaveLength(2);
+  });
+
+  test('createAccount throws RangeError after exactly 10 collisions and creates no row', async () => {
+    const { createAccount } = await import('../src/username.js');
+    // Pre-insert the one name the generator will ever produce, so every attempt
+    // collides on the PK — the retry loop can never find a free username.
+    const fixedName = 'always-collide-1';
+    await db.insert(schema.accounts).values({ username: fixedName, token: 'preexisting-token' });
+
+    let callCount = 0;
+    const genUsername = () => {
+      callCount++;
+      return fixedName;
+    };
+
+    await expect(createAccount(db, null, genUsername)).rejects.toThrow(RangeError);
+    // The loop is capped at 10 attempts; a regression in the cap is caught here.
+    expect(callCount).toBe(10);
+    // No new account was created — only the pre-inserted collision row remains.
+    const all = await db.select().from(schema.accounts);
+    expect(all).toHaveLength(1);
+    expect(all[0].username).toBe(fixedName);
+  });
+
+  test('returns 503 when every username generation collides (retries exhausted)', async () => {
+    // Force the route's default generator path to collide on every insert by
+    // making the DB raise a unique-violation (SQLSTATE 23505) each time. After
+    // 10 exhausted attempts createAccount throws RangeError, which the handler
+    // maps to a 503.
+    const uniqueViolation = Object.assign(new Error('duplicate key value'), { code: '23505' });
+    const insertSpy = vi.spyOn(db, 'insert').mockReturnValue({
+      values: () => Promise.reject(uniqueViolation),
+    } as unknown as ReturnType<typeof db.insert>);
+
+    try {
+      const res = await app.request('/api/accounts', { method: 'POST' });
+      expect(res.status).toBe(503);
+      const body = await res.json() as { error: string };
+      expect(body.error).toBe('Could not generate unique username');
+      // 10 insert attempts were made before giving up.
+      expect(insertSpy).toHaveBeenCalledTimes(10);
+    } finally {
+      insertSpy.mockRestore();
+    }
+    // No account row leaked through the failed attempts.
+    const all = await db.select().from(schema.accounts);
+    expect(all).toHaveLength(0);
   });
 });
 
