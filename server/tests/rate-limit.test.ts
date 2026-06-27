@@ -80,6 +80,28 @@ describe('rate limiting', () => {
     expect(Number(res.headers.get('Retry-After'))).toBeGreaterThan(0);
   });
 
+  test('X-Forwarded-For chain keys the bucket on the first (client) IP only', async () => {
+    const { username: u, token } = await createTestAccount();
+    // Proxy chain: real client is 1.2.3.4, 5.6.7.8 is a downstream proxy hop.
+    const chained = { ...authHeaders(token), 'x-forwarded-for': '1.2.3.4, 5.6.7.8' };
+
+    // Drain the 60 reads/min budget via the chain header.
+    for (let i = 0; i < 60; i++) {
+      expect((await app.request(`/api/${u}`, { headers: chained })).status).toBe(200);
+    }
+    expect((await app.request(`/api/${u}`, { headers: chained })).status).toBe(429);
+
+    // The first IP alone hits the *same* bucket → still blocked, proving the
+    // key is '1.2.3.4' (the leading element), not the whole header string.
+    const firstAlone = { ...authHeaders(token), 'x-forwarded-for': '1.2.3.4' };
+    expect((await app.request(`/api/${u}`, { headers: firstAlone })).status).toBe(429);
+
+    // The downstream proxy IP alone is a *different* bucket → allowed, proving
+    // trailing chain hops are never used for keying.
+    const secondAlone = { ...authHeaders(token), 'x-forwarded-for': '5.6.7.8' };
+    expect((await app.request(`/api/${u}`, { headers: secondAlone })).status).toBe(200);
+  });
+
   test('10 account creations/hour per IP — 11th returns 429', async () => {
     // All requests come from 'unknown' IP (no x-forwarded-for header)
     for (let i = 0; i < 10; i++) {

@@ -22,26 +22,6 @@ beforeAll(() => {
     new vm.Script(SCREENING_SRC).runInThisContext();
 });
 
-// ── passesStage1 ────────────────────────────────────────────────────────────
-
-test('passesStage1: null nearestResult → false', () => {
-    expect(globalThis.passesStage1({lat:60.17,lng:24.94}, null)).toBe(false);
-});
-
-test('passesStage1: snap within threshold → true', () => {
-    // ~100 m offset, well under 500 m
-    const c = {lat:60.17, lng:24.94};
-    const n = {lat:60.1709, lng:24.94};
-    expect(globalThis.passesStage1(c, n)).toBe(true);
-});
-
-test('passesStage1: snap exceeds threshold → false', () => {
-    // ~1.1 km offset, over 500 m
-    const c = {lat:60.17, lng:24.94};
-    const n = {lat:60.18, lng:24.94};
-    expect(globalThis.passesStage1(c, n)).toBe(false);
-});
-
 // ── detourRatio ────────────────────────────────────────────────────────────
 
 test('detourRatio: identical km → 1.0', () => {

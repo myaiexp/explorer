@@ -3,18 +3,21 @@ import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import {
   sectionWriteRateLimit,
+  accountCreationRateLimit,
   resetRateLimiter,
   sweepStaleBuckets,
 } from '../src/middleware/rate-limit.js';
 
-// Thin harness: mount the real middleware on a no-op 204 handler so the bucket
-// logic is exercised directly — no DB, no account-creation rate limit, and fake
-// timers stay clear of the pg pool. IP comes from x-forwarded-for (see getIp),
-// the username from the path param (read inside the middleware, as in sections.ts).
+// Thin harness: mount the real middleware on no-op handlers so the bucket logic
+// is exercised directly — no DB, no real account creation, and fake timers stay
+// clear of the pg pool. IP comes from x-forwarded-for (see getIp), the username
+// from the path param (read inside the middleware, as in sections.ts).
 const app = new Hono();
 app.put('/:username/write', sectionWriteRateLimit(), (c) => c.body(null, 204));
+app.post('/accounts', accountCreationRateLimit(), (c) => c.body(null, 201));
 
 const WINDOW_MS = 60_000;
+const HOUR_MS = 3_600_000;
 
 function write(username: string, ip: string): Promise<Response> {
   return app.request(`/${username}/write`, {
@@ -92,6 +95,30 @@ describe('sectionWriteRateLimit — per-username bucket (60/min)', () => {
       // Advance past the window → bucket refills → next write passes.
       vi.advanceTimersByTime(WINDOW_MS);
       expect((await write(username, ip)).status).toBe(204);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('accountCreationRateLimit — IP account bucket (10/hour)', () => {
+  test('account-creation bucket refills after the hour window elapses', async () => {
+    vi.useFakeTimers();
+    try {
+      const ip = '198.51.100.99';
+      const create = () =>
+        app.request('/accounts', { method: 'POST', headers: { 'x-forwarded-for': ip } });
+
+      // Drain the 10/hour budget.
+      for (let i = 0; i < 10; i++) {
+        expect((await create()).status).toBe(201);
+      }
+      // 11th within the same hour → bucket empty → 429.
+      expect((await create()).status).toBe(429);
+
+      // Advance past the hour window → bucket refills → next creation passes.
+      vi.advanceTimersByTime(HOUR_MS);
+      expect((await create()).status).toBe(201);
     } finally {
       vi.useRealTimers();
     }
