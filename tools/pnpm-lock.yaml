@@ -1,0 +1,22 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@garmin/fitsdk':
+        specifier: ^21.208.0
+        version: 21.208.0
+
+packages:
+
+  '@garmin/fitsdk@21.208.0':
+    resolution: {integrity: sha512-mEmPHyzqaS3bb8n+yaOmgmBo/0CUrsLsN5J4viAUN5Kh6+YiwdvPh5OAzb2Jgy2IaI23q7mGtNr/8WRJC1+HoA==}
+
+snapshots:
+
+  '@garmin/fitsdk@21.208.0': {}

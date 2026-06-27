@@ -7,6 +7,6 @@
     "validate-fit": "node validate-fit.mjs"
   },
   "devDependencies": {
-    "@garmin/fitsdk": "^21.158.0"
+    "@garmin/fitsdk": "^21.208.0"
   }
 }
