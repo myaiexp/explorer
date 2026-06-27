@@ -118,6 +118,11 @@ const rejectCases: Array<[string, unknown]> = [
   ['destLat non-number', { ...validRow(), destLat: undefined }],
   ['destLng non-number', { ...validRow(), destLng: '25' }],
   ['distance non-number', { ...validRow(), distance: '4.2' }],
+  ['date malformed (not ISO)', { ...validRow(), date: 'last tuesday' }],
+  ['date SQL-ish string', { ...validRow(), date: 'DROP TABLE visits' }],
+  ['startLabel over 500 chars', { ...validRow(), startLabel: 'x'.repeat(501) }],
+  ['destName over 2000 chars', { ...validRow(), destName: 'x'.repeat(2001) }],
+  ['tripMode over 500 chars', { ...validRow(), tripMode: 'x'.repeat(501) }],
 ];
 
 describe('reject-path parity across both call sites', () => {
@@ -133,6 +138,27 @@ describe('reject-path parity across both call sites', () => {
     // Pre-refactor only checked typeof === 'number'; NaN/Infinity passed. Lock that in.
     expect(validateRouteRow({ ...validRow(), distance: NaN }, USER)).not.toBeNull();
     expect(validateVisit({ ...validRow(), startLat: Infinity }, USER)).not.toBeNull();
+  });
+});
+
+describe('field bounds (date + length caps)', () => {
+  it('accepts a bare ISO date (YYYY-MM-DD) and a full timestamp', () => {
+    expect(validateRouteRow({ ...validRow(), date: '2026-04-27' }, USER)).not.toBeNull();
+    expect(validateRouteRow({ ...validRow(), date: '2026-04-27T10:00:00.123Z' }, USER)).not.toBeNull();
+  });
+
+  it('accepts strings exactly at the length cap (500 label / 2000 name)', () => {
+    expect(validateRouteRow({ ...validRow(), startLabel: 'x'.repeat(500) }, USER)).not.toBeNull();
+    expect(validateRouteRow({ ...validRow(), destName: 'x'.repeat(2000) }, USER)).not.toBeNull();
+    expect(validateRouteRow({ ...validRow(), tripMode: 'x'.repeat(500) }, USER)).not.toBeNull();
+  });
+
+  it('rejects an over-length poiCategory on validateVisit only', () => {
+    // poiCategory is visit-only; the shared core/history never reads it, so it
+    // passes there but must be capped where it is actually stored.
+    expect(validateVisit({ ...validRow(), poiCategory: 'x'.repeat(501) }, USER)).toBeNull();
+    expect(validateVisit({ ...validRow(), poiCategory: 'x'.repeat(500) }, USER)).not.toBeNull();
+    expect(validateHistoryRow({ ...validRow(), poiCategory: 'x'.repeat(501) }, USER)).not.toBeNull();
   });
 });
 

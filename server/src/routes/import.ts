@@ -6,6 +6,14 @@ import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 import { isObject, isArray } from '../lib/type-guards.js';
 import { accountAuth } from '../middleware/auth.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
+import {
+  MAX_LABEL_LEN,
+  MAX_NAME_LEN,
+  MAX_FAVORITE_PAYLOAD_LEN,
+  isIsoDate,
+  tooLong,
+  payloadLength,
+} from '../lib/validate-fields.js';
 
 // Shared validation + normalization for route-shaped rows. `visits` and `history` have an
 // identical column shape except `visits` also carries `poiCategory`, so both call sites reuse
@@ -15,12 +23,15 @@ export function validateRouteRow(row: unknown, username: string): typeof schema.
   if (!isObject(row)) return null;
   const { id, date, startLat, startLng, destLat, destLng, distance } = row;
   if (typeof id !== 'string' || !id) return null;
-  if (typeof date !== 'string' || !date) return null;
+  if (!isIsoDate(date)) return null;
   if (typeof startLat !== 'number') return null;
   if (typeof startLng !== 'number') return null;
   if (typeof destLat !== 'number') return null;
   if (typeof destLng !== 'number') return null;
   if (typeof distance !== 'number') return null;
+  if (tooLong(row.startLabel, MAX_LABEL_LEN)) return null;
+  if (tooLong(row.destName, MAX_NAME_LEN)) return null;
+  if (tooLong(row.tripMode, MAX_LABEL_LEN)) return null;
 
   return {
     id,
@@ -45,6 +56,7 @@ export function validateVisit(row: unknown, username: string): typeof schema.vis
   const base = validateRouteRow(row, username);
   if (!base) return null;
   // base !== null guarantees row is an object; re-narrow to read the visit-only poiCategory.
+  if (isObject(row) && tooLong(row.poiCategory, MAX_LABEL_LEN)) return null;
   const poiCategory = isObject(row) && typeof row.poiCategory === 'string' ? row.poiCategory : null;
   return { ...base, poiCategory };
 }
@@ -54,6 +66,7 @@ function validateFavorite(row: unknown, username: string): typeof schema.favorit
   const { id, payload } = row;
   if (typeof id !== 'string' || !id) return null;
   if (payload === undefined || payload === null) return null;
+  if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN) return null;
   return { id, username, payload };
 }
 
@@ -63,6 +76,8 @@ function validateSavedLocation(row: unknown, username: string): typeof schema.sa
   if (typeof id !== 'string' || !id) return null;
   if (typeof label !== 'string') return null;
   if (typeof value !== 'string') return null;
+  if (label.length > MAX_LABEL_LEN) return null;
+  if (value.length > MAX_LABEL_LEN) return null;
   return { id, username, label, value };
 }
 

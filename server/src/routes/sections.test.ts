@@ -266,11 +266,32 @@ describe('favorites PUT', () => {
     expect(Object.keys(ops[0].conf!.set)).toEqual(['payload']);
   });
 
-  it('uses the whole body as payload when no payload field is present', async () => {
+  it('uses the whole body as payload when no payload field is present (client contract)', async () => {
+    // The client PUTs the favorite object directly (no `payload` wrapper), so the
+    // whole body becomes the stored JSONB. This fall-back is intentional.
     const { db, ops } = makeFakeDb({ userExists: true });
     const app = sectionsRoutes(db);
     await app.request('/alice/favorites/f1', jsonReq('PUT', { color: 'red', n: 3 }));
     expect(ops[0].row?.payload).toEqual({ color: 'red', n: 3 });
+  });
+
+  it('rejects an over-size payload with 400 (explicit payload field)', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const huge = { blob: 'x'.repeat(520_000) }; // serialized length > 512_000
+    const res = await app.request('/alice/favorites/f1', jsonReq('PUT', { payload: huge }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/payload exceeds maximum size/);
+    expect(ops).toHaveLength(0);
+  });
+
+  it('rejects an over-size whole-body favorite with 400 (fall-back path is capped too)', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/favorites/f1', jsonReq('PUT', { blob: 'x'.repeat(520_000) }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/payload exceeds maximum size/);
+    expect(ops).toHaveLength(0);
   });
 });
 
@@ -392,6 +413,88 @@ describe('history DELETE', () => {
     const app = sectionsRoutes(db);
     const res = await app.request('/alice/history/h1', { method: 'DELETE', headers: AUTH });
     expect(res.status).toBe(401);
+    expect(ops).toHaveLength(0);
+  });
+});
+
+// ── field validation: ISO date, string-length caps, body-size limit ───────────
+
+describe('date validation', () => {
+  it('rejects a present-but-malformed date with a 400 and ISO message', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ date: 'last tuesday' })));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'date must be an ISO-8601 timestamp' });
+    expect(ops).toHaveLength(0);
+  });
+
+  it('rejects a SQL-ish string masquerading as a date with 400', async () => {
+    const { db } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/history/h1', jsonReq('PUT', validTrip({ date: 'DROP TABLE visits' })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/ISO-8601/);
+  });
+
+  it('accepts a bare ISO date (YYYY-MM-DD) prefix', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ date: '2026-06-02' })));
+    expect(res.status).toBe(204);
+    expect(ops[0].row?.date).toBe('2026-06-02');
+  });
+});
+
+describe('string-length caps', () => {
+  it('rejects an over-length startLabel with 400', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ startLabel: 'x'.repeat(501) })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/startLabel exceeds maximum length/);
+    expect(ops).toHaveLength(0);
+  });
+
+  it('rejects an over-length poiCategory with 400', async () => {
+    const { db } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ poiCategory: 'x'.repeat(501) })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/poiCategory exceeds maximum length/);
+  });
+
+  it('rejects an over-length saved-location label with 400', async () => {
+    const { db } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/saved-locations/s1', jsonReq('PUT', { label: 'x'.repeat(501), value: 'ok' }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/label exceeds maximum length/);
+  });
+
+  it('accepts a destName up to the 2000-char name cap', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ destName: 'x'.repeat(2000) })));
+    expect(res.status).toBe(204);
+    expect(ops[0].row?.destName).toHaveLength(2000);
+  });
+});
+
+describe('request body-size limit', () => {
+  it('rejects an oversized body (giant unknown key) with 413 before the handler runs', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    // > 1 MiB total — bodyLimit rejects via the Content-Length fast path (the realistic
+    // case: nginx and fetch both set it) before c.req.json() buffers the body.
+    const body = JSON.stringify(validTrip({ junk: 'x'.repeat(1_100_000) }));
+    const res = await app.request('/alice/visits/v1', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'content-length': String(body.length), ...AUTH },
+      body,
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'Request body too large' });
     expect(ops).toHaveLength(0);
   });
 });
