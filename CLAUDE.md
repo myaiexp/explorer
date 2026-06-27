@@ -4,6 +4,8 @@
 
 **Wander** — a static web app for generating random walking/exploration destinations. Pick a starting location and radius, get a random POI or point, see a routed round-trip or one-way path on a Leaflet map.
 
+UI design system (colors, typography, components, layout) is documented in `DESIGN.md`.
+
 ## Architecture
 
 Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`, in `index.html` `defer` load order:
@@ -25,7 +27,9 @@ Frontend is a vanilla static app, no build step. Source files served as-is from 
 - `toast.js` — transient #notification toast (globalThis-exposed; showToast + showError/showSuccess/showWarning wrappers)
 - `app.js` — main application logic (orchestration, DOM, Leaflet; consumes the geometry/overpass/osrm/storage modules as globals)
 
-Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom (`pnpm vitest run tests/sync.test.js`); backend tests run with `cd server && pnpm test`.
+Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom — run the whole suite with `pnpm test` (root `test` script is `vitest run`, covering every `tests/*.test.js`); backend tests run with `cd server && pnpm test`.
+
+`junctions-cache/` is a separate Hono microservice — a server-side Overpass cache for OSM road-junction lookups that powers the frontend's smart-routing path. Listens on `127.0.0.1:5001`, systemd unit `wander-junctions.service`, deployed on **shelly** (not the VPS) at `/srv/wander-junctions/junctions-cache` via the `shelly` git remote; VPS nginx proxies `https://mase.fi/api/junctions/` to it. Has its own `package.json`/tests — see `junctions-cache/README.md` for endpoints, cache modes, and deploy details.
 
 **Auth model:** each account has a high-entropy secret `token` (32 random bytes, base64url) issued by `POST /accounts` (the only time it's returned). Every read/write — `GET /:username`, the section PUT/DELETE routes, `POST /:username/import`, `DELETE /:username` — requires `Authorization: Bearer <token>` (verified constant-time in `middleware/auth.ts`). The human-readable username is only a public handle, not a credential. Missing-account and wrong-token both return an identical `401` so the endpoint can't be used to enumerate usernames; `GET /:username` is also IP rate-limited (60/min). The client (`sync.js`) stores the token in the `walk_cloud_backup` consent record and carries it in the URL **fragment** (`/explorer/<username>#t=<token>`) so the private link works cross-device while keeping the secret out of server logs/Referer. The overflow menu's "Copy backup link" button copies that full link. Opening a link-sourced account on a device that isn't already bound to it (no stored consent record for that username) always prompts a `window.confirm` before adopting it — even on a fresh/empty browser — so a shared link can't silently bind a visitor's browser to a foreign account and harvest their future walks.
 
@@ -60,3 +64,5 @@ pnpm build             # tsc → dist/
 ```
 
 Deploy with `deploy` — pushes to Forgejo, which triggers `forgejo-deploy` to: check out into `~/Projects/explorer`, build the server, run migrations, and rsync frontend assets to `/var/www/html/explorer`. The local `deploy` script then restarts `explorer-api.service`.
+
+Canonical service and nginx config files live in `deploy/`: `nginx-explorer.conf`, `nginx-osrm-fi.conf`, the `explorer-api.service` unit, and `shelly-osrm/` (the self-hosted OSRM-foot service, refresh timer, and install script for the shelly box). The `junctions-cache` service is deployed separately (see its README).
