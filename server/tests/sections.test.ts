@@ -242,6 +242,48 @@ describe('favorites', () => {
     });
     expect(res.status).toBe(401);
   });
+
+  test('DELETE favorites returns 401 when no matching account exists (no existence oracle)', async () => {
+    const res = await app.request('/api/no-such-user-99/favorites/f-1', {
+      method: 'DELETE',
+      headers: authHeaders('any-token'),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  // buildRow uses `body.payload !== undefined ? body.payload : body` — a wrapper
+  // key is optional, and its absence is a deliberate passthrough (the client PUTs
+  // the favorite object directly; see toggleFavorite in app.js). Pin both branches
+  // so a refactor can't silently change what gets persisted.
+  test('PUT favorites with a { payload } wrapper stores the wrapped value', async () => {
+    const { username: u, token } = await createTestAccount();
+    const id = 'fav-wrap';
+    const res = await app.request(`/api/${u}/favorites/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ payload: { name: 'Park' } }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+
+    const rows = await db.select().from(schema.favorites).where(eq(schema.favorites.id, id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload).toEqual({ name: 'Park' });
+  });
+
+  test('PUT favorites with no payload key stores the whole body as the payload', async () => {
+    const { username: u, token } = await createTestAccount();
+    const id = 'fav-nowrap';
+    const res = await app.request(`/api/${u}/favorites/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'Park' }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+
+    const rows = await db.select().from(schema.favorites).where(eq(schema.favorites.id, id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload).toEqual({ name: 'Park' });
+  });
 });
 
 describe('saved-locations', () => {
@@ -284,6 +326,33 @@ describe('saved-locations', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  test('PUT saved-locations returns 400 when value missing', async () => {
+    const { username: u, token } = await createTestAccount();
+    const res = await app.request(`/api/${u}/saved-locations/sl-bad-2`, {
+      method: 'PUT',
+      body: JSON.stringify({ label: 'Home' }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT saved-locations returns 401 when no matching account exists (no existence oracle)', async () => {
+    const res = await app.request('/api/no-such-user-99/saved-locations/sl-1', {
+      method: 'PUT',
+      body: JSON.stringify({ label: 'Home', value: '60.1,25.1' }),
+      headers: { 'content-type': 'application/json', ...authHeaders('any-token') },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test('DELETE saved-locations returns 401 when no matching account exists (no existence oracle)', async () => {
+    const res = await app.request('/api/no-such-user-99/saved-locations/sl-1', {
+      method: 'DELETE',
+      headers: authHeaders('any-token'),
+    });
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('history', () => {
@@ -318,5 +387,62 @@ describe('history', () => {
     expect(res.status).toBe(204);
     const rows = await db.select().from(schema.history).where(eq(schema.history.id, id));
     expect(rows).toHaveLength(0);
+  });
+
+  // History shares buildTripBase with visits, so the same required-field set
+  // (date/startLat/startLng/destLat/destLng/distance) gates the upsert.
+  test('PUT history returns 400 when required fields missing', async () => {
+    const { username: u, token } = await createTestAccount();
+    const res = await app.request(`/api/${u}/history/h-bad`, {
+      method: 'PUT',
+      body: JSON.stringify({ date: '2026-04-27T10:00:00Z' }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT history returns 401 when no matching account exists (no existence oracle)', async () => {
+    const res = await app.request('/api/no-such-user-99/history/h-1', {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload('h-1', 3)),
+      headers: { 'content-type': 'application/json', ...authHeaders('any-token') },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test('DELETE history returns 401 when no matching account exists (no existence oracle)', async () => {
+    const res = await app.request('/api/no-such-user-99/history/h-1', {
+      method: 'DELETE',
+      headers: authHeaders('any-token'),
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+// The PUT handler is generic over all four sections: parse JSON (→ 400 'Invalid
+// JSON' on failure), then reject any non-object body (→ 400 'Body must be an
+// object', e.g. a JSON array). Both branches sit before buildRow, so exercising
+// them on one section (visits) covers the shared path for all of them.
+describe('PUT body-shape validation (generic across sections)', () => {
+  test("returns 400 'Invalid JSON' for an unparseable body", async () => {
+    const { username: u, token } = await createTestAccount();
+    const res = await app.request(`/api/${u}/visits/v-badjson`, {
+      method: 'PUT',
+      body: 'not-json',
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Invalid JSON' });
+  });
+
+  test("returns 400 'Body must be an object' for a JSON array body", async () => {
+    const { username: u, token } = await createTestAccount();
+    const res = await app.request(`/api/${u}/visits/v-array`, {
+      method: 'PUT',
+      body: '[]',
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'Body must be an object' });
   });
 });
