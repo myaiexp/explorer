@@ -1,3 +1,4 @@
+// Token-bucket rate limiting with bounded, self-evicting buckets.
 import type { Context, Next } from 'hono';
 
 interface Bucket {
@@ -5,10 +6,28 @@ interface Bucket {
   lastRefill: number;
 }
 
+// Window lengths, hoisted so the middlewares and the sweeper agree on them.
+const MINUTE = 60_000;
+const HOUR = 3_600_000;
+
 const usernameBuckets = new Map<string, Bucket>();
 const ipWriteBuckets = new Map<string, Bucket>();
 const ipAccountBuckets = new Map<string, Bucket>();
 const ipReadBuckets = new Map<string, Bucket>();
+
+// Pairs each bucket map with the window it is consumed under, so the sweeper
+// can decide staleness per map (a bucket idle ≥ its window is fully refilled
+// and therefore indistinguishable from a never-seen key).
+const REGISTRY: ReadonlyArray<{ buckets: Map<string, Bucket>; windowMs: number }> = [
+  { buckets: usernameBuckets, windowMs: MINUTE },
+  { buckets: ipWriteBuckets, windowMs: MINUTE },
+  { buckets: ipReadBuckets, windowMs: MINUTE },
+  { buckets: ipAccountBuckets, windowMs: HOUR },
+];
+
+// Hard ceiling per map. Far above any realistic active-client count for a
+// 1–2 minute window, but bounds heap under a spoofed-X-Forwarded-For flood.
+const MAX_BUCKETS = 50_000;
 
 export function resetRateLimiter(): void {
   usernameBuckets.clear();
@@ -26,6 +45,17 @@ function getIp(c: Context): string {
   );
 }
 
+// Continuously accrue tokens at limit/windowMs per ms, capped at limit. This is
+// the token-bucket refill — unlike a fixed window it never grants a full reset
+// at a boundary, so a client cannot drain the bucket and immediately drain it
+// again (the classic double-rate burst).
+function refill(bucket: Bucket, limit: number, windowMs: number, now: number): void {
+  const elapsed = now - bucket.lastRefill;
+  if (elapsed <= 0) return;
+  bucket.tokens = Math.min(limit, bucket.tokens + (elapsed / windowMs) * limit);
+  bucket.lastRefill = now;
+}
+
 function consume(
   buckets: Map<string, Bucket>,
   key: string,
@@ -37,28 +67,75 @@ function consume(
   if (!bucket) {
     bucket = { tokens: limit, lastRefill: now };
     buckets.set(key, bucket);
+  } else {
+    refill(bucket, limit, windowMs, now);
   }
-  // refill if window elapsed
-  if (now - bucket.lastRefill >= windowMs) {
-    bucket.tokens = limit;
-    bucket.lastRefill = now;
-  }
-  if (bucket.tokens <= 0) {
+  if (bucket.tokens < 1) {
     return false;
   }
   bucket.tokens -= 1;
   return true;
 }
 
+// Seconds until ≥1 token is available again. Called right after a failed
+// consume(), so the bucket's tokens are current as of `now` (refill just ran).
 function retryAfter(
   buckets: Map<string, Bucket>,
   key: string,
+  limit: number,
   windowMs: number
 ): number {
   const bucket = buckets.get(key);
   if (!bucket) return Math.ceil(windowMs / 1000);
-  const elapsed = Date.now() - bucket.lastRefill;
-  return Math.ceil((windowMs - elapsed) / 1000);
+  const deficit = 1 - bucket.tokens;
+  if (deficit <= 0) return 1;
+  const msNeeded = (deficit / limit) * windowMs;
+  return Math.max(1, Math.ceil(msNeeded / 1000));
+}
+
+// Evict buckets idle long enough to be indistinguishable from a fresh one, then
+// enforce the hard cap by dropping the least-recently-active survivors. Returns
+// the number of entries removed. `maxBuckets` is injectable for testing.
+export function sweepStaleBuckets(now = Date.now(), maxBuckets = MAX_BUCKETS): number {
+  let removed = 0;
+  for (const { buckets, windowMs } of REGISTRY) {
+    const cutoff = windowMs * 2;
+    for (const [key, bucket] of buckets) {
+      if (now - bucket.lastRefill >= cutoff) {
+        buckets.delete(key);
+        removed++;
+      }
+    }
+    if (buckets.size > maxBuckets) {
+      const oldestFirst = [...buckets.entries()].sort(
+        (a, b) => a[1].lastRefill - b[1].lastRefill
+      );
+      const excess = buckets.size - maxBuckets;
+      for (let i = 0; i < excess; i++) {
+        buckets.delete(oldestFirst[i][0]);
+        removed++;
+      }
+    }
+  }
+  return removed;
+}
+
+let sweepTimer: ReturnType<typeof setInterval> | undefined;
+
+// Start periodic eviction of stale rate-limit buckets. Idempotent; the timer is
+// unref'd so it never keeps the process alive. Called once from the server entry
+// point — tests drive sweepStaleBuckets() directly instead.
+export function startBucketSweeper(intervalMs = 5 * MINUTE): void {
+  if (sweepTimer) return;
+  sweepTimer = setInterval(() => sweepStaleBuckets(), intervalMs);
+  sweepTimer.unref?.();
+}
+
+export function stopBucketSweeper(): void {
+  if (sweepTimer) {
+    clearInterval(sweepTimer);
+    sweepTimer = undefined;
+  }
 }
 
 /** 60 writes/min per username param + 300 writes/min per IP */
@@ -66,14 +143,13 @@ export function sectionWriteRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = getIp(c);
     const username = c.req.param('username') ?? 'unknown';
-    const WINDOW = 60_000;
 
-    if (!consume(usernameBuckets, username, 60, WINDOW)) {
-      const secs = retryAfter(usernameBuckets, username, WINDOW);
+    if (!consume(usernameBuckets, username, 60, MINUTE)) {
+      const secs = retryAfter(usernameBuckets, username, 60, MINUTE);
       return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
     }
-    if (!consume(ipWriteBuckets, ip, 300, WINDOW)) {
-      const secs = retryAfter(ipWriteBuckets, ip, WINDOW);
+    if (!consume(ipWriteBuckets, ip, 300, MINUTE)) {
+      const secs = retryAfter(ipWriteBuckets, ip, 300, MINUTE);
       return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
     }
     await next();
@@ -84,10 +160,9 @@ export function sectionWriteRateLimit() {
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = getIp(c);
-    const WINDOW = 60_000;
 
-    if (!consume(ipReadBuckets, ip, 60, WINDOW)) {
-      const secs = retryAfter(ipReadBuckets, ip, WINDOW);
+    if (!consume(ipReadBuckets, ip, 60, MINUTE)) {
+      const secs = retryAfter(ipReadBuckets, ip, 60, MINUTE);
       return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
     }
     await next();
@@ -98,10 +173,9 @@ export function readRateLimit() {
 export function accountCreationRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = getIp(c);
-    const WINDOW = 3_600_000;
 
-    if (!consume(ipAccountBuckets, ip, 10, WINDOW)) {
-      const secs = retryAfter(ipAccountBuckets, ip, WINDOW);
+    if (!consume(ipAccountBuckets, ip, 10, HOUR)) {
+      const secs = retryAfter(ipAccountBuckets, ip, 10, HOUR);
       return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
     }
     await next();
