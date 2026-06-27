@@ -138,6 +138,44 @@ describe('wideBboxFromStart', () => {
         expect(b.maxLat).toBeCloseTo(5 / 111, 6);
         expect(b.maxLng).toBeCloseTo(5 / 111, 6);
     });
+
+    // Regression guard for the `Math.max(0.05, cos(lat))` floor (audit #3160).
+    // The 89.99° tests above pin exact clamp values; these pin the *property* the
+    // floor exists for. Mutation-killing: at 89.95° with startLng 0 (away from the
+    // ±180 clamp) the floor caps lngPad at 10/(111·0.05) ≈ 1.8°, whereas dropping
+    // the floor would let cos(89.95°)≈0.000873 inflate it to ≈103° — a near-global
+    // strip. Asserting the bound therefore fails if the floor is removed (the
+    // ±180 clamp can't mask it here, unlike at startLng 179.9).
+    test('cos floor BOUNDS lng padding at high latitude instead of letting it explode (audit #3160)', () => {
+        const flooredLngPad = 10 / (111 * 0.05);   // ≈ 1.8018° — the cap the floor enforces
+        for (const startLat of [89.95, -89.95]) {
+            const b = wideBboxFromStart({ startLat, startLng: 0, maxKm: 10 });
+            for (const v of [b.minLat, b.minLng, b.maxLat, b.maxLng]) {
+                expect(Number.isFinite(v)).toBe(true);
+            }
+            // Without the floor these would be ≈ ±103°, not ≈ ±1.8°.
+            expect(Math.abs(b.maxLng)).toBeLessThanOrEqual(flooredLngPad + 1e-9);
+            expect(Math.abs(b.minLng)).toBeLessThanOrEqual(flooredLngPad + 1e-9);
+            expect(b.minLat).toBeGreaterThanOrEqual(-90);
+            expect(b.maxLat).toBeLessThanOrEqual(90);
+        }
+    });
+
+    test('exact pole (±90°) yields a finite, in-range bbox — no Infinity from cos→0 (audit #3160)', () => {
+        // cos(±90°·π/180) ≈ 6e-17 in IEEE754 (never exactly 0), so even unfloored
+        // this stays finite — but pin the invariant: every corner is finite and
+        // sits inside the valid lat/lng envelope after clamping.
+        for (const startLat of [90, -90]) {
+            const b = wideBboxFromStart({ startLat, startLng: 179.9, maxKm: 300 });
+            for (const v of [b.minLat, b.minLng, b.maxLat, b.maxLng]) {
+                expect(Number.isFinite(v)).toBe(true);
+            }
+            expect(b.minLat).toBeGreaterThanOrEqual(-90);
+            expect(b.maxLat).toBeLessThanOrEqual(90);
+            expect(b.minLng).toBeGreaterThanOrEqual(-180);
+            expect(b.maxLng).toBeLessThanOrEqual(180);
+        }
+    });
 });
 
 // ── getJunctions — inflight dedup + key quantization ─────────────────────────
@@ -160,6 +198,38 @@ describe('getJunctions', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(r1).toEqual({ cache: 'miss', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
         expect(r2).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+    });
+
+    test('a rejecting Overpass fetch rejects every concurrent waiter with the same error, then clears inflight (audit #3157)', async () => {
+        vi.useFakeTimers();
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        const boom = new Error('overpass 504');
+        let rejectFetch: (e: Error) => void = () => {};
+        fetchMock.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectFetch = reject; }));
+
+        const p1 = cache.getJunctions(BBOX, 'default');
+        const p2 = cache.getJunctions(BBOX, 'default');
+        // p2 shares p1's inflight promise — only one fetch is in flight.
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        // Attach handlers before rejecting so both rejections are observed
+        // (no unhandled-rejection noise) and we can assert the propagated value.
+        const e1 = p1.catch(e => e);
+        const e2 = p2.catch(e => e);
+        rejectFetch(boom);
+
+        // Both waiters reject with the identical error instance — the second
+        // caller is not insulated from the shared promise's failure.
+        expect(await e1).toBe(boom);
+        expect(await e2).toBe(boom);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        // The `finally` cleared the inflight entry (and nothing was stored), so a
+        // fresh call re-fetches rather than re-awaiting the dead rejected promise.
+        fetchMock.mockResolvedValueOnce([{ lat: 60.5, lng: 24.5 }]);
+        const retry = await cache.getJunctions(BBOX, 'default');
+        expect(retry).toEqual({ cache: 'miss', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     test('a stored result is served from cache without re-fetching', async () => {

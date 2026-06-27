@@ -72,3 +72,32 @@ describe('rankByNovelty', () => {
         expect(new Set(ranked)).toEqual(new Set(cands));
     });
 });
+
+// shuffleInPlace was only ever exercised indirectly through rankByNovelty,
+// leaving its contract — mutate-in-place (same array reference, not a copy) and
+// preserve the exact multiset of elements — unpinned, including the empty/single
+// degenerate inputs the Fisher-Yates loop short-circuits on (audit #1580).
+describe('shuffleInPlace', () => {
+    test('empty array → returns the SAME (empty) array reference', () => {
+        const arr = [];
+        const out = globalThis.shuffleInPlace(arr);
+        expect(out).toBe(arr);          // mutates in place, never allocates a copy
+        expect(out).toEqual([]);
+    });
+
+    test('single element → returns the SAME array reference, unchanged', () => {
+        const arr = [42];
+        const out = globalThis.shuffleInPlace(arr);
+        expect(out).toBe(arr);
+        expect(out).toEqual([42]);
+    });
+
+    test('multi-element → same reference (in-place) and preserves the exact multiset', () => {
+        const arr = [1, 2, 3, 4, 5];
+        const out = globalThis.shuffleInPlace(arr);
+        expect(out).toBe(arr);          // not a new array
+        // Order may change, but every original element survives exactly once.
+        expect([...out].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+        expect(out.length).toBe(5);
+    });
+});
