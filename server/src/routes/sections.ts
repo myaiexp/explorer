@@ -20,14 +20,6 @@ import {
   payloadLength,
 } from '../lib/validate-fields.js';
 
-async function userExists(db: Db, username: string): Promise<boolean> {
-  const rows = await db
-    .select({ username: schema.accounts.username })
-    .from(schema.accounts)
-    .where(eq(schema.accounts.username, username));
-  return rows.length > 0;
-}
-
 // A section's domain rule: turn a validated object body into the row to upsert,
 // or a 400 error message. `id`/`username` come from the path.
 type BuildRow<T extends PgTable> = (
@@ -42,9 +34,11 @@ interface Section<T extends PgTable & { id: PgColumn; username: PgColumn }> {
   buildRow: BuildRow<T>;
 }
 
-// Wires PUT (upsert) + DELETE for one section. The PUT body flow — userExists →
-// JSON parse → isObject guard → buildRow → upsert — and the DELETE flow are
-// identical across sections; only `table`/`path`/`buildRow` differ.
+// Wires PUT (upsert) + DELETE for one section. The PUT body flow — JSON parse →
+// isObject guard → buildRow → upsert — and the DELETE flow are identical across
+// sections; only `table`/`path`/`buildRow` differ. The `auth` (accountAuth)
+// middleware runs first and 401s when the account is missing, so both handlers
+// can assume :username names an existing account — no re-check needed here.
 function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn }>(
   app: Hono,
   db: Db,
@@ -58,10 +52,6 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
   app.put(`/:username/${path}/:id`, rl, auth, writeBodyLimit, async (c) => {
     const username = c.req.param('username')!;
     const id = c.req.param('id')!;
-
-    if (!(await userExists(db, username))) {
-      return c.json({ error: 'User not found' }, 404);
-    }
 
     let body: unknown;
     try {
@@ -90,10 +80,6 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
   app.delete(`/:username/${path}/:id`, rl, auth, async (c) => {
     const username = c.req.param('username')!;
     const id = c.req.param('id')!;
-
-    if (!(await userExists(db, username))) {
-      return c.json({ error: 'User not found' }, 404);
-    }
 
     await db.delete(table).where(and(eq(table.id, id), eq(table.username, username)));
 

@@ -11,6 +11,12 @@
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import SYNC_SRC from '../sync.js?raw';
+// Side-effect import: storage.js owns the walk_* key strings and readStoredArray
+// that sync.js resolves off globalThis at call time. Importing it runs its
+// top-level globalThis assignments once, so those globals exist before any
+// ExplorerSync method runs (mirrors prod, where both scripts have executed by the
+// time init() is called). Values are constant, so a single load suffices.
+import '../storage.js';
 
 // ── Load sync.js source once ─────────────────────────────────────────────────
 

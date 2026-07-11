@@ -12,12 +12,12 @@
 
     var BACKUP_KEY = 'walk_cloud_backup';
     var OUTBOX_KEY = 'walk_sync_outbox';
-    var DATA_KEYS = {
-        visits: 'walk_visits',
-        favorites: 'walk_favorites',
-        savedLocations: 'walk_saved_locations',
-        history: 'walk_history'
-    };
+    // The four synced sections, in sync order. These names are sync.js's own
+    // vocabulary — they key the server's GET response and the outbox entries.
+    // The 'walk_*' localStorage keys they map to are owned by storage.js (loaded
+    // alongside us); sectionKey() resolves each from storage.js's globals so the
+    // key strings have exactly one home and a rename there can't silently fork.
+    var DATA_SECTIONS = ['visits', 'favorites', 'savedLocations', 'history'];
     var USERNAME_RE = /^[a-z]+-[a-z]+-\d{1,2}$/;
     var API_BASE = '/explorer/api';
 
@@ -95,25 +95,30 @@
         }
     }
 
-    function readSection(section) {
-        try {
-            var raw = localStorage.getItem(DATA_KEYS[section]);
-            return raw ? JSON.parse(raw) : [];
-        } catch (e) {
-            return [];
+    // Section's localStorage key, resolved from storage.js's globals at call time
+    // (they aren't set at our IIFE time — storage.js loads after sync.js — but are
+    // by the time any method here runs). storage.js is the single owner of these
+    // key strings; resolving them here keeps sync.js from forking a second copy.
+    function sectionKey(section) {
+        switch (section) {
+            case 'visits': return globalThis.STORAGE_KEY;
+            case 'favorites': return globalThis.FAVORITES_KEY;
+            case 'savedLocations': return globalThis.SAVED_LOCATIONS_KEY;
+            case 'history': return globalThis.HISTORY_KEY;
+            default: return undefined;
         }
     }
 
+    // Delegates the parse-or-default contract to storage.js's readStoredArray so
+    // it lives in exactly one place (corrupt/missing → []).
+    function readSection(section) {
+        return globalThis.readStoredArray(sectionKey(section));
+    }
+
     function isLocalStorageEmpty() {
-        var sections = Object.keys(DATA_KEYS);
-        for (var i = 0; i < sections.length; i++) {
-            var raw = localStorage.getItem(DATA_KEYS[sections[i]]);
-            if (raw) {
-                try {
-                    var arr = JSON.parse(raw);
-                    if (Array.isArray(arr) && arr.length > 0) { return false; }
-                } catch (e) { /* skip */ }
-            }
+        for (var i = 0; i < DATA_SECTIONS.length; i++) {
+            var arr = readSection(DATA_SECTIONS[i]);
+            if (Array.isArray(arr) && arr.length > 0) { return false; }
         }
         return true;
     }
@@ -151,16 +156,16 @@
             }
         });
         var merged = Object.keys(byId).map(function (id) { return byId[id]; });
-        localStorage.setItem(DATA_KEYS[section], JSON.stringify(merged));
+        localStorage.setItem(sectionKey(section), JSON.stringify(merged));
     }
 
     function populateSection(section, serverRows) {
-        localStorage.setItem(DATA_KEYS[section], JSON.stringify(normalizeServerRows(section, serverRows)));
+        localStorage.setItem(sectionKey(section), JSON.stringify(normalizeServerRows(section, serverRows)));
     }
 
     function wipeSections() {
-        Object.keys(DATA_KEYS).forEach(function (s) {
-            localStorage.removeItem(DATA_KEYS[s]);
+        DATA_SECTIONS.forEach(function (s) {
+            localStorage.removeItem(sectionKey(s));
         });
     }
 
@@ -177,6 +182,23 @@
             opts.body = JSON.stringify(body);
         }
         return fetch(API_BASE + path, opts);
+    }
+
+    // Download an account's four sections and apply each via applyRow
+    // (mergeSection on the user's own device, populateSection on a fresh load).
+    // onSuccess runs after a successful download (bind + persist consent); onFail
+    // runs on a non-ok response or a network error (roll back partial auth state).
+    // Shared by init's three load paths — they differ only in applyRow and hooks.
+    function loadAccount(username, applyRow, onSuccess, onFail) {
+        return apiFetch('GET', '/' + username).then(function (res) {
+            if (!res.ok) { if (onFail) { onFail(); } return; }
+            return res.json().then(function (data) {
+                DATA_SECTIONS.forEach(function (s) {
+                    if (Array.isArray(data[s])) { applyRow(s, data[s]); }
+                });
+                if (onSuccess) { onSuccess(); }
+            });
+        }).catch(function () { if (onFail) { onFail(); } });
     }
 
     // ── Flush worker ─────────────────────────────────────────────────────────────
@@ -289,6 +311,17 @@
             var urlUser = parseUrlUsername();
             var urlToken = parseUrlToken();
 
+            // Adopting a URL-sourced account (Cases 3 & 4/5): on a successful
+            // download bind + persist consent; on failure roll back the token that
+            // was set tentatively before the fetch.
+            function bindAdoptedAccount() {
+                writeConsentRecord({ state: 'accepted', username: urlUser, token: urlToken });
+                _state = 'accepted';
+                _username = urlUser;
+                fireStateChange();
+            }
+            function rollbackToken() { _token = null; }
+
             // ── Case 1: no URL segment ──────────────────────────────────────────
             if (!urlUser) {
                 if (flag && flag.state === 'accepted') {
@@ -311,14 +344,9 @@
                 _state = 'accepted';
                 _username = urlUser;
                 _token = flag.token || urlToken || null;
-                return apiFetch('GET', '/' + urlUser).then(function (res) {
-                    if (!res.ok) { return; }
-                    return res.json().then(function (data) {
-                        ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
-                            if (Array.isArray(data[s])) { mergeSection(s, data[s]); }
-                        });
-                    });
-                }).catch(function () { /* silent */ });
+                // Own device: merge server rows into local (last-write-wins). A
+                // failed GET is silently ignored — state is already 'accepted'.
+                return loadAccount(urlUser, mergeSection);
             }
 
             // Loading a NEW/different account from the URL requires the secret
@@ -355,18 +383,7 @@
                     return Promise.resolve();
                 }
                 _token = urlToken;
-                return apiFetch('GET', '/' + urlUser).then(function (res) {
-                    if (!res.ok) { _token = null; return; }
-                    return res.json().then(function (data) {
-                        ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
-                            if (Array.isArray(data[s])) { populateSection(s, data[s]); }
-                        });
-                        writeConsentRecord({ state: 'accepted', username: urlUser, token: urlToken });
-                        _state = 'accepted';
-                        _username = urlUser;
-                        fireStateChange();
-                    });
-                }).catch(function () { _token = null; });
+                return loadAccount(urlUser, populateSection, bindAdoptedAccount, rollbackToken);
             }
 
             // Case 4/5: URL segment + token with non-empty localStorage or different stored user
@@ -385,18 +402,7 @@
             // Confirmed — wipe and load
             _token = urlToken;
             wipeSections();
-            return apiFetch('GET', '/' + urlUser).then(function (res) {
-                if (!res.ok) { _token = null; return; }
-                return res.json().then(function (data) {
-                    ['visits', 'favorites', 'savedLocations', 'history'].forEach(function (s) {
-                        if (Array.isArray(data[s])) { populateSection(s, data[s]); }
-                    });
-                    writeConsentRecord({ state: 'accepted', username: urlUser, token: urlToken });
-                    _state = 'accepted';
-                    _username = urlUser;
-                    fireStateChange();
-                });
-            }).catch(function () { _token = null; });
+            return loadAccount(urlUser, populateSection, bindAdoptedAccount, rollbackToken);
         },
 
         getState: function () {
@@ -451,7 +457,7 @@
                     }
                 });
                 if (changed) {
-                    localStorage.setItem(DATA_KEYS.savedLocations, JSON.stringify(locs));
+                    localStorage.setItem(sectionKey('savedLocations'), JSON.stringify(locs));
                 }
 
                 // Build full payload

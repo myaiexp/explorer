@@ -13,9 +13,12 @@ interface RecordedOp {
 }
 
 // Fake Db reproducing the exact drizzle call chains the handlers use:
-//   userExists: db.select({...}).from(t).where(c)            -> rows[]
-//   upsert:     db.insert(t).values(row).onConflictDoUpdate  -> void
-//   delete:     db.delete(t).where(c)                         -> void
+//   auth:   db.select({...}).from(accounts).where(c)        -> rows[]
+//   upsert: db.insert(t).values(row).onConflictDoUpdate     -> void
+//   delete: db.delete(t).where(c)                           -> void
+// `userExists` models whether the account row exists: true → the select returns
+// the account (auth finds a matching token), false → [] (auth 401s). The handlers
+// no longer re-check existence themselves — accountAuth is the sole gate.
 function makeFakeDb(opts: { userExists: boolean }) {
   const ops: RecordedOp[] = [];
   const db = {
@@ -24,7 +27,7 @@ function makeFakeDb(opts: { userExists: boolean }) {
         from() {
           return {
             where() {
-              // Auth middleware reads `.token`; userExists reads `.length`.
+              // Auth middleware reads `.token` off row 0.
               return Promise.resolve(opts.userExists ? [{ username: 'alice', token: 'sekret' }] : []);
             },
           };
@@ -88,7 +91,7 @@ beforeEach(() => {
 describe('section PUT — shared guards', () => {
   it('returns 401 when the account does not exist (auth blocks before the body)', async () => {
     // A missing account has no token to match, so auth rejects with 401 before
-    // the handler's userExists/body checks ever run.
+    // the handler's body checks ever run.
     const { db, ops } = makeFakeDb({ userExists: false });
     const app = sectionsRoutes(db);
     const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip()));
