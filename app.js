@@ -91,12 +91,13 @@ let currentSession = null;
 
 // Map-click mode for "pick destination" feature
 let pickMode = false;
-let pickHandler = null;
 
 // ─── Sync helpers ────────────────────────────────────────────────────────────
 
+// ExplorerSync (sync.js) is loaded before app.js in index.html's fixed defer
+// order, so it is always defined by the time any of these run — no typeof guard.
 function maybeRequestConsent() {
-    if (typeof ExplorerSync !== 'undefined' && ExplorerSync.getState().state === 'anonymous') {
+    if (ExplorerSync.getState().state === 'anonymous') {
         ExplorerSync.requestConsent();
     }
 }
@@ -548,14 +549,12 @@ function showConsentToast() {
 window.ExplorerSyncUI = { showConsentToast };
 
 function enableCloudBackup() {
-    if (typeof ExplorerSync === 'undefined') return;
     closeOverflowMenuIfOpen();
     ExplorerSync.requestConsent();
 }
 
 function copyBackupLink() {
     closeOverflowMenuIfOpen();
-    if (typeof ExplorerSync === 'undefined') return;
     const link = ExplorerSync.getState().link;
     if (!link) { showError('No backup link available.'); return; }
     navigator.clipboard.writeText(link).then(
@@ -581,25 +580,23 @@ function closeOverflowMenuIfOpen() {
 }
 
 function updateSyncMenu() {
-    if (typeof ExplorerSync === 'undefined') return;
     const s = ExplorerSync.getState();
     const status = document.getElementById('syncStatus');
     const usernameEl = document.getElementById('syncUsername');
     const enableBtn = document.getElementById('enableCloudBackupBtn');
     const copyLinkBtn = document.getElementById('copyBackupLinkBtn');
     const deleteBtn = document.getElementById('deleteCloudDataBtn');
-    if (!status || !enableBtn || !deleteBtn) return;
     if (s.state === 'accepted') {
         status.style.display = '';
-        if (usernameEl) usernameEl.textContent = s.username || '';
+        usernameEl.textContent = s.username || '';
         enableBtn.style.display = 'none';
-        if (copyLinkBtn) copyLinkBtn.style.display = '';
+        copyLinkBtn.style.display = '';
         deleteBtn.style.display = '';
     } else {
         status.style.display = 'none';
-        if (usernameEl) usernameEl.textContent = '';
+        usernameEl.textContent = '';
         enableBtn.style.display = '';
-        if (copyLinkBtn) copyLinkBtn.style.display = 'none';
+        copyLinkBtn.style.display = 'none';
         deleteBtn.style.display = 'none';
     }
 }
@@ -869,24 +866,38 @@ function randomCandidatePool(startLat, startLng, straightMin, straightMax) {
         generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
 }
 
+// The random-annulus resolution shape: pool + initial novelty pick, no name.
+// Used both as the Overpass fallback and for the 'any' strategy.
+function randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests) {
+    const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
+    return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+}
+
 // Resolve the destination candidate pool for the chosen locationType. POI/road
-// strategies hit Overpass and fall back to a random annulus pool on failure or
-// empty result; 'any' goes straight to a random pool. Returns the full pool plus
-// an initial novelty pick: { candidatePool, dest, destName }.
+// strategies hit Overpass and fall back to a random annulus pool; 'any' goes
+// straight to a random pool. Two distinct fallbacks with accurate progress
+// messages: a genuine fetch failure (only the fetch call is in the try) vs. a
+// successful-but-empty response. Errors from capPool/pickMostNovelDestination
+// are NOT caught here — they surface to generateDestination's handler instead of
+// being silently masked as "Overpass unavailable". Returns the full pool plus an
+// initial novelty pick: { candidatePool, dest, destName }.
 async function resolveCandidatePool(locationType, locationTypeVal, startLat, startLng, straightMin, straightMax, onProgress, existingDests) {
     if (locationType === 'roads') {
         onProgress('Searching for roads in the area…');
+        let roads;
         try {
             const winterMode = document.getElementById('winterMode').checked;
-            const roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
-            if (roads.length === 0) throw new Error('empty');
-            const candidatePool = capPool(roads);
-            return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+            roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
         } catch {
             onProgress('Overpass unavailable, using random point…');
-            const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
-            return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
         }
+        if (roads.length === 0) {
+            onProgress('No roads found nearby, using random point…');
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+        }
+        const candidatePool = capPool(roads);
+        return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
     }
     if (locationType === 'any_poi' || locationType === 'poi') {
         const filters = locationType === 'any_poi'
@@ -896,21 +907,23 @@ async function resolveCandidatePool(locationType, locationTypeVal, startLat, sta
             ? 'any POI'
             : POI_TYPES.find(p => p.key === locationTypeVal)?.label || 'places';
         onProgress(`Searching for ${label}…`);
+        let pois;
         try {
-            const pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
-            if (pois.length === 0) throw new Error('empty');
-            const candidatePool = capPool(pois);
-            const dest = pickMostNovelDestination(candidatePool, existingDests);
-            return { candidatePool, dest, destName: dest.name };
+            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
         } catch {
             onProgress('Overpass unavailable, using random point…');
-            const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
-            return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
         }
+        if (pois.length === 0) {
+            onProgress('No matching places found nearby, using random point…');
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+        }
+        const candidatePool = capPool(pois);
+        const dest = pickMostNovelDestination(candidatePool, existingDests);
+        return { candidatePool, dest, destName: dest.name };
     }
     // locationType === 'any': a fully random point anywhere in the annulus.
-    const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
-    return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+    return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
 }
 
 // Screen the candidate pool for water-reachability before route building.
@@ -1127,9 +1140,8 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
 
 // Map-click handler installed while "pick on map" mode is active: resolve the
 // start, build a route to the clicked point, and render it. Hoisted to module
-// scope (was an inline closure in togglePickMode) so the two function scopes
-// read independently. Stored in the module-level `pickHandler` so exitPickMode
-// can detach it.
+// scope (was an inline closure in togglePickMode) so exitPickMode can detach it
+// by reference with map.off('click', handlePickClick).
 async function handlePickClick(e) {
     exitPickMode();
     const destLat = e.latlng.lat;
@@ -1171,8 +1183,7 @@ function togglePickMode() {
     map.getContainer().style.cursor = 'crosshair';
     showSuccess('Click anywhere on the map to set your destination');
 
-    pickHandler = handlePickClick;
-    map.on('click', pickHandler);
+    map.on('click', handlePickClick);
 }
 
 function exitPickMode() {
@@ -1181,10 +1192,7 @@ function exitPickMode() {
     btn.classList.remove('active');
     btn.textContent = 'Pick on map';
     map.getContainer().style.cursor = '';
-    if (pickHandler) {
-        map.off('click', pickHandler);
-        pickHandler = null;
-    }
+    map.off('click', handlePickClick);
 }
 
 // ─── Mark as Visited ─────────────────────────────────────────────────────────
@@ -1898,10 +1906,8 @@ restoreSettings();
 initSettingsListeners();
 renderSavedLocations();
 updateSaveLocationBtn();
-if (typeof ExplorerSync !== 'undefined') {
-    ExplorerSync.init().finally(updateSyncMenu);
-    updateSyncMenu();
-}
+ExplorerSync.init().finally(updateSyncMenu);
+updateSyncMenu();
 renderVisitedLayer();
 updateVisitedCounter();
 renderFavoritesSection();
