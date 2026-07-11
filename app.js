@@ -121,7 +121,7 @@ function syncedDelete(key, arr, section, id) {
 
 // ─── localStorage ─────────────────────────────────────────────────────────────
 // readStoredArray + the array accessors (getVisits, getSavedLocations,
-// getFavorites, getHistory) and their storage keys (STORAGE_KEY,
+// getFavorites, getHistory) and their storage keys (VISITS_KEY,
 // SAVED_LOCATIONS_KEY, FAVORITES_KEY, HISTORY_KEY) live in storage.js (loaded
 // before app.js); used here as globals.
 
@@ -1136,7 +1136,7 @@ function markAsVisited() {
     if (currentSession.visitId) {
         const undoneId = currentSession.visitId;
         const visits = getVisits().filter(v => v.id !== undoneId);
-        syncedDelete(STORAGE_KEY, visits, 'visits', String(undoneId));
+        syncedDelete(VISITS_KEY, visits, 'visits', String(undoneId));
         currentSession.visitId = null;
         btn.classList.remove('marked');
         btn.textContent = 'Mark as visited';
@@ -1151,7 +1151,7 @@ function markAsVisited() {
 
     const visits = getVisits();
     visits.push(visit);
-    syncedPut(STORAGE_KEY, visits, 'visits', visit.id, visit);
+    syncedPut(VISITS_KEY, visits, 'visits', visit.id, visit);
     maybeRequestConsent();
     currentSession.visitId = visit.id;
 
@@ -1361,7 +1361,7 @@ function importVisits(event) {
             for (const v of newEntries) {
                 if (!v.id) v.id = crypto.randomUUID();
             }
-            writeStoredArray(STORAGE_KEY, [...existing, ...newEntries]);
+            writeStoredArray(VISITS_KEY, [...existing, ...newEntries]);
             for (const v of newEntries) {
                 ExplorerSync.mutate('visits', 'put', v.id, v);
             }

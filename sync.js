@@ -101,7 +101,7 @@
     // key strings; resolving them here keeps sync.js from forking a second copy.
     function sectionKey(section) {
         switch (section) {
-            case 'visits': return globalThis.STORAGE_KEY;
+            case 'visits': return globalThis.VISITS_KEY;
             case 'favorites': return globalThis.FAVORITES_KEY;
             case 'savedLocations': return globalThis.SAVED_LOCATIONS_KEY;
             case 'history': return globalThis.HISTORY_KEY;

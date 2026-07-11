@@ -3,7 +3,7 @@
 // Loaded before app.js; the keys are used by app.js's setItem/sync calls too,
 // so they live here once and are exposed as globals.
 
-const STORAGE_KEY = 'walk_visits';
+const VISITS_KEY = 'walk_visits';
 const SAVED_LOCATIONS_KEY = 'walk_saved_locations';
 const FAVORITES_KEY = 'walk_favorites';
 const HISTORY_KEY = 'walk_history';
@@ -28,7 +28,7 @@ function writeStoredArray(key, arr) {
 }
 
 function getVisits() {
-    return readStoredArray(STORAGE_KEY);
+    return readStoredArray(VISITS_KEY);
 }
 
 function getSavedLocations() {
@@ -45,7 +45,7 @@ function getHistory() {
 
 // Explicit globalThis exports — app.js references these keys and accessors as
 // globals, and the vm-based tests read them off globalThis.
-globalThis.STORAGE_KEY = STORAGE_KEY;
+globalThis.VISITS_KEY = VISITS_KEY;
 globalThis.SAVED_LOCATIONS_KEY = SAVED_LOCATIONS_KEY;
 globalThis.FAVORITES_KEY = FAVORITES_KEY;
 globalThis.HISTORY_KEY = HISTORY_KEY;
