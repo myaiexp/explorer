@@ -158,8 +158,8 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     const minLng = Math.min(startLng, destLng);
     const maxLng = Math.max(startLng, destLng);
     const midLat = (minLat + maxLat) / 2;
-    const latPad = offsetKm / 111;
-    const lngPad = offsetKm / (111 * Math.cos(midLat * Math.PI / 180));
+    const latPad = kmToDegLat(offsetKm);
+    const lngPad = kmToDegLng(offsetKm, midLat);
     const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
     const exclude = winterMode ? 'winter' : 'default';
     const params = new URLSearchParams({ bbox, exclude });

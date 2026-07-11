@@ -32,9 +32,7 @@ async function queryOverpass(query, onProgress) {
 }
 
 async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter, onProgress) {
-    const latOffset = maxKm / 111;
-    const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
-    const bbox = `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
+    const bbox = bboxAround(centerLat, centerLng, maxKm);
     const filters = Array.isArray(filter) ? filter : [filter];
     const unionBody = filters.map(f => `node${f}(${bbox});\nway${f}(${bbox});`).join('\n');
     const query = `
@@ -63,16 +61,22 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter, onP
     return pois;
 }
 
+// TWIN: junctions-cache/src/overpass.ts carries the same HIGHWAY_EXCLUDE presets
+// and the same status-parse + retry loop (see queryOverpass below). The two are
+// deliberately independent — separate deployables (that ships to shelly, this
+// serves as a raw static asset), so there is no build step to share a constant
+// through. The exclude strings MUST stay byte-identical or the server-cached
+// junctions stop matching what a direct frontend Overpass call would compute.
+// tests/overpass-exclude-parity.test.js fails RED if these two copies drift.
 const HIGHWAY_EXCLUDE_DEFAULT = 'motorway|motorway_link|trunk|trunk_link|service|steps';
 const HIGHWAY_EXCLUDE_WINTER  = 'motorway|motorway_link|trunk|trunk_link|service|steps|path|track|footway|bridleway|cycleway|pedestrian';
 
 async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress, winterMode = false) {
-    const latOffset = maxKm / 111;
-    const lngOffset = maxKm / (111 * Math.cos(centerLat * Math.PI / 180));
     const exclude = winterMode ? HIGHWAY_EXCLUDE_WINTER : HIGHWAY_EXCLUDE_DEFAULT;
+    const bbox = bboxAround(centerLat, centerLng, maxKm);
     const query = `
         [out:json][timeout:15];
-        way["highway"]["highway"!~"${exclude}"](${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset});
+        way["highway"]["highway"!~"${exclude}"](${bbox});
         out center;
     `;
     const data = await queryOverpass(query, onProgress);

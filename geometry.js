@@ -1,6 +1,6 @@
 // Pure geometry helpers — distance, bearings, envelope vias, random points,
 // spread-slider mapping. No DOM, no network. Loaded after geo-utils.js (for
-// haversineKm) and before the overpass/osrm/app scripts that consume these.
+// haversineKm + kmToDegLat) and before the overpass/osrm/app scripts that consume these.
 
 // Haversine great-circle distance in km — canonical impl lives in geo-utils.js
 // (shared with novelty.js); geo-utils.js loads before this file per index.html.
@@ -22,7 +22,7 @@ function envelopeOffsetPoint(aLat, aLng, bLat, bLng, t, maxOffsetKm, side) {
     const lng0 = aLng + t * (bLng - aLng);
     const brng = bearingRad(aLat, aLng, bLat, bLng);
     const perpBrng = brng + side * (Math.PI / 2);
-    const envelope = Math.sin(Math.PI * t) * maxOffsetKm / 111;
+    const envelope = kmToDegLat(Math.sin(Math.PI * t) * maxOffsetKm);
     const lat = lat0 + envelope * Math.cos(perpBrng);
     const lng = lng0 + envelope * Math.sin(perpBrng) / Math.cos(lat0 * Math.PI / 180);
     return { lat, lng };
@@ -30,8 +30,8 @@ function envelopeOffsetPoint(aLat, aLng, bLat, bLng, t, maxOffsetKm, side) {
 
 // A uniformly random point in the annulus [minKm, maxKm] around a center.
 function generateRandomPointAnnulus(centerLat, centerLng, minKm, maxKm) {
-    const minDeg = minKm / 111;
-    const maxDeg = maxKm / 111;
+    const minDeg = kmToDegLat(minKm);
+    const maxDeg = kmToDegLat(maxKm);
     const r = Math.sqrt(Math.random() * (maxDeg ** 2 - minDeg ** 2) + minDeg ** 2);
     const theta = Math.random() * 2 * Math.PI;
     const latOffset = r * Math.cos(theta);

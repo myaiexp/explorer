@@ -6,24 +6,23 @@
  * non-module browser script; we run it via vm and read the helpers off globalThis.
  *
  * calculateDistance aliases globalThis.haversineKm (geo-utils.js in the browser),
- * so we stub it before loading.
+ * and the helpers now read globalThis.kmToDegLat for the km→degree projection, so
+ * we load the real geo-utils.js first (it provides both) before geometry.js.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import vm from 'node:vm';
 
+function load(name) {
+    new vm.Script(readFileSync(resolve(__dirname, `../${name}`), 'utf8')).runInThisContext();
+}
+
 beforeAll(() => {
-    // geometry.js reads globalThis.haversineKm at load (the calculateDistance alias).
-    globalThis.haversineKm = (la1, lo1, la2, lo2) => {
-        const R = 6371, toRad = Math.PI / 180;
-        const dLat = (la2 - la1) * toRad, dLng = (lo2 - lo1) * toRad;
-        const a = Math.sin(dLat / 2) ** 2 +
-            Math.cos(la1 * toRad) * Math.cos(la2 * toRad) * Math.sin(dLng / 2) ** 2;
-        return 2 * R * Math.asin(Math.sqrt(a));
-    };
-    const src = readFileSync(resolve(__dirname, '../geometry.js'), 'utf8');
-    new vm.Script(src).runInThisContext();
+    // geo-utils.js supplies haversineKm (the calculateDistance alias geometry.js
+    // reads at load) plus kmToDegLat/kmToDegLng, used inside the helpers below.
+    load('geo-utils.js');
+    load('geometry.js');
 });
 
 describe('computeSpreadParams', () => {

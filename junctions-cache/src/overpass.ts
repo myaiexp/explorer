@@ -9,8 +9,14 @@ const MAX_ATTEMPTS = 3;
 
 export type LatLng = { lat: number; lng: number };
 
-// Mirror the constants in explorer/app.js so server-cached results match what
-// the frontend would have computed from a direct Overpass call.
+// TWIN: explorer/overpass.js carries the same HIGHWAY_EXCLUDE presets and the
+// same status-parse + retry loop (queryOverpass there / fetchJunctionsFromOverpass
+// here). Deliberately independent — separate deployables (this ships to shelly,
+// that serves as a raw static asset), so there is no build step to share a
+// constant through. These exclude strings MUST stay byte-identical to the
+// frontend's or server-cached junctions stop matching what a direct frontend
+// Overpass call would compute. explorer/tests/overpass-exclude-parity.test.js
+// fails RED if the two copies drift.
 export type ExcludePreset = 'default' | 'winter';
 export const HIGHWAY_EXCLUDE: Record<ExcludePreset, string> = {
     default: 'motorway|motorway_link|trunk|trunk_link|service|steps',

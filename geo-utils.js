@@ -1,4 +1,4 @@
-// Shared geographic math — canonical Haversine great-circle distance.
+// Shared geographic math — Haversine distance + km→degree projection.
 // Loaded first — before fit-encoder/loop-quality/screening/bbox/novelty/app,
 // all of which read its globalThis-exposed helpers. Pure module, no DOM.
 
@@ -19,5 +19,33 @@ function haversineM(lat1, lng1, lat2, lng2) {
     return haversineKm(lat1, lng1, lat2, lng2) * 1000;
 }
 
+// km→degree projection (the small-angle "111 km per degree" approximation) —
+// the single named owner of a formula that was previously copied across
+// overpass.js, osrm.js, and geometry.js. Latitude spacing is ~constant; a fix
+// or precision change to the projection now happens in one place.
+
+// Kilometres → degrees of latitude.
+function kmToDegLat(km) {
+    return km / 111;
+}
+
+// Kilometres → degrees of longitude at `lat`. Longitude spacing shrinks by
+// cos(lat), so the same km-offset spans more degrees nearer the poles.
+function kmToDegLng(km, lat) {
+    return km / (111 * Math.cos(lat * Math.PI / 180));
+}
+
+// Overpass bbox string "minLat,minLng,maxLat,maxLng" for a square-ish box of
+// half-extent `km` centred on (centerLat, centerLng). Used by every symmetric
+// radius fetch so the corner math has exactly one source.
+function bboxAround(centerLat, centerLng, km) {
+    const latOffset = kmToDegLat(km);
+    const lngOffset = kmToDegLng(km, centerLat);
+    return `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
+}
+
 globalThis.haversineKm = haversineKm;
 globalThis.haversineM = haversineM;
+globalThis.kmToDegLat = kmToDegLat;
+globalThis.kmToDegLng = kmToDegLng;
+globalThis.bboxAround = bboxAround;

@@ -15,6 +15,9 @@
  */
 
 import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import vm from 'node:vm';
 import OSRM_SRC from '../osrm.js?raw';
 
 // Pull out the `async function fetchCorridorJunctions(...) { ... }` block by
@@ -36,6 +39,9 @@ function extractFn(name) {
 let fetchCorridorJunctions;
 
 beforeAll(() => {
+    // fetchCorridorJunctions pads its bbox via geo-utils.js's kmToDegLat/kmToDegLng
+    // globals; load the real source so they resolve through the new Function scope.
+    new vm.Script(readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8')).runInThisContext();
     const src = extractFn('fetchCorridorJunctions');
     // Evaluate the declaration and hand back a reference. new Function() bootstraps
     // the extracted source in the global scope (static local file content, not
