@@ -1,18 +1,14 @@
-import { config } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-// Load .env from the server directory (not CWD which may differ)
-const __dirname = dirname(fileURLToPath(import.meta.url));
-config({ path: resolve(__dirname, '../.env'), override: true });
-
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 import { schema } from '../src/db.js';
 import { resetRateLimiter } from '../src/middleware/rate-limit.js';
+import { resolveTestDatabaseUrl } from './test-db.js';
 
-export const db = createDb(process.env.DATABASE_URL!);
+// Guarded test DB URL — resolveTestDatabaseUrl() throws unless the db name ends
+// in _test, so truncateAll() below can never wipe production (see test-db.ts).
+export const db = createDb(resolveTestDatabaseUrl());
 export const app: Hono = createApp(db);
 export { resetRateLimiter };
 

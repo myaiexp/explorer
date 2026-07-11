@@ -1,10 +1,20 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { app, db, truncateAll, createTestAccount, VISIT_BODY, resetRateLimiter, authHeaders } from './helpers.js';
 import { schema } from '../src/db.js';
 
 beforeEach(async () => {
+  // Freeze Date so the token-bucket refill can't grant a token mid-test. These
+  // tests fire 60+ real DB-backed requests, which under a loaded serial run
+  // (fileParallelism:false) can exceed the ~1s that refills a 60/min bucket and
+  // let the request-that-should-429 slip through. Only Date is faked — real
+  // timers stay live so pg/hono async I/O is unaffected.
+  vi.useFakeTimers({ toFake: ['Date'] });
   await truncateAll();
   resetRateLimiter();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 const visitPayload = (id: string) => JSON.stringify({

@@ -40,7 +40,9 @@ function installFetch(opts: {
     statusThrows?: boolean;
 }) {
     let i = 0;
-    const fetchMock = vi.fn(async (url: string) => {
+    // Second param is declared (though unused here) so mock.calls entries are typed
+    // [string, RequestInit] — lets assertions read the init arg without unsafe casts.
+    const fetchMock = vi.fn(async (url: string, _init: RequestInit) => {
         if (url === OVERPASS_STATUS) {
             if (opts.statusThrows) throw new Error('status endpoint down');
             return { ok: true, status: 200, text: async () => opts.statusBody ?? '' };
@@ -150,7 +152,7 @@ describe('fetchJunctionsFromOverpass — request + retry/timeout', () => {
         await vi.runAllTimersAsync();
         expect(await p).toEqual([{ lat: 60.1, lng: 24.1 }]);
 
-        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+        const [url, init] = fetchMock.mock.calls[0]!;
         expect(url).toBe(OVERPASS_URL);
         expect(init.method).toBe('POST');
         const raw = init.body as string;
@@ -165,7 +167,7 @@ describe('fetchJunctionsFromOverpass — request + retry/timeout', () => {
         const p = fetchJunctionsFromOverpass(BBOX, 'winter');
         await vi.runAllTimersAsync();
         await p;
-        const decoded = decodeURIComponent((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+        const decoded = decodeURIComponent(fetchMock.mock.calls[0]![1].body as string);
         expect(decoded).toContain(HIGHWAY_EXCLUDE.winter);
     });
 
