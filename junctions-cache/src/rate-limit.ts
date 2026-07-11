@@ -5,6 +5,18 @@
 // nginx) and bounds a single client's request rate per endpoint. The client IP
 // is read from X-Forwarded-For (set by the nginx proxy), falling back to the
 // raw socket address for direct connections.
+//
+// TWIN: server/src/middleware/rate-limit.ts carries the same token-bucket core.
+// The two are deliberately kept independent — separate deployables on separate
+// boxes (this ships to shelly, that to the VPS), each with its own lockfile and
+// `--frozen-lockfile` deploy and its own per-package `tsc` rootDir, so there is
+// no workspace to share a package through. MIRROR any fix to the shared core in
+// BOTH files: the Bucket shape, refill()'s continuous accrual (incl. the
+// no-double-rate-burst property), the X-Forwarded-For-first client-IP extraction
+// (clientIp here / getIp there), the Retry-After deficit math, and the
+// idle-≥-2-windows staleness rule. Do NOT sync the per-service policy, which is
+// intentionally different: MAX_BUCKETS (10k here vs 50k there), inline eviction
+// here vs a periodic sweeper there, and factory-owned vs module-level maps.
 
 import type { Context, Next } from 'hono';
 

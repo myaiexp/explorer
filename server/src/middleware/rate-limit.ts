@@ -1,4 +1,16 @@
 // Token-bucket rate limiting with bounded, self-evicting buckets.
+//
+// TWIN: junctions-cache/src/rate-limit.ts carries the same token-bucket core.
+// Deliberately independent — separate deployables on separate boxes (that ships
+// to shelly, this to the VPS), each with its own lockfile / `--frozen-lockfile`
+// deploy / per-package `tsc` rootDir, so there is no workspace to share through.
+// MIRROR any fix to the shared core in BOTH files: the Bucket shape, refill()'s
+// continuous accrual (incl. the no-double-rate-burst property), the
+// X-Forwarded-For-first client-IP extraction (getIp here / clientIp there), the
+// Retry-After deficit math, and the idle-≥-2-windows staleness rule. Do NOT sync
+// the per-service policy: MAX_BUCKETS (50k here vs 10k there), the periodic
+// sweeper here vs inline eviction there, and module-level maps + REGISTRY here vs
+// factory-owned maps there.
 import type { Context, Next } from 'hono';
 
 interface Bucket {
