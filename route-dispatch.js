@@ -22,8 +22,8 @@
 //                    buildJunctionLoop, so the message is skipped there. default null
 //   spread           precomputed { offsetMult, viaTs } (computeSpreadParams);
 //                    forwarded to buildLoop / buildJunctionLoop so the routing
-//                    layer stays DOM-free. default undefined (those builders
-//                    fall back to the 50% params).
+//                    layer stays DOM-free. Required for loop builds — callers pass
+//                    getSpreadParams(); omitting it makes the loop builders throw.
 //
 // Returns { outbound, return, junctions }. junctions is null except for the
 // smart-loop branch, which returns the pool buildJunctionLoop used or fetched.

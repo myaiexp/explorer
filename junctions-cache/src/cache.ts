@@ -25,12 +25,12 @@ const inflight = new Map<string, Promise<LatLng[]>>();
 let dirty = false;
 let saving: Promise<void> | null = null;
 
-function q(n: number): string {
+function quantizeCoord(n: number): string {
     return n.toFixed(QUANTIZE_DECIMALS);
 }
 
 function keyFor(bbox: Bbox, exclude: ExcludePreset): string {
-    return `${q(bbox.minLat)},${q(bbox.minLng)},${q(bbox.maxLat)},${q(bbox.maxLng)}|${exclude}`;
+    return `${quantizeCoord(bbox.minLat)},${quantizeCoord(bbox.minLng)},${quantizeCoord(bbox.maxLat)},${quantizeCoord(bbox.maxLng)}|${exclude}`;
 }
 
 export type StartParams = { startLat: number; startLng: number; maxKm: number };

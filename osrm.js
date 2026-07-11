@@ -91,9 +91,12 @@ async function screeningTableFn(start, candidates) {
 // floored at 0.3 km) from start/dest + the spread params. Pure — no DOM.
 function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
     const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    // Defensive default to the 50% params if a caller omits spread — keeps this
-    // pure (no DOM) while every real call path passes an explicit spread.
-    const { offsetMult, viaTs } = spread || computeSpreadParams(50);
+    // spread is required. Production always passes getSpreadParams(), which itself
+    // defaults NaN/undefined slider values to the 50% params — so the graceful
+    // fallback already lives at the source. A missing spread here is a caller bug:
+    // destructure it directly so it throws loudly instead of silently substituting
+    // a spread the user never picked.
+    const { offsetMult, viaTs } = spread;
     const offsetKm = Math.max(0.1, straightDist * offsetMult);
     return {
         offsetKm,
