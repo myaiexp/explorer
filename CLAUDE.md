@@ -26,7 +26,9 @@ Frontend is a vanilla static app, no build step. Source files served as-is from 
 - `session.js` — pure session/route data-shaping: computeRouteTotals (badge distances/duration; one-way return leg = 0), routeSessionFields (route→currentSession mapping), snapshotSession (currentSession→persisted visit/favorite/history row) (globalThis-exposed; loaded after storage.js)
 - `route-dispatch.js` — route-build dispatch by trip mode (globalThis-exposed; calls buildOneWay/buildJunctionLoop/buildLoop from osrm.js)
 - `toast.js` — transient #notification toast (globalThis-exposed; showToast + showError/showSuccess/showWarning wrappers)
-- `app.js` — main application logic (orchestration, DOM, Leaflet; consumes the geometry/overpass/osrm/storage modules as globals)
+- `elevation.js` — route elevation profile: fetchElevations (Open-Meteo sampling) + renderElevationChart (hand-built SVG chart; takes the chart color as a param, no route-color state of its own) (globalThis-exposed; loaded after toast.js)
+- `export.js` — route file export: exportGPX / openFITModal / closeFITModal / confirmFITExport + mergeRouteCoords + triggerDownload (reads the active route from app.js's currentSession; uses FitEncoder + fetchElevations; globalThis-exposed; loaded after elevation.js)
+- `app.js` — main application logic (orchestration, DOM, Leaflet, map/session state, collections CRUD; consumes the geometry/overpass/osrm/storage/elevation/export modules as globals)
 
 Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom — run the whole suite with `pnpm test` (root `test` script is `vitest run`, covering every `tests/*.test.js`); backend tests run with `cd server && pnpm test`.
 

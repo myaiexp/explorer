@@ -613,110 +613,10 @@ function resetMarkVisitedBtn() {
 }
 
 // ─── Elevation profile ───────────────────────────────────────────────────────
-
-async function fetchElevations(coords) {
-    // Sample up to 100 points evenly along the route
-    const maxPts = 100;
-    const step = Math.max(1, Math.floor(coords.length / maxPts));
-    const sampled = [];
-    for (let i = 0; i < coords.length; i += step) sampled.push(coords[i]);
-    if (sampled[sampled.length - 1] !== coords[coords.length - 1]) {
-        sampled.push(coords[coords.length - 1]);
-    }
-
-    const lats = sampled.map(c => c[0].toFixed(4)).join(',');
-    const lngs = sampled.map(c => c[1].toFixed(4)).join(',');
-    const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.elevation || null;
-}
-
-function renderElevationChart(elevations) {
-    const container = document.getElementById('elevationContainer');
-    container.replaceChildren();
-    if (!elevations || elevations.length < 2) {
-        container.classList.remove('active');
-        return;
-    }
-
-    const min = Math.min(...elevations);
-    const max = Math.max(...elevations);
-    const range = max - min || 1;
-    const w = 300;
-    const h = 64;
-    const pad = 1;
-
-    const pts = elevations.map((e, i) => {
-        const x = (i / (elevations.length - 1)) * w;
-        const y = h - pad - ((e - min) / range) * (h - 2 * pad);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
-    const linePath = pts.join(' L');
-    const areaPath = `M0,${h} L${pts[0]} L${linePath} L${w},${h} Z`;
-
-    let gain = 0, loss = 0;
-    for (let i = 1; i < elevations.length; i++) {
-        const diff = elevations[i] - elevations[i - 1];
-        if (diff > 0) gain += diff;
-        else loss -= diff;
-    }
-
-    const NS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('class', 'elevation-chart');
-    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-    svg.setAttribute('preserveAspectRatio', 'none');
-
-    const defs = document.createElementNS(NS, 'defs');
-    const grad = document.createElementNS(NS, 'linearGradient');
-    grad.setAttribute('id', 'elevGrad');
-    grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
-    grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
-    const chartColor = getRouteColor();
-    const stop1 = document.createElementNS(NS, 'stop');
-    stop1.setAttribute('offset', '0%');
-    stop1.setAttribute('stop-color', chartColor);
-    stop1.setAttribute('stop-opacity', '0.4');
-    const stop2 = document.createElementNS(NS, 'stop');
-    stop2.setAttribute('offset', '100%');
-    stop2.setAttribute('stop-color', chartColor);
-    stop2.setAttribute('stop-opacity', '0.05');
-    grad.appendChild(stop1);
-    grad.appendChild(stop2);
-    defs.appendChild(grad);
-    svg.appendChild(defs);
-
-    const area = document.createElementNS(NS, 'path');
-    area.setAttribute('d', areaPath);
-    area.setAttribute('fill', 'url(#elevGrad)');
-    svg.appendChild(area);
-
-    const line = document.createElementNS(NS, 'polyline');
-    line.setAttribute('points', pts.join(' '));
-    line.setAttribute('fill', 'none');
-    line.setAttribute('stroke', chartColor);
-    line.setAttribute('stroke-width', '1.5');
-    line.setAttribute('vector-effect', 'non-scaling-stroke');
-    svg.appendChild(line);
-
-    container.appendChild(svg);
-
-    const stats = document.createElement('div');
-    stats.className = 'elevation-stats';
-    const rangeStat = document.createElement('span');
-    rangeStat.textContent = `${Math.round(min)}–${Math.round(max)} m`;
-    const gainStat = document.createElement('span');
-    gainStat.textContent = `↑ ${Math.round(gain)} m`;
-    const lossStat = document.createElement('span');
-    lossStat.textContent = `↓ ${Math.round(loss)} m`;
-    stats.appendChild(rangeStat);
-    stats.appendChild(gainStat);
-    stats.appendChild(lossStat);
-    container.appendChild(stats);
-
-    container.classList.add('active');
-}
+// fetchElevations + renderElevationChart (Open-Meteo sampling + the hand-built
+// SVG chart) live in elevation.js (loaded before app.js). renderElevationChart
+// takes the chart color as a param — callers pass getRouteColor(). Used here as
+// globals.
 
 // ─── Google Maps directions URL ──────────────────────────────────────────────
 
@@ -779,7 +679,7 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
     if (routeCoords.length > 0) {
         document.getElementById('elevationContainer').classList.remove('active');
         fetchElevations(routeCoords)
-            .then(renderElevationChart)
+            .then(el => renderElevationChart(el, color))
             .catch(() => {});
     }
 
@@ -1546,44 +1446,12 @@ async function restoreFromHash() {
     }
 }
 
-// ─── GPX export ──────────────────────────────────────────────────────────────
-
-function exportGPX() {
-    if (!currentSession) return;
-    const { destName, routeCoords, returnRouteCoords } = currentSession;
-    const name = destName || 'Wander route';
-    const allCoords = mergeRouteCoords(routeCoords, returnRouteCoords);
-    if (allCoords.length === 0) { showError('No route data to export.'); return; }
-
-    const trkpts = allCoords.map(([lat, lng]) =>
-        `      <trkpt lat="${lat}" lon="${lng}"></trkpt>`
-    ).join('\n');
-
-    const gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Wander"
-     xmlns="http://www.topografix.com/GPX/1/1">
-  <trk>
-    <name>${name.replace(/[<>&]/g, '')}</name>
-    <trkseg>
-${trkpts}
-    </trkseg>
-  </trk>
-</gpx>`;
-
-    triggerDownload(gpx, name, 'gpx', 'application/gpx+xml');
-}
-
-// ─── Garmin FIT export ───────────────────────────────────────────────────────
-
-function openFITModal() {
-    if (!currentSession) { showError('Generate a route first.'); return; }
-    if (typeof FitEncoder === 'undefined') { showError('FIT encoder not loaded.'); return; }
-    document.getElementById('fitModal').classList.add('active');
-}
-
-function closeFITModal() {
-    document.getElementById('fitModal').classList.remove('active');
-}
+// ─── Route file export ───────────────────────────────────────────────────────
+// GPX + Garmin FIT export (exportGPX, openFITModal, closeFITModal,
+// confirmFITExport) plus mergeRouteCoords + triggerDownload live in export.js
+// (loaded before app.js); called from index.html onclick handlers as globals.
+// The Escape-to-close wiring for the FIT + preferences modals stays here with
+// the other top-level listeners.
 
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && document.getElementById('fitModal').classList.contains('active')) {
@@ -1632,48 +1500,6 @@ function applyRouteColor() {
     routeLines.forEach(l => l.setStyle({ color }));
     if (destMarker) destMarker.setIcon(createPinIcon(color));
     renderVisitedLayer();
-}
-
-async function confirmFITExport() {
-    if (!currentSession) { showError('Generate a route first.'); return; }
-    closeFITModal();
-
-    const { destName, routeCoords, returnRouteCoords, routeSteps, returnRouteSteps } = currentSession;
-    const coords = mergeRouteCoords(routeCoords, returnRouteCoords);
-    if (coords.length < 2) { showError('No route data to export.'); return; }
-
-    const steps = [...(routeSteps || []), ...(returnRouteSteps || [])];
-    const coursePoints = FitEncoder.osrmStepsToCoursePoints(coords, steps);
-
-    let elevations = null;
-    try { elevations = await fetchElevations(coords); } catch { /* optional */ }
-
-    const name = destName || 'Wander route';
-    const bytes = FitEncoder.encodeCourse({ name, coords, coursePoints, elevations });
-    triggerDownload(bytes, name, 'fit', 'application/vnd.ant.fit');
-}
-
-// Concatenate outbound + return route coords, dropping the duplicate destination
-// point (last of outbound == first of return, within 1 m).
-function mergeRouteCoords(out, ret) {
-    const a = out || [];
-    const b = ret || [];
-    if (a.length === 0) return b.slice();
-    if (b.length === 0) return a.slice();
-    const [aLat, aLng] = a[a.length - 1];
-    const [bLat, bLng] = b[0];
-    const dup = Math.abs(aLat - bLat) < 1e-5 && Math.abs(aLng - bLng) < 1e-5;
-    return dup ? a.concat(b.slice(1)) : a.concat(b);
-}
-
-function triggerDownload(data, name, ext, mime) {
-    const blob = new Blob([data], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
 }
 
 // ─── Keyboard shortcuts ───────────────────────────────────────────────────────

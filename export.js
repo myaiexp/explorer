@@ -1,0 +1,90 @@
+// Route file export — GPX + Garmin FIT course files and the FIT modal open/close.
+// Reads the active route from the module-global currentSession (app.js) and turns
+// it into a downloadable file; uses FitEncoder (fit-encoder.js) and fetchElevations
+// (elevation.js). Loaded before app.js; the functions are called from index.html
+// onclick handlers as globals. (The Escape-to-close keydown wiring stays in app.js
+// with the other top-level listeners.)
+
+function exportGPX() {
+    if (!currentSession) return;
+    const { destName, routeCoords, returnRouteCoords } = currentSession;
+    const name = destName || 'Wander route';
+    const allCoords = mergeRouteCoords(routeCoords, returnRouteCoords);
+    if (allCoords.length === 0) { showError('No route data to export.'); return; }
+
+    const trkpts = allCoords.map(([lat, lng]) =>
+        `      <trkpt lat="${lat}" lon="${lng}"></trkpt>`
+    ).join('\n');
+
+    const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Wander"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>${name.replace(/[<>&]/g, '')}</name>
+    <trkseg>
+${trkpts}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+    triggerDownload(gpx, name, 'gpx', 'application/gpx+xml');
+}
+
+function openFITModal() {
+    if (!currentSession) { showError('Generate a route first.'); return; }
+    if (typeof FitEncoder === 'undefined') { showError('FIT encoder not loaded.'); return; }
+    document.getElementById('fitModal').classList.add('active');
+}
+
+function closeFITModal() {
+    document.getElementById('fitModal').classList.remove('active');
+}
+
+async function confirmFITExport() {
+    if (!currentSession) { showError('Generate a route first.'); return; }
+    closeFITModal();
+
+    const { destName, routeCoords, returnRouteCoords, routeSteps, returnRouteSteps } = currentSession;
+    const coords = mergeRouteCoords(routeCoords, returnRouteCoords);
+    if (coords.length < 2) { showError('No route data to export.'); return; }
+
+    const steps = [...(routeSteps || []), ...(returnRouteSteps || [])];
+    const coursePoints = FitEncoder.osrmStepsToCoursePoints(coords, steps);
+
+    let elevations = null;
+    try { elevations = await fetchElevations(coords); } catch { /* optional */ }
+
+    const name = destName || 'Wander route';
+    const bytes = FitEncoder.encodeCourse({ name, coords, coursePoints, elevations });
+    triggerDownload(bytes, name, 'fit', 'application/vnd.ant.fit');
+}
+
+// Concatenate outbound + return route coords, dropping the duplicate destination
+// point (last of outbound == first of return, within 1 m).
+function mergeRouteCoords(out, ret) {
+    const a = out || [];
+    const b = ret || [];
+    if (a.length === 0) return b.slice();
+    if (b.length === 0) return a.slice();
+    const [aLat, aLng] = a[a.length - 1];
+    const [bLat, bLng] = b[0];
+    const dup = Math.abs(aLat - bLat) < 1e-5 && Math.abs(aLng - bLng) < 1e-5;
+    return dup ? a.concat(b.slice(1)) : a.concat(b);
+}
+
+function triggerDownload(data, name, ext, mime) {
+    const blob = new Blob([data], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+globalThis.exportGPX = exportGPX;
+globalThis.openFITModal = openFITModal;
+globalThis.closeFITModal = closeFITModal;
+globalThis.confirmFITExport = confirmFITExport;
+globalThis.mergeRouteCoords = mergeRouteCoords;
+globalThis.triggerDownload = triggerDownload;
