@@ -1,0 +1,12 @@
+// Typecheck config for the test suite — the base tsconfig only includes src/**,
+// so tests are otherwise never type-checked (esbuild strips types at run time).
+// Run via `pnpm typecheck`. rootDir is widened to the package root and emit is
+// off, since this is a check-only pass over both src and tests.
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "rootDir": ".",
+        "noEmit": true
+    },
+    "include": ["src/**/*", "tests/**/*"]
+}

@@ -12,6 +12,15 @@ pnpm build && pnpm start    # production
 
 Listens on `127.0.0.1:5001` (override with `PORT`/`HOST`). Persists cache to `./data/cache.json` (override with `CACHE_PATH`).
 
+## Tests
+
+```bash
+pnpm test        # vitest (node env; every tests/*.test.ts carries // @vitest-environment node)
+pnpm typecheck   # tsc over src + tests via tsconfig.test.json
+```
+
+`pnpm build` only compiles `src/**` (the base `tsconfig.json` include), so it never type-checks the test files — `pnpm typecheck` uses `tsconfig.test.json` to close that gap and catch unsafe casts/mocks in tests.
+
 ## Abuse controls
 
 - **Per-IP rate limits** (token bucket, keyed on `X-Forwarded-For` then socket): `/junctions` 60/min, `/logs` 30/min, `/health` 120/min. These are defense-in-depth behind the nginx edge `limit_req` and also cover direct tailnet access that bypasses nginx.
