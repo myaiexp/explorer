@@ -8,35 +8,7 @@ UI design system (colors, typography, components, layout) is documented in `DESI
 
 ## Architecture
 
-Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`, in `index.html` `defer` load order:
-
-- `index.html` — structure
-- `style.css` — styles
-- `geo-utils.js` — canonical Haversine distance, km + meters (pure, globalThis-exposed; loaded first — used by geometry.js, fit-encoder.js, loop-quality.js, screening.js, novelty.js, app.js)
-- `geometry.js` — pure geometry: calculateDistance (haversineKm alias), bearingRad, envelopeOffsetPoint, generateRandomPointAnnulus, computeSpreadParams (globalThis-exposed; loaded after geo-utils.js)
-- `fit-encoder.js` — Garmin FIT course-file encoder (used by `exportFIT()` in app.js)
-- `sync.js` — cloud-backup sync engine (outbox + per-row upserts to `/explorer/api`)
-- `bbox.js` — Finland bounding box helpers (pure, globalThis-exposed)
-- `loop-quality.js` — loop overlap detection (pure, globalThis-exposed)
-- `novelty.js` — novelty ranking helpers (pure, globalThis-exposed)
-- `screening.js` — water-aware reachability filtering (pure, globalThis-exposed)
-- `overpass.js` — Overpass querying: queryOverpass, fetchPOIsInRadius, fetchRoadsInRadius (+ sleep, HIGHWAY_EXCLUDE_*; no DOM, globalThis-exposed; loaded after geometry.js)
-- `osrm.js` — OSRM routing + loop building: tryOsrm/fetchRouteThrough/tryNearest/snapToRoad/screeningTableFn + buildLoopSetup/loopVias/buildLoop/buildJunctionLoop/buildOneWay/fetchCorridorJunctions/snapToJunction/pickBetterLoop (DOM-free — callers pass a precomputed spread; `loopVias` is the single source for the envelope vias, shared with app.js's buildDirectionsUrl; globalThis-exposed; loaded after geometry.js + loop-quality.js)
-- `storage.js` — localStorage accessors: readStoredArray/writeStoredArray + getVisits/getSavedLocations/getFavorites/getHistory and their keys (globalThis-exposed; no network — the persist-and-mirror half lives in sync-helpers.js's syncedPut/syncedDelete)
-- `session.js` — pure session/route data-shaping: computeRouteTotals (badge distances/duration; one-way return leg = 0), routeSessionFields (route→currentSession mapping), snapshotSession (currentSession→persisted visit/favorite/history row) (globalThis-exposed; loaded after storage.js)
-- `route-dispatch.js` — route-build dispatch by trip mode (globalThis-exposed; calls buildOneWay/buildJunctionLoop/buildLoop from osrm.js)
-- `toast.js` — transient #notification toast (globalThis-exposed; showToast + showError/showSuccess/showWarning wrappers)
-- `elevation.js` — route elevation profile: fetchElevations (Open-Meteo sampling) + renderElevationChart (hand-built SVG chart; takes the chart color as a param, no route-color state of its own) (globalThis-exposed; loaded after toast.js)
-- `export.js` — route file export: exportGPX / openFITModal / closeFITModal / confirmFITExport + mergeRouteCoords + triggerDownload (reads the active route from app.js's currentSession; uses FitEncoder + fetchElevations; globalThis-exposed; loaded after elevation.js)
-- `sync-helpers.js` — persist-and-mirror wrappers: maybeRequestConsent + syncedPut/syncedDelete (one step: writeStoredArray localStorage write + ExplorerSync.mutate cloud-outbox replication; globalThis-exposed; loaded after storage.js + sync.js; used by the CRUD modules below and app.js's markAsVisited)
-- `list-item.js` — shared `.history-item` DOM row factory (buildListItem) used by favorites.js + history.js (globalThis-exposed)
-- `settings.js` — settings persistence: SETTINGS_FIELDS-driven saveSettings/restoreSettings/initSettingsListeners over the preference form (globalThis-exposed; loaded before app.js, wired in app.js Init)
-- `saved-locations.js` — saved-locations CRUD: toggleSaveLocation/selectSavedLocation/deleteSavedLocation/renderSavedLocations/updateSaveLocationBtn (globalThis-exposed; uses sync-helpers.js + settings.js)
-- `favorites.js` — favorites CRUD: sameFavoriteDest/toggleFavorite/updateFavoriteBtn/deleteFavorite/renderFavoritesSection (globalThis-exposed; reads app.js's currentSession, renders rows via list-item.js, restores via history.js's restoreResult)
-- `history.js` — visit-history CRUD: saveToHistory/deleteHistoryEntry/restoreResult/renderHistorySection/toggleHistoryExpanded + HISTORY_MAX/HISTORY_VISIBLE (globalThis-exposed; restoreResult re-displays an entry via app.js's clearMap/displayRoute — no new history row)
-- `cloud-backup-ui.js` — cloud-backup UI: showConsentToast (registered as window.ExplorerSyncUI for sync.js) + enableCloudBackup/copyBackupLink/confirmDeleteCloudData/closeOverflowMenuIfOpen/updateSyncMenu (overflow-menu sync controls; globalThis-exposed)
-- `visits-io.js` — visits JSON backup file I/O: exportVisits/importVisits (globalThis-exposed; importVisits mirrors each imported row to the cloud outbox and refreshes app.js's visited layer)
-- `app.js` — main application-logic orchestrator (DOM, Leaflet, map/session state; the generate → screen → build → display pipeline, mark-as-visited + visited layer, pick-destination mode, preferences modal, URL sharing, spread reroute, keyboard shortcuts, and Init wiring; consumes the geometry/overpass/osrm/storage/session/elevation/export modules plus the extracted settings/saved-locations/favorites/history/cloud-backup-ui/visits-io + sync-helpers/list-item modules as globals)
+Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`. Script load order in `index.html` is dependency-significant (`defer`d); each JS file's own header comment states what it is "loaded after" — don't reorder the script tags without checking those headers.
 
 Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service`. DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Static frontend tests at repo root use vitest + jsdom — run the whole suite with `pnpm test` (root `test` script is `vitest run`, covering every `tests/*.test.js`); backend tests run with `cd server && pnpm test`. Backend test layout follows one convention: **colocated `src/**/*.unit.test.ts`** are pure/fake-Db unit tests (no Postgres), while **`server/tests/*.test.ts`** are real-DB integration tests that truncate `explorer_test`. The `.unit.` marker keeps same-named unit/integration pairs (e.g. `sections`, `import`) distinct at a glance.
 
@@ -53,8 +25,6 @@ Backend (cloud backup) lives in `server/` — Node 20 + Hono + Drizzle + Postgre
 3. A destination is picked: random POI from Overpass (categorized: nature, food, activity, culture, or "any"), random road point, or fully random point
 4. OSRM calculates a walking route; round-trip mode builds a loop by generating 3 geometric envelope vias per side, snapping each independently to the nearest road via OSRM nearest within `max(0.3 km, offsetKm·0.5)`, then routing through them (spread slider controls loop width)
 5. Result shown on Leaflet map with markers, route polylines, elevation profile chart, distance/duration badges, Google Maps directions link
-
-**Key features:** saved locations, favorites/bookmarks, visit history with map overlay, GPX export, Garmin FIT export (course file with turn cues from OSRM steps), route sharing via URL, "Surprise me" button, Overpass rate-limit handling with retry logic, XSS protection on URL parameters, localStorage persistence of all settings.
 
 ## Development
 
