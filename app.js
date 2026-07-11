@@ -93,31 +93,8 @@ let currentSession = null;
 let pickMode = false;
 
 // ─── Sync helpers ────────────────────────────────────────────────────────────
-
-// ExplorerSync (sync.js) is loaded before app.js in index.html's fixed defer
-// order, so it is always defined by the time any of these run — no typeof guard.
-function maybeRequestConsent() {
-    if (ExplorerSync.getState().state === 'anonymous') {
-        ExplorerSync.requestConsent();
-    }
-}
-
-// Persist a synced collection and mirror the change to the cloud outbox in one
-// step. writeStoredArray (storage.js) owns the localStorage write; these keep
-// the persist-and-mirror invariant in one place so a new call site can't save
-// locally while forgetting to replicate (the bug class fixed in #2065). Every
-// mutation of the four synced collections (visits, savedLocations, favorites,
-// history) goes through one of these — except importVisits' batch put, which
-// writes once and mirrors each row in a loop.
-function syncedPut(key, arr, section, id, data) {
-    writeStoredArray(key, arr);
-    ExplorerSync.mutate(section, 'put', id, data);
-}
-
-function syncedDelete(key, arr, section, id) {
-    writeStoredArray(key, arr);
-    ExplorerSync.mutate(section, 'delete', id);
-}
+// maybeRequestConsent + syncedPut/syncedDelete live in sync-helpers.js (loaded
+// before app.js); used here (markAsVisited) and by the CRUD modules as globals.
 
 // ─── localStorage ─────────────────────────────────────────────────────────────
 // readStoredArray + the array accessors (getVisits, getSavedLocations,
@@ -125,141 +102,12 @@ function syncedDelete(key, arr, section, id) {
 // SAVED_LOCATIONS_KEY, FAVORITES_KEY, HISTORY_KEY) live in storage.js (loaded
 // before app.js); used here as globals.
 
-const SETTINGS_KEY = 'walk_settings';
-
-// ─── Settings persistence ────────────────────────────────────────────────────
-
-// Declarative spec for the persisted preferences, so save/restore/listen all
-// iterate one list instead of enumerating the same eight fields three times.
-// prop is the element property to read/write; skipEmpty fields (free-text-ish
-// inputs) are only restored when non-empty so a blank saved value never clobbers
-// a default. The tripMode radio pair and the distance-label sync stay explicit
-// in restoreSettings — they don't fit the one-element/one-prop shape.
-const SETTINGS_FIELDS = [
-    { key: 'location',     id: 'location',           prop: 'value',   skipEmpty: true },
-    { key: 'minDistance',  id: 'minDistance',        prop: 'value' },
-    { key: 'maxDistance',  id: 'maxDistance',        prop: 'value' },
-    { key: 'poiType',      id: 'locationTypeSelect', prop: 'value',   skipEmpty: true },
-    { key: 'spread',       id: 'spreadSlider',       prop: 'value' },
-    { key: 'winterMode',   id: 'winterMode',         prop: 'checked' },
-    { key: 'smartRouting', id: 'smartRouting',       prop: 'checked' },
-];
-
-function saveSettings() {
-    const settings = {
-        tripMode: document.querySelector('input[name="tripMode"]:checked').value,
-    };
-    for (const f of SETTINGS_FIELDS) {
-        settings[f.key] = document.getElementById(f.id)[f.prop];
-    }
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-}
-
-function restoreSettings() {
-    try {
-        const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY));
-        if (!settings) return;
-        for (const f of SETTINGS_FIELDS) {
-            const val = settings[f.key];
-            if (val == null) continue;
-            if (f.skipEmpty && !val) continue;
-            document.getElementById(f.id)[f.prop] = val;
-        }
-        // Trip mode is a radio pair (two elements, one stored value) — special-cased.
-        if (settings.tripMode === 'round' || settings.tripMode === 'one-way') {
-            document.getElementById(settings.tripMode === 'one-way' ? 'oneWay' : 'roundTrip').checked = true;
-        }
-        // Sync distance label with restored trip mode
-        const isOneWay = document.getElementById('oneWay').checked;
-        document.getElementById('distanceLabel').textContent =
-            isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
-    } catch {}
-}
-
-// Auto-save on input changes
-function initSettingsListeners() {
-    for (const f of SETTINGS_FIELDS) {
-        document.getElementById(f.id).addEventListener('change', saveSettings);
-    }
-    document.querySelectorAll('input[name="tripMode"]').forEach(r => r.addEventListener('change', saveSettings));
-}
-
-// ─── Saved locations ─────────────────────────────────────────────────────────
-// SAVED_LOCATIONS_KEY + getSavedLocations live in storage.js; used here as globals.
-
-function toggleSaveLocation() {
-    const input = document.getElementById('location').value.trim();
-    if (!input) { showError('Enter a location first.'); return; }
-    const saved = getSavedLocations();
-    const existing = saved.findIndex(s => s.value === input);
-    if (existing >= 0) {
-        const removed = saved[existing];
-        saved.splice(existing, 1);
-        syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value));
-        showSuccess('Location removed from saved.');
-    } else {
-        const label = prompt('Name for this location:', input);
-        if (label === null) return;
-        const newLoc = { id: crypto.randomUUID(), label: label || input, value: input };
-        saved.push(newLoc);
-        syncedPut(SAVED_LOCATIONS_KEY, saved, 'savedLocations', newLoc.id, newLoc);
-        maybeRequestConsent();
-        showSuccess('Location saved.');
-    }
-    renderSavedLocations();
-    updateSaveLocationBtn();
-}
-
-function selectSavedLocation(value) {
-    document.getElementById('location').value = value;
-    updateSaveLocationBtn();
-    saveSettings();
-}
-
-function deleteSavedLocation(index, event) {
-    event.stopPropagation();
-    const saved = getSavedLocations();
-    const removed = saved[index];
-    saved.splice(index, 1);
-    syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value));
-    renderSavedLocations();
-    updateSaveLocationBtn();
-}
-
-function renderSavedLocations() {
-    const container = document.getElementById('savedLocations');
-    const saved = getSavedLocations();
-    container.replaceChildren();
-    for (let i = 0; i < saved.length; i++) {
-        const item = document.createElement('div');
-        item.className = 'saved-location-item';
-        item.addEventListener('click', () => selectSavedLocation(saved[i].value));
-
-        const label = document.createElement('span');
-        label.className = 'saved-location-label';
-        label.textContent = saved[i].label;
-        item.appendChild(label);
-
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'history-delete';
-        del.title = 'Remove';
-        del.textContent = '\u00d7';
-        del.addEventListener('click', (e) => deleteSavedLocation(i, e));
-        item.appendChild(del);
-
-        container.appendChild(item);
-    }
-}
-
-function updateSaveLocationBtn() {
-    const btn = document.getElementById('saveLocationBtn');
-    const input = document.getElementById('location').value.trim();
-    const saved = getSavedLocations();
-    const isSaved = saved.some(s => s.value === input);
-    btn.style.color = isSaved ? '#fbbf24' : '';
-    btn.querySelector('svg').setAttribute('fill', isSaved ? '#fbbf24' : 'none');
-}
+// ─── Settings / saved locations ──────────────────────────────────────────────
+// Settings persistence (SETTINGS_KEY/SETTINGS_FIELDS + saveSettings/
+// restoreSettings/initSettingsListeners) lives in settings.js; saved-locations
+// CRUD (toggleSaveLocation/selectSavedLocation/deleteSavedLocation/
+// renderSavedLocations/updateSaveLocationBtn) in saved-locations.js. Both loaded
+// before app.js; wired in the Init section below.
 
 // ─── Map helpers ─────────────────────────────────────────────────────────────
 
@@ -475,133 +323,11 @@ async function withLoading(fn) {
 
 // ─── Cloud-backup UI ──────────────────────────────────────────────────────────
 
-function showConsentToast() {
-    return new Promise((resolve) => {
-        if (document.getElementById('cloudConsentToast')) {
-            resolve('declined');
-            return;
-        }
-
-        const toast = document.createElement('div');
-        toast.className = 'toast-consent';
-        toast.id = 'cloudConsentToast';
-
-        const msg = document.createElement('div');
-        msg.className = 'toast-consent-message';
-        msg.textContent =
-            'Wander can save your visits, saved locations, and favorites ' +
-            'to a database on mase.fi so they survive clearing your browser.';
-        toast.appendChild(msg);
-
-        const buttons = document.createElement('div');
-        buttons.className = 'toast-consent-buttons';
-
-        const declineBtn = document.createElement('button');
-        declineBtn.type = 'button';
-        declineBtn.textContent = 'Decline';
-
-        const acceptBtn = document.createElement('button');
-        acceptBtn.type = 'button';
-        acceptBtn.className = 'primary';
-        acceptBtn.textContent = 'Accept';
-
-        let settled = false;
-        const settle = (choice) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(autoTimer);
-            toast.remove();
-            resolve(choice);
-        };
-
-        declineBtn.addEventListener('click', () => {
-            ExplorerSync.decline();
-            settle('declined');
-        });
-        acceptBtn.addEventListener('click', () => {
-            acceptBtn.disabled = true;
-            declineBtn.disabled = true;
-            acceptBtn.textContent = 'Saving…';
-            ExplorerSync.accept().then(() => {
-                showSuccess('Cloud backup enabled.');
-                settle('accepted');
-            }).catch((err) => {
-                console.warn('Cloud backup enable failed', err);
-                showError('Could not enable cloud backup. Try again later.');
-                settle('declined');
-            });
-        });
-
-        buttons.appendChild(declineBtn);
-        buttons.appendChild(acceptBtn);
-        toast.appendChild(buttons);
-        document.body.appendChild(toast);
-
-        const autoTimer = setTimeout(() => {
-            if (!settled) {
-                ExplorerSync.decline();
-                settle('declined');
-            }
-        }, 30000);
-    });
-}
-
-window.ExplorerSyncUI = { showConsentToast };
-
-function enableCloudBackup() {
-    closeOverflowMenuIfOpen();
-    ExplorerSync.requestConsent();
-}
-
-function copyBackupLink() {
-    closeOverflowMenuIfOpen();
-    const link = ExplorerSync.getState().link;
-    if (!link) { showError('No backup link available.'); return; }
-    navigator.clipboard.writeText(link).then(
-        () => showSuccess('Backup link copied — open it on any device to restore your data.'),
-        () => showError('Failed to copy link.')
-    );
-}
-
-function confirmDeleteCloudData() {
-    closeOverflowMenuIfOpen();
-    if (!confirm('Delete your cloud data permanently? Your local data will be kept.')) return;
-    ExplorerSync.deleteAccount().then(() => {
-        showSuccess('Cloud data deleted.');
-    }).catch((err) => {
-        console.warn('Delete cloud data failed', err);
-        showError('Could not delete cloud data. Try again later.');
-    });
-}
-
-function closeOverflowMenuIfOpen() {
-    const menu = document.getElementById('overflowMenu');
-    if (menu) menu.classList.remove('open');
-}
-
-function updateSyncMenu() {
-    const s = ExplorerSync.getState();
-    const status = document.getElementById('syncStatus');
-    const usernameEl = document.getElementById('syncUsername');
-    const enableBtn = document.getElementById('enableCloudBackupBtn');
-    const copyLinkBtn = document.getElementById('copyBackupLinkBtn');
-    const deleteBtn = document.getElementById('deleteCloudDataBtn');
-    if (s.state === 'accepted') {
-        status.style.display = '';
-        usernameEl.textContent = s.username || '';
-        enableBtn.style.display = 'none';
-        copyLinkBtn.style.display = '';
-        deleteBtn.style.display = '';
-    } else {
-        status.style.display = 'none';
-        usernameEl.textContent = '';
-        enableBtn.style.display = '';
-        copyLinkBtn.style.display = 'none';
-        deleteBtn.style.display = 'none';
-    }
-}
-
-window.addEventListener('explorer-sync-state-change', updateSyncMenu);
+// The cloud-backup UI (showConsentToast + the overflow-menu sync controls:
+// enableCloudBackup/copyBackupLink/confirmDeleteCloudData/closeOverflowMenuIfOpen/
+// updateSyncMenu, plus the window.ExplorerSyncUI export and the
+// explorer-sync-state-change listener) lives in cloud-backup-ui.js.
+// resetMarkVisitedBtn stays here — it resets the result panel, not sync state.
 
 function resetMarkVisitedBtn() {
     const btn = document.getElementById('markVisitedBtn');
@@ -1246,157 +972,17 @@ function updateVisitedCounter() {
 
 // ─── List-item factory (history + favorites) ─────────────────────────────────
 
-// Build the shared .history-item skeleton used by both the history and the
-// favorites lists: a name line, a meta line, and a × delete button. Callers
-// supply the label/meta text plus the select and delete click handlers.
-function buildListItem(label, meta, onSelect, onDelete) {
-    const item = document.createElement('div');
-    item.className = 'history-item';
-    item.addEventListener('click', onSelect);
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'history-item-name';
-    nameEl.textContent = label;
-    item.appendChild(nameEl);
-
-    const metaEl = document.createElement('div');
-    metaEl.className = 'history-item-meta';
-    metaEl.textContent = meta;
-    item.appendChild(metaEl);
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'history-delete';
-    del.title = 'Remove';
-    del.textContent = '×';
-    del.addEventListener('click', onDelete);
-    item.appendChild(del);
-
-    return item;
-}
+// buildListItem — the shared history/favorites row skeleton — lives in list-item.js.
 
 // ─── Favorites ───────────────────────────────────────────────────────────────
-// FAVORITES_KEY + getFavorites live in storage.js; used here as globals.
-
-// Favorite-identity predicate: does this favorite point at the same destination
-// as `dest` (a session or another favorite)? Matched by dest coords at 6-decimal
-// precision. Sole owner of the match rule so the star button and the favorites
-// list can never disagree — change the precision (or match by id) here once.
-function sameFavoriteDest(fav, dest) {
-    return fav.destLat.toFixed(6) === dest.destLat.toFixed(6) &&
-           fav.destLng.toFixed(6) === dest.destLng.toFixed(6);
-}
-
-function toggleFavorite() {
-    if (!currentSession) return;
-    const btn = document.getElementById('favoriteBtn');
-    const favs = getFavorites();
-
-    const idx = favs.findIndex(f => sameFavoriteDest(f, currentSession));
-
-    if (idx >= 0) {
-        const removed = favs[idx];
-        favs.splice(idx, 1);
-        btn.classList.remove('active');
-        syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
-    } else {
-        const newFav = snapshotSession(currentSession);
-        favs.unshift(newFav);
-        btn.classList.add('active');
-        syncedPut(FAVORITES_KEY, favs, 'favorites', newFav.id, newFav);
-        maybeRequestConsent();
-    }
-    renderFavoritesSection();
-}
-
-function updateFavoriteBtn() {
-    const btn = document.getElementById('favoriteBtn');
-    if (!currentSession) { btn.classList.remove('active'); return; }
-    const isFav = getFavorites().some(f => sameFavoriteDest(f, currentSession));
-    btn.classList.toggle('active', isFav);
-}
-
-function deleteFavorite(index, event) {
-    event.stopPropagation();
-    const favs = getFavorites();
-    const removed = favs[index];
-    favs.splice(index, 1);
-    syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
-    renderFavoritesSection();
-    updateFavoriteBtn();
-}
-
-function renderFavoritesSection() {
-    const favs = getFavorites();
-    const section = document.getElementById('favoritesSection');
-    const list = document.getElementById('favoritesList');
-
-    if (favs.length === 0) {
-        section.classList.remove('visible');
-        return;
-    }
-
-    section.classList.add('visible');
-    list.replaceChildren();
-    favs.forEach((entry, i) => {
-        const label = entry.destName ||
-            `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
-        const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
-        const item = buildListItem(label, dist,
-            () => { restoreResult(getFavorites()[i]); updateFavoriteBtn(); },
-            (e) => deleteFavorite(i, e));
-        list.appendChild(item);
-    });
-}
+// FAVORITES_KEY + getFavorites live in storage.js. The favorites CRUD
+// (sameFavoriteDest/toggleFavorite/updateFavoriteBtn/deleteFavorite/
+// renderFavoritesSection) lives in favorites.js; called from displayRoute (the
+// star button) and the Init section as globals.
 
 // ─── Export / Import ──────────────────────────────────────────────────────────
 
-function exportVisits() {
-    const visits = getVisits();
-    if (visits.length === 0) { showError('No visits to export yet.'); return; }
-    const date = new Date().toISOString().split('T')[0];
-    const blob = new Blob([JSON.stringify(visits, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `walks-${date}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function importVisits(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        try {
-            const imported = JSON.parse(e.target.result);
-            if (!Array.isArray(imported)) throw new Error('Invalid format');
-            const existing = getVisits();
-            const existingIds = new Set(existing.map(v => v.id));
-            const newEntries = imported.filter(v => !existingIds.has(v.id));
-            // Give every imported entry a stable id, then mirror each to the
-            // cloud outbox exactly as markAsVisited does. Without this, imported
-            // visits live only in localStorage and silently never replicate to
-            // the cloud backup when sync is active.
-            for (const v of newEntries) {
-                if (!v.id) v.id = crypto.randomUUID();
-            }
-            writeStoredArray(VISITS_KEY, [...existing, ...newEntries]);
-            for (const v of newEntries) {
-                ExplorerSync.mutate('visits', 'put', v.id, v);
-            }
-            maybeRequestConsent();
-            showSuccess(`Added ${newEntries.length} new ${newEntries.length === 1 ? 'visit' : 'visits'}.`);
-            updateVisitedCounter();
-            renderVisitedLayer();
-        } catch {
-            showError('Failed to import: invalid JSON file.');
-        }
-        event.target.value = '';
-    };
-    reader.readAsText(file);
-}
+// exportVisits/importVisits (the visits JSON backup file I/O) live in visits-io.js.
 
 // ─── URL sharing ─────────────────────────────────────────────────────────────
 
@@ -1640,98 +1226,9 @@ document.addEventListener('click', (e) => {
 });
 
 // ─── History ─────────────────────────────────────────────────────────────────
-// HISTORY_KEY + getHistory live in storage.js; used here as globals.
-
-const HISTORY_MAX = 20;
-const HISTORY_VISIBLE = 3;
-let historyExpanded = false;
-
-function saveToHistory(session) {
-    const entry = snapshotSession(session);
-    const history = getHistory();
-    history.unshift(entry);
-    if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
-    syncedPut(HISTORY_KEY, history, 'history', entry.id, entry);
-    maybeRequestConsent();
-    renderHistorySection();
-}
-
-function deleteHistoryEntry(index) {
-    const history = getHistory();
-    const removed = history[index];
-    history.splice(index, 1);
-    syncedDelete(HISTORY_KEY, history, 'history', String(removed.id));
-    renderHistorySection();
-}
-
-function restoreResult(entry) {
-    clearMap();
-    // Prefer the real per-leg distances when the entry has them. Legacy entries
-    // (saved before per-leg distances existed, or pulled from the cloud where
-    // only the total is stored) fall back to assigning the whole total to the
-    // outbound leg — numerically correct for the displayed total, which is all
-    // displayRoute renders.
-    const hasLegDist = typeof entry.routeDistance === 'number';
-    const outbound = entry.routeCoords
-        ? { coords: entry.routeCoords,
-            distance: (hasLegDist ? entry.routeDistance : entry.distance) * 1000,
-            duration: entry.routeDuration || 0 }
-        : null;
-    const ret = entry.returnRouteCoords
-        ? { coords: entry.returnRouteCoords,
-            distance: (hasLegDist ? (entry.returnRouteDistance || 0) : 0) * 1000,
-            duration: entry.returnRouteDuration || 0 }
-        : null;
-    // No saveToHistory here: re-displaying an existing history/favorite entry
-    // must not create a new one (the old side effect in displayRoute did).
-    displayRoute({
-        startLat: entry.startLat, startLng: entry.startLng,
-        destLat: entry.destLat, destLng: entry.destLng,
-        outbound, ret,
-        locationInput: entry.startLabel, destName: entry.destName, tripMode: entry.tripMode,
-    });
-}
-
-function renderHistorySection() {
-    const history = getHistory();
-    const section = document.getElementById('historySection');
-    const list = document.getElementById('historyList');
-    const moreBtn = document.getElementById('historyMoreBtn');
-
-    if (history.length === 0) {
-        section.classList.remove('visible');
-        return;
-    }
-
-    section.classList.add('visible');
-    const shown = historyExpanded ? history : history.slice(0, HISTORY_VISIBLE);
-    list.replaceChildren();
-    shown.forEach((entry, i) => {
-        const label = entry.destName ||
-            `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
-        const date = new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
-        const meta = [dist, date].filter(Boolean).join(' · ');
-
-        const item = buildListItem(label, meta,
-            () => restoreResult(getHistory()[i]),
-            (e) => { e.stopPropagation(); deleteHistoryEntry(i); });
-        list.appendChild(item);
-    });
-
-    const hidden = history.length - HISTORY_VISIBLE;
-    if (history.length > HISTORY_VISIBLE) {
-        moreBtn.style.display = 'block';
-        moreBtn.textContent = historyExpanded ? 'Show less' : `Show ${hidden} more`;
-    } else {
-        moreBtn.style.display = 'none';
-    }
-}
-
-function toggleHistoryExpanded() {
-    historyExpanded = !historyExpanded;
-    renderHistorySection();
-}
+// HISTORY_KEY + getHistory live in storage.js. The history CRUD
+// (saveToHistory/deleteHistoryEntry/restoreResult/renderHistorySection/
+// toggleHistoryExpanded + HISTORY_MAX/HISTORY_VISIBLE) lives in history.js.
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 

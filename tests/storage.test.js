@@ -3,7 +3,7 @@
  * Tests for storage.js — the array-backed read/write accessors. jsdom supplies
  * localStorage; storage.js is a non-module browser script run via vm, exposing
  * its helpers on globalThis. Focus: the read/write round-trip symmetry that lets
- * app.js's syncedPut/syncedDelete keep the persist-and-mirror invariant in one place.
+ * sync-helpers.js's syncedPut/syncedDelete keep the persist-and-mirror invariant in one place.
  */
 import { describe, test, expect, beforeAll, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
