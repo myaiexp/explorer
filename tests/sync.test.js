@@ -648,6 +648,83 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
     });
 });
 
+// ── #2065 — favorites round-trip through cloud sync ────────────────────────────
+// The server stores favorites as {id, username, payload, updatedAt} where payload is
+// the flat favorite blob (unlike visits/history/savedLocations, which have typed
+// columns and come back already-flat). On sync-down the client must UNWRAP payload
+// back to the flat shape the renderer reads (f.destLat, f.destName, …) — writing the
+// raw row verbatim leaves favorites as {id, payload:{…}}, so f.destLat is undefined and
+// the renderer crashes on `f.destLat.toFixed(6)`.
+
+describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
+    const serverFavRow = {
+        id: 'fav-1',
+        username: 'rugged-pine-42',
+        payload: { id: 'fav-1', destLat: 60.1, destLng: 24.9, destName: 'Park', distance: 3 },
+        updatedAt: '2024-06-01T00:00:00Z',
+    };
+
+    test('init Case 2 merge: favorites are stored flat, not payload-wrapped', async () => {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [], favorites: [serverFavRow], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        const stored = JSON.parse(localStorage.getItem('walk_favorites'));
+        expect(stored).toHaveLength(1);
+        // Flat shape the renderer reads — NOT {payload:{…}}
+        expect(stored[0].destLat).toBe(60.1);
+        expect(stored[0].destName).toBe('Park');
+        expect(stored[0].id).toBe('fav-1');
+        expect(stored[0].payload).toBeUndefined();
+        // updatedAt preserved so future merges can do last-write-wins
+        expect(stored[0].updatedAt).toBe('2024-06-01T00:00:00Z');
+    });
+
+    test('init Case 4/5 populate: favorites from a switched account are stored flat', async () => {
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        mockFetch({
+            '/explorer/api/mossy-fern-7': {
+                visits: [], favorites: [{ ...serverFavRow, username: 'mossy-fern-7' }], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        const stored = JSON.parse(localStorage.getItem('walk_favorites'));
+        expect(stored).toHaveLength(1);
+        expect(stored[0].destLat).toBe(60.1);
+        expect(stored[0].payload).toBeUndefined();
+    });
+
+    test('non-favorite sections (visits) are still stored verbatim (not unwrapped)', async () => {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [{ id: 'v1', destLat: 61.0, updatedAt: '2024-06-01T00:00:00Z' }],
+                favorites: [], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        const stored = JSON.parse(localStorage.getItem('walk_visits'));
+        expect(stored[0]).toMatchObject({ id: 'v1', destLat: 61.0 });
+    });
+});
+
 // ── init/flush coverage gaps (audit) ──────────────────────────────────────────
 // Closes untested branches flagged by the audit: init Case 1 accepted-restore,
 // Case 2/3 server non-ok early-exits, Case 4/5 switching-message cancel path,
