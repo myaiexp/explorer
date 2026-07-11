@@ -7,7 +7,6 @@
 
 const STAGE1_NEAREST_MAX_M = 500;
 const STAGE2_DETOUR_MAX    = 2.2;
-const RANDOM_POOL_SIZE     = 15;
 const SCREENING_POOL_CAP   = 45;   // bound parallel OSRM fan-out for Overpass pools
 
 // Randomly down-sample a candidate pool to SCREENING_POOL_CAP entries.
@@ -119,7 +118,6 @@ async function screenCandidates(start, candidates, { tableFn }) {
 
 globalThis.STAGE1_NEAREST_MAX_M = STAGE1_NEAREST_MAX_M;
 globalThis.STAGE2_DETOUR_MAX    = STAGE2_DETOUR_MAX;
-globalThis.RANDOM_POOL_SIZE     = RANDOM_POOL_SIZE;
 globalThis.SCREENING_POOL_CAP   = SCREENING_POOL_CAP;
 globalThis.capPool        = capPool;
 globalThis.detourRatio    = detourRatio;

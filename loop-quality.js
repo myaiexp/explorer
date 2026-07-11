@@ -11,10 +11,6 @@ const OVERLAP_PROXIMITY_M = 25;
 // are sharing nearly half their length, which is the lake-collapse signal.
 const OVERLAP_BAD_THRESHOLD = 0.4;
 
-// 3 candidates: deepest novel candidate is usually the best-shape POI
-// in the area; if none of the top 3 work, area is structurally bad.
-const MAX_RETRY_ATTEMPTS = 3;
-
 // For each p in `from`, count it as "near" if ANY q in `to` is within
 // OVERLAP_PROXIMITY_M. Returns the fraction of near points. Naïve O(n*m) —
 // coords are 100–500 points typically, fine without spatial indexing.
@@ -56,5 +52,4 @@ function loopOverlapFraction(outboundCoords, returnCoords) {
 // from non-script consumers (e.g. vm.runInThisContext in tests).
 globalThis.OVERLAP_PROXIMITY_M = OVERLAP_PROXIMITY_M;
 globalThis.OVERLAP_BAD_THRESHOLD = OVERLAP_BAD_THRESHOLD;
-globalThis.MAX_RETRY_ATTEMPTS = MAX_RETRY_ATTEMPTS;
 globalThis.loopOverlapFraction = loopOverlapFraction;

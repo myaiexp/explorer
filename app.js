@@ -782,6 +782,16 @@ async function resolveStart() {
 
 // ─── Destination resolution ──────────────────────────────────────────────────
 
+// Orchestration-layer routing policy. These are app.js's own knobs — the size
+// of the random-annulus candidate pool and the smart-routing retry budget for
+// findBestLoop — homed here rather than in the pure helper modules they used to
+// borrow. (Don't confuse RANDOM_POOL_SIZE with screening.js's SCREENING_POOL_CAP:
+// this seeds the pool, that caps the OSRM fan-out over it.)
+const RANDOM_POOL_SIZE = 15;
+// 3 candidates: deepest novel candidate is usually the best-shape POI in the
+// area; if none of the top 3 work, the area is structurally bad.
+const MAX_RETRY_ATTEMPTS = 3;
+
 // A pool of fully random points in the annulus — the fallback when Overpass
 // fails or returns nothing, and the pool for 'any' (random-point-anywhere).
 function randomCandidatePool(startLat, startLng, straightMin, straightMax) {
