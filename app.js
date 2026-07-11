@@ -806,16 +806,18 @@ function randomPoolResult(startLat, startLng, straightMin, straightMax, existing
     return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
 }
 
-// Resolve the destination candidate pool for the chosen locationType. POI/road
-// strategies hit Overpass and fall back to a random annulus pool; 'any' goes
-// straight to a random pool. Two distinct fallbacks with accurate progress
-// messages: a genuine fetch failure (only the fetch call is in the try) vs. a
+// Resolve the destination candidate pool for the chosen routing strategy.
+// POI/road strategies hit Overpass and fall back to a random annulus pool; 'any'
+// goes straight to a random pool. `rawLocationType` is the underlying <select>
+// value — only meaningful in the 'poi' branch, where it names the specific POI
+// key to look up. Two distinct fallbacks with accurate progress messages: a
+// genuine fetch failure (only the fetch call is in the try) vs. a
 // successful-but-empty response. Errors from capPool/pickMostNovelDestination
 // are NOT caught here — they surface to generateDestination's handler instead of
 // being silently masked as "Overpass unavailable". Returns the full pool plus an
 // initial novelty pick: { candidatePool, dest, destName }.
-async function resolveCandidatePool(locationType, locationTypeVal, startLat, startLng, straightMin, straightMax, onProgress, existingDests) {
-    if (locationType === 'roads') {
+async function resolveCandidatePool(routingStrategy, rawLocationType, startLat, startLng, straightMin, straightMax, onProgress, existingDests) {
+    if (routingStrategy === 'roads') {
         onProgress('Searching for roads in the area…');
         let roads;
         try {
@@ -832,13 +834,13 @@ async function resolveCandidatePool(locationType, locationTypeVal, startLat, sta
         const candidatePool = capPool(roads);
         return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
     }
-    if (locationType === 'any_poi' || locationType === 'poi') {
-        const filters = locationType === 'any_poi'
+    if (routingStrategy === 'any_poi' || routingStrategy === 'poi') {
+        const filters = routingStrategy === 'any_poi'
             ? POI_TYPES.map(p => p.filter)
-            : [POI_TYPES.find(p => p.key === locationTypeVal)?.filter].filter(Boolean);
-        const label = locationType === 'any_poi'
+            : [POI_TYPES.find(p => p.key === rawLocationType)?.filter].filter(Boolean);
+        const label = routingStrategy === 'any_poi'
             ? 'any POI'
-            : POI_TYPES.find(p => p.key === locationTypeVal)?.label || 'places';
+            : POI_TYPES.find(p => p.key === rawLocationType)?.label || 'places';
         onProgress(`Searching for ${label}…`);
         let pois;
         try {
@@ -855,7 +857,7 @@ async function resolveCandidatePool(locationType, locationTypeVal, startLat, sta
         const dest = pickMostNovelDestination(candidatePool, existingDests);
         return { candidatePool, dest, destName: dest.name };
     }
-    // locationType === 'any': a fully random point anywhere in the annulus.
+    // routingStrategy === 'any': a fully random point anywhere in the annulus.
     return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
 }
 
@@ -891,6 +893,15 @@ async function screenCandidatePool(startLat, startLng, candidatePool, dest, dest
     return { candidatePool, dest, destName, waterLocked: false };
 }
 
+// True when `candidate` should replace the current best loop: no incumbent yet,
+// or the candidate has a real (non-null) overlap that's lower. A measured
+// overlap always beats a null (unknown) overlap; two nulls never displace.
+function isBetterLoop(candidate, best) {
+    if (!best) return true;
+    if (candidate.overlap === null) return false;
+    return best.overlap === null || candidate.overlap < best.overlap;
+}
+
 // Smart-routing retry loop: rank the pool by novelty and build a junction loop
 // for each candidate (reusing the corridor junction pool across attempts),
 // keeping the lowest-overlap result. Stops early once a loop beats the overlap
@@ -922,15 +933,36 @@ async function findBestLoop(startLat, startLng, candidatePool, dest, existingDes
             overlap: result.overlap,
             junctions: result.junctions,
         };
-        if (!bestSeen
-            || (candidate.overlap !== null
-                && (bestSeen.overlap === null || candidate.overlap < bestSeen.overlap))) {
-            bestSeen = candidate;
-        }
+        if (isBetterLoop(candidate, bestSeen)) bestSeen = candidate;
 
         if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
     }
     return bestSeen;
+}
+
+// Build the route for a resolved destination. Smart round-trips run the
+// novelty-retry loop (findBestLoop), which may substitute a different,
+// lower-overlap destination; one-way and plain loops dispatch straight through
+// buildRouteForMode. Reads the smart-routing/winter-mode toggles from the DOM.
+// Returns the (possibly updated) dest/destName plus the built legs, junctions,
+// and loop overlap (null when not a measured smart loop, and outbound/return are
+// undefined when a smart build produced nothing).
+async function buildRouteForDestination(startLat, startLng, candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, onProgress) {
+    if (tripMode !== 'one-way' && document.getElementById('smartRouting').checked) {
+        const winterMode = document.getElementById('winterMode').checked;
+        const best = await findBestLoop(
+            startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress);
+        if (best) {
+            return { dest: best.dest, destName: best.destName, outbound: best.outbound,
+                return: best.return, junctions: best.junctions, overlap: best.overlap };
+        }
+        return { dest, destName, outbound: undefined, return: undefined, junctions: null, overlap: null };
+    }
+    const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
+        tripMode, smartRouting: false, winterMode: false, onProgress,
+        buildingMessage: 'Building route…', spread,
+    });
+    return { dest, destName, outbound: r.outbound, return: r.return, junctions: null, overlap: null };
 }
 
 // ─── Main: generate random destination ───────────────────────────────────────
@@ -954,15 +986,12 @@ async function generateDestination() {
 
             const existingDests = getAllExistingDestinations();
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
-            const locationTypeVal = document.getElementById('locationTypeSelect').value;
-            // Map the dropdown value to a routing strategy. Every case is listed
-            // explicitly so 'any' is visible: it resolves to a fully random point
-            // anywhere, not to roads or POIs.
-            const locationType =
-                locationTypeVal === 'roads' ? 'roads'
-                : locationTypeVal === 'any_poi' ? 'any_poi'
-                : locationTypeVal === 'any' ? 'any'
-                : 'poi';
+            const rawLocationType = document.getElementById('locationTypeSelect').value;
+            // Map the dropdown value to a routing strategy. Known values pass
+            // through; anything else is a specific POI key and routes as 'poi'.
+            // 'any' is listed explicitly so it stays visible: it resolves to a
+            // fully random point anywhere, not to roads or POIs.
+            const routingStrategy = ['roads', 'any_poi', 'any'].includes(rawLocationType) ? rawLocationType : 'poi';
 
             // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
             const scale = tripMode === 'one-way' ? 1.3 : 2.6;
@@ -971,37 +1000,19 @@ async function generateDestination() {
 
             // Resolve a candidate pool, then screen it for water-reachability.
             const resolved = await resolveCandidatePool(
-                locationType, locationTypeVal, startLat, startLng, straightMin, straightMax, onProgress, existingDests);
+                routingStrategy, rawLocationType, startLat, startLng, straightMin, straightMax, onProgress, existingDests);
             const screened = await screenCandidatePool(
                 startLat, startLng, resolved.candidatePool, resolved.dest, resolved.destName, existingDests, onProgress);
-            let { candidatePool, dest, destName } = screened;
-            const waterLocked = screened.waterLocked;
+            const { candidatePool, waterLocked } = screened;
 
-            // Build route. Smart round-trips run the novelty-retry loop; one-way
-            // and plain loops dispatch straight through buildRouteForMode. The
-            // spread is read from the DOM here (UI layer) and passed down.
+            // Build route (the spread is read from the DOM here, at the UI layer,
+            // and passed down). Smart round-trips may substitute a lower-overlap
+            // destination, so read dest/destName back from the build result.
             const spread = getSpreadParams();
-            let outboundRoute, returnRoute, junctions = null, overlap = null;
-            if (tripMode !== 'one-way' && document.getElementById('smartRouting').checked) {
-                const winterMode = document.getElementById('winterMode').checked;
-                const best = await findBestLoop(
-                    startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress);
-                if (best) {
-                    dest = best.dest;
-                    destName = best.destName;
-                    outboundRoute = best.outbound;
-                    returnRoute = best.return;
-                    junctions = best.junctions;
-                    overlap = best.overlap;
-                }
-            } else {
-                const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
-                    tripMode, smartRouting: false, winterMode: false, onProgress,
-                    buildingMessage: 'Building route…', spread,
-                });
-                outboundRoute = r.outbound;
-                returnRoute = r.return;
-            }
+            const built = await buildRouteForDestination(
+                startLat, startLng, candidatePool, screened.dest, screened.destName,
+                existingDests, maxKm, tripMode, spread, onProgress);
+            const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
             const session = displayRoute({
                 startLat, startLng, destLat: dest.lat, destLng: dest.lng,
