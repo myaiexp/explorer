@@ -1,36 +1,30 @@
-// Cloud-backup sync engine — outbox-based per-row mirror to /explorer/api
+// Cloud-backup sync engine — consent/account state machine + public API. The
+// two data-heavy sub-concerns live in sibling modules this file composes:
+//   • sync-flush.js    — the durable outbox + single-flight backoff flush worker
+//   • sync-sections.js — read/merge/normalize/write of the four synced sections
 //
 // Consent-toast hook contract:
 //   Register: window.ExplorerSyncUI = { showConsentToast: function() { return Promise<'accepted'|'declined'> } }
 //   showConsentToast() must return a Promise that resolves to 'accepted' or 'declined'.
 //   If window.ExplorerSyncUI?.showConsentToast is not set, requestConsent() falls back to window.confirm().
 //
-// Load order: <script src="sync.js"> BEFORE <script src="app.js">
+// Load order: sync-flush.js + sync-sections.js BEFORE this; this BEFORE app.js.
 
 (function () {
     'use strict';
 
     var BACKUP_KEY = 'walk_cloud_backup';
-    var OUTBOX_KEY = 'walk_sync_outbox';
-    // The four synced sections, in sync order. These names are sync.js's own
-    // vocabulary — they key the server's GET response and the outbox entries.
-    // The 'walk_*' localStorage keys they map to are owned by storage.js (loaded
-    // alongside us); sectionKey() resolves each from storage.js's globals so the
-    // key strings have exactly one home and a rename there can't silently fork.
-    var DATA_SECTIONS = ['visits', 'favorites', 'savedLocations', 'history'];
     var USERNAME_RE = /^[a-z]+-[a-z]+-\d{1,2}$/;
     var API_BASE = '/explorer/api';
+
+    // The four synced sections + their local-data helpers live in sync-sections.js.
+    var Sections = globalThis.SyncSections;
 
     // ── Internal state ──────────────────────────────────────────────────────────
 
     var _state = 'anonymous';   // 'anonymous' | 'accepted' | 'declined'
     var _username = null;
     var _token = null;          // per-account secret; sent as Bearer on every request
-    var _flushing = false;
-    var _backoffMs = 0;
-    var _backoffTimer = null;
-    var _flushWaiters = [];     // resolve callbacks awaiting a fully-drained outbox
-    var BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 60000];
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -52,23 +46,6 @@
 
     function clearConsentRecord() {
         localStorage.removeItem(BACKUP_KEY);
-    }
-
-    function parseOutbox() {
-        try {
-            var raw = localStorage.getItem(OUTBOX_KEY);
-            return raw ? JSON.parse(raw) : [];
-        } catch (e) {
-            return [];
-        }
-    }
-
-    function saveOutbox(entries) {
-        localStorage.setItem(OUTBOX_KEY, JSON.stringify(entries));
-    }
-
-    function clearOutbox() {
-        localStorage.removeItem(OUTBOX_KEY);
     }
 
     function parseUrlUsername() {
@@ -95,80 +72,6 @@
         }
     }
 
-    // Section's localStorage key, resolved from storage.js's globals at call time
-    // (they aren't set at our IIFE time — storage.js loads after sync.js — but are
-    // by the time any method here runs). storage.js is the single owner of these
-    // key strings; resolving them here keeps sync.js from forking a second copy.
-    function sectionKey(section) {
-        switch (section) {
-            case 'visits': return globalThis.VISITS_KEY;
-            case 'favorites': return globalThis.FAVORITES_KEY;
-            case 'savedLocations': return globalThis.SAVED_LOCATIONS_KEY;
-            case 'history': return globalThis.HISTORY_KEY;
-            default: return undefined;
-        }
-    }
-
-    // Delegates the parse-or-default contract to storage.js's readStoredArray so
-    // it lives in exactly one place (corrupt/missing → []).
-    function readSection(section) {
-        return globalThis.readStoredArray(sectionKey(section));
-    }
-
-    function isLocalStorageEmpty() {
-        for (var i = 0; i < DATA_SECTIONS.length; i++) {
-            var arr = readSection(DATA_SECTIONS[i]);
-            if (Array.isArray(arr) && arr.length > 0) { return false; }
-        }
-        return true;
-    }
-
-    // The favorites section is stored server-side as {id, username, payload, updatedAt}
-    // where payload is the flat favorite blob; every other section already comes back
-    // flat (typed columns). Unwrap favorites to the flat shape the app + renderer read
-    // (f.destLat, f.destName, …), preserving id + updatedAt for last-write-wins. Without
-    // this a synced-down favorite stays {id, payload:{…}} and crashes the renderer (#2065).
-    function normalizeServerRows(section, serverRows) {
-        if (section !== 'favorites') { return serverRows; }
-        return serverRows.map(function (row) {
-            if (!row || typeof row.payload !== 'object' || row.payload === null) { return row; }
-            var flat = Object.assign({}, row.payload, { id: row.id });
-            if (row.updatedAt !== undefined) { flat.updatedAt = row.updatedAt; }
-            return flat;
-        });
-    }
-
-    function mergeSection(section, serverRows) {
-        serverRows = normalizeServerRows(section, serverRows);
-        // Last-write-wins by updatedAt per id
-        var local = readSection(section);
-        var byId = {};
-        local.forEach(function (row) { if (row.id) { byId[row.id] = row; } });
-        serverRows.forEach(function (row) {
-            if (!row.id) { return; }
-            var existing = byId[row.id];
-            if (!existing) {
-                byId[row.id] = row;
-            } else {
-                var existingTs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-                var rowTs = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
-                if (rowTs >= existingTs) { byId[row.id] = row; }
-            }
-        });
-        var merged = Object.keys(byId).map(function (id) { return byId[id]; });
-        localStorage.setItem(sectionKey(section), JSON.stringify(merged));
-    }
-
-    function populateSection(section, serverRows) {
-        localStorage.setItem(sectionKey(section), JSON.stringify(normalizeServerRows(section, serverRows)));
-    }
-
-    function wipeSections() {
-        DATA_SECTIONS.forEach(function (s) {
-            localStorage.removeItem(sectionKey(s));
-        });
-    }
-
     // ── Fetch helpers ────────────────────────────────────────────────────────────
 
     function apiFetch(method, path, body) {
@@ -193,7 +96,7 @@
         return apiFetch('GET', '/' + username).then(function (res) {
             if (!res.ok) { if (onFail) { onFail(); } return; }
             return res.json().then(function (data) {
-                DATA_SECTIONS.forEach(function (s) {
+                Sections.DATA_SECTIONS.forEach(function (s) {
                     if (Array.isArray(data[s])) { applyRow(s, data[s]); }
                 });
                 if (onSuccess) { onSuccess(); }
@@ -203,104 +106,17 @@
 
     // ── Flush worker ─────────────────────────────────────────────────────────────
 
-    function scheduleFlush(delayMs) {
-        if (_backoffTimer !== null) { return; }
-        if (delayMs > 0) {
-            _backoffTimer = setTimeout(function () {
-                _backoffTimer = null;
-                doFlush();
-            }, delayMs);
-        } else {
-            // Use a microtask so callers finish before we start
-            Promise.resolve().then(doFlush);
-        }
-    }
-
-    function nextBackoff(current) {
-        for (var i = 0; i < BACKOFF_STEPS.length; i++) {
-            if (current < BACKOFF_STEPS[i]) { return BACKOFF_STEPS[i]; }
-        }
-        return BACKOFF_STEPS[BACKOFF_STEPS.length - 1];
-    }
-
-    // Resolve any pending _outbox.flush() promises once the queue is fully
-    // drained and no flush is in flight. The event-based completion signal that
-    // replaces the old 10 ms polling loop.
-    function settleFlushWaiters() {
-        if (_flushing) { return; }
-        if (parseOutbox().length > 0) { return; }
-        var waiters = _flushWaiters;
-        _flushWaiters = [];
-        for (var i = 0; i < waiters.length; i++) { waiters[i](); }
-    }
-
-    // Drop the head entry just processed (re-reading the outbox so a concurrent
-    // mutate() enqueued during the in-flight request is preserved), persist, and
-    // either reschedule for the next entry or signal flush completion.
-    function consumeOutboxHead() {
-        var remaining = parseOutbox();
-        remaining.shift();
-        saveOutbox(remaining);
-        if (remaining.length > 0) {
-            scheduleFlush(0);
-        }
-        settleFlushWaiters();
-    }
-
-    function doFlush() {
-        if (_flushing) { return; }
-        if (_state !== 'accepted' || !_username) { settleFlushWaiters(); return; }
-        var outbox = parseOutbox();
-        if (outbox.length === 0) { settleFlushWaiters(); return; }
-
-        _flushing = true;
-        var entry = outbox[0];
-        var path = '/' + _username + '/' + entry.section + '/' + entry.id;
-        var method = entry.op === 'delete' ? 'DELETE' : 'PUT';
-        var body = entry.op === 'delete' ? undefined : entry.data;
-
-        apiFetch(method, path, body).then(function (res) {
-            _flushing = false;
-            _backoffMs = 0;
-
-            if (res.status >= 200 && res.status < 300) {
-                consumeOutboxHead();
-                return;
-            }
-
-            if (res.status === 429) {
-                var retryAfter = parseInt(res.headers.get('Retry-After') || '5', 10);
-                scheduleFlush(retryAfter * 1000);
-                return;
-            }
-
-            if (res.status >= 400 && res.status < 500) {
-                console.warn('[ExplorerSync] Dropping outbox entry due to ' + res.status, entry);
-                consumeOutboxHead();
-                return;
-            }
-
-            // 5xx or unexpected — exponential backoff
-            _backoffMs = nextBackoff(_backoffMs);
-            scheduleFlush(_backoffMs);
-
-        }).catch(function () {
-            _flushing = false;
-            _backoffMs = nextBackoff(_backoffMs);
-            scheduleFlush(_backoffMs);
-        });
-    }
+    // The outbox + backoff pump lives in sync-flush.js. It reads none of this
+    // module's state directly: getUsername() gates flushing on accepted + a bound
+    // username, and apiFetch carries the Bearer token.
+    var flushWorker = globalThis.createSyncFlushWorker({
+        apiFetch: apiFetch,
+        getUsername: function () { return _state === 'accepted' ? _username : null; }
+    });
 
     // ── Online listener ──────────────────────────────────────────────────────────
 
-    window.addEventListener('online', function () {
-        if (_backoffTimer !== null) {
-            clearTimeout(_backoffTimer);
-            _backoffTimer = null;
-        }
-        _backoffMs = 0;
-        scheduleFlush(0);
-    });
+    window.addEventListener('online', function () { flushWorker.onOnline(); });
 
     // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -346,7 +162,7 @@
                 _token = consent.token || urlToken || null;
                 // Own device: merge server rows into local (last-write-wins). A
                 // failed GET is silently ignored — state is already 'accepted'.
-                return loadAccount(urlUser, mergeSection);
+                return loadAccount(urlUser, Sections.mergeSection);
             }
 
             // Loading a NEW/different account from the URL requires the secret
@@ -370,7 +186,7 @@
             // must be consented to — otherwise a shared link silently hijacks a
             // fresh browser into uploading the visitor's data to a foreign
             // account. Gate it with the same confirm used for Cases 4/5.
-            if (!consent && isLocalStorageEmpty()) {
+            if (!consent && Sections.isLocalStorageEmpty()) {
                 var adoptConfirmed = window.confirm(
                     'Load shared backup account ' + urlUser + '?\n\n' +
                     'Your walks, favourites, and saved locations on this device will ' +
@@ -383,7 +199,7 @@
                     return Promise.resolve();
                 }
                 _token = urlToken;
-                return loadAccount(urlUser, populateSection, bindAdoptedAccount, rollbackToken);
+                return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken);
             }
 
             // Case 4/5: URL segment + token with non-empty localStorage or different stored user
@@ -401,8 +217,8 @@
 
             // Confirmed — wipe and load
             _token = urlToken;
-            wipeSections();
-            return loadAccount(urlUser, populateSection, bindAdoptedAccount, rollbackToken);
+            Sections.wipeSections();
+            return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken);
         },
 
         getState: function () {
@@ -414,7 +230,7 @@
                 link: (_state === 'accepted' && _username && _token)
                     ? location.origin + '/explorer/' + _username + '#t=' + _token
                     : null,
-                outboxLength: parseOutbox().length
+                outboxLength: flushWorker.length()
             };
         },
 
@@ -448,7 +264,7 @@
                 _token = token;
 
                 // Assign missing UUIDs to savedLocations
-                var locs = readSection('savedLocations');
+                var locs = Sections.readSection('savedLocations');
                 var changed = false;
                 locs.forEach(function (loc) {
                     if (!loc.id) {
@@ -457,15 +273,15 @@
                     }
                 });
                 if (changed) {
-                    localStorage.setItem(sectionKey('savedLocations'), JSON.stringify(locs));
+                    localStorage.setItem(Sections.sectionKey('savedLocations'), JSON.stringify(locs));
                 }
 
                 // Build full payload
                 var payload = {
-                    visits: readSection('visits'),
-                    favorites: readSection('favorites'),
-                    savedLocations: readSection('savedLocations'),
-                    history: readSection('history')
+                    visits: Sections.readSection('visits'),
+                    favorites: Sections.readSection('favorites'),
+                    savedLocations: Sections.readSection('savedLocations'),
+                    history: Sections.readSection('history')
                 };
 
                 return apiFetch('POST', '/' + username + '/import', payload).then(function (res2) {
@@ -495,7 +311,7 @@
             return apiFetch('DELETE', '/' + usernameToDelete).then(function (res) {
                 if (!res.ok) { throw new Error('DELETE account failed: ' + res.status); }
                 clearConsentRecord();
-                clearOutbox();
+                flushWorker.clear();
                 _state = 'anonymous';
                 _username = null;
                 _token = null;
@@ -506,26 +322,13 @@
 
         mutate: function (section, op, id, data) {
             if (_state !== 'accepted') { return; }
-            var outbox = parseOutbox();
-            outbox.push({ section: section, op: op, id: id, data: data });
-            saveOutbox(outbox);
-            scheduleFlush(0);
+            flushWorker.enqueue({ section: section, op: op, id: id, data: data });
         },
 
+        // Test/inspection hook onto the flush worker's outbox.
         _outbox: {
-            peek: function () { return parseOutbox(); },
-            flush: function () {
-                // Resolves when the outbox is fully drained. Completion is signalled
-                // through the flush machinery (settleFlushWaiters) rather than polled.
-                return new Promise(function (resolve) {
-                    if (!_flushing && parseOutbox().length === 0) {
-                        resolve();
-                        return;
-                    }
-                    _flushWaiters.push(resolve);
-                    doFlush();
-                });
-            }
+            peek: flushWorker.peek,
+            flush: flushWorker.flush
         }
     };
 

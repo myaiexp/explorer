@@ -10,23 +10,31 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+// sync.js's IIFE reads globalThis.createSyncFlushWorker (sync-flush.js) and
+// globalThis.SyncSections (sync-sections.js) at load time, so both sibling
+// modules must run first — mirrors index.html's script order.
+import FLUSH_SRC from '../sync-flush.js?raw';
+import SECTIONS_SRC from '../sync-sections.js?raw';
 import SYNC_SRC from '../sync.js?raw';
 // Side-effect import: storage.js owns the walk_* key strings and readStoredArray
-// that sync.js resolves off globalThis at call time. Importing it runs its
-// top-level globalThis assignments once, so those globals exist before any
+// that sync-sections.js resolves off globalThis at call time. Importing it runs
+// its top-level globalThis assignments once, so those globals exist before any
 // ExplorerSync method runs (mirrors prod, where both scripts have executed by the
 // time init() is called). Values are constant, so a single load suffices.
 import '../storage.js';
 
-// ── Load sync.js source once ─────────────────────────────────────────────────
+// ── Load the sync scripts once ────────────────────────────────────────────────
 
-// Execute the IIFE in the jsdom global scope. new Function() is used here
-// deliberately to bootstrap a non-module browser script in the test environment.
+// Execute each IIFE in the jsdom global scope. new Function() is used here
+// deliberately to bootstrap non-module browser scripts in the test environment.
+// Order matches index.html: the flush worker + section helpers register their
+// globals before sync.js's IIFE consumes them.
 function loadSync() {
     delete window.ExplorerSync;
     // new Function with static local file content — not user-supplied input
-    const fn = new Function(SYNC_SRC); // eslint-disable-line no-new-func
-    fn.call(window);
+    new Function(FLUSH_SRC).call(window);    // eslint-disable-line no-new-func
+    new Function(SECTIONS_SRC).call(window); // eslint-disable-line no-new-func
+    new Function(SYNC_SRC).call(window);     // eslint-disable-line no-new-func
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

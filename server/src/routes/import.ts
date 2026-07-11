@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { PgTable, PgColumn, PgInsertValue } from 'drizzle-orm/pg-core';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
-import { isObject, isArray } from '../lib/type-guards.js';
+import { isObject, isArray, type AnyRecord } from '../lib/type-guards.js';
 import { accountAuth } from '../middleware/auth.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
 import {
@@ -11,46 +11,38 @@ import {
   validateVisitRow,
   validateFavoriteRow,
   validateSavedLocationRow,
+  type RowResult,
 } from '../lib/validate-rows.js';
 
 // The four import tables share only the columns this route touches: a username
 // owner (delete key) — enough to drive the generic replace transaction below.
 type UserTable = PgTable & { username: PgColumn };
 
-// Bulk import wants a null short-circuit rather than an error string, so each
-// section is a thin adapter over the shared validator (lib/validate-rows.ts):
-// guard the row is an object, delegate, and collapse any { error } to null. The
-// row's own `id` is the identity here (per-row PUT uses the path id instead).
-// Coordinate-shape validation lives inside validateTripRow, so these no longer
-// need the assertRouteCoords try/catch the import loops used to repeat.
-export function validateRouteRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
-  if (!isObject(row)) return null;
-  const res = validateTripRow(row.id, username, row);
-  return 'error' in res ? null : res.row;
+// Bulk import wants a null short-circuit rather than an error string. Every
+// section adapter is the same three steps over a shared validator
+// (lib/validate-rows.ts): guard the row is an object, delegate with the row's own
+// `id` as identity (per-row PUT uses the path id instead), and collapse any
+// { error } to null. `nullable` names that pattern once, so deriving a validator
+// for a fifth section is a one-liner. Coordinate-shape validation lives inside
+// validateTripRow, so these no longer need the assertRouteCoords try/catch the
+// import loops used to repeat.
+function nullable<T>(
+  validate: (id: unknown, username: string, body: AnyRecord) => RowResult<T>,
+): (row: unknown, username: string) => T | null {
+  return (row, username) => {
+    if (!isObject(row)) return null;
+    const res = validate(row.id, username, row);
+    return 'error' in res ? null : res.row;
+  };
 }
 
-export function validateVisit(row: unknown, username: string): typeof schema.visits.$inferInsert | null {
-  if (!isObject(row)) return null;
-  const res = validateVisitRow(row.id, username, row);
-  return 'error' in res ? null : res.row;
-}
+export const validateRouteRow = nullable(validateTripRow);
+export const validateVisit = nullable(validateVisitRow);
+const validateFavorite = nullable(validateFavoriteRow);
+const validateSavedLocation = nullable(validateSavedLocationRow);
 
-function validateFavorite(row: unknown, username: string): typeof schema.favorites.$inferInsert | null {
-  if (!isObject(row)) return null;
-  const res = validateFavoriteRow(row.id, username, row);
-  return 'error' in res ? null : res.row;
-}
-
-function validateSavedLocation(row: unknown, username: string): typeof schema.savedLocations.$inferInsert | null {
-  if (!isObject(row)) return null;
-  const res = validateSavedLocationRow(row.id, username, row);
-  return 'error' in res ? null : res.row;
-}
-
-// History rows are exactly the shared trip shape (no poiCategory) — thin delegate.
-export function validateHistoryRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
-  return validateRouteRow(row, username);
-}
+// History rows are exactly the shared trip shape (no poiCategory) — same core.
+export const validateHistoryRow = validateRouteRow;
 
 export function importRoutes(db: Db): Hono {
   const app = new Hono();
