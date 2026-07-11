@@ -34,7 +34,7 @@
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
-    // The consent record persisted under BACKUP_KEY is not a boolean: it is
+    // The consent record persisted under BACKUP_KEY is a structured record:
     // { state: 'accepted'|'declined', username?, token? } — the user's
     // backup-consent decision plus the account it is bound to.
     function readConsentRecord() {
@@ -307,7 +307,7 @@
     var ExplorerSync = {
 
         init: function () {
-            var flag = readConsentRecord();
+            var consent = readConsentRecord();
             var urlUser = parseUrlUsername();
             var urlToken = parseUrlToken();
 
@@ -324,11 +324,11 @@
 
             // ── Case 1: no URL segment ──────────────────────────────────────────
             if (!urlUser) {
-                if (flag && flag.state === 'accepted') {
+                if (consent && consent.state === 'accepted') {
                     _state = 'accepted';
-                    _username = flag.username;
-                    _token = flag.token || null;
-                } else if (flag && flag.state === 'declined') {
+                    _username = consent.username;
+                    _token = consent.token || null;
+                } else if (consent && consent.state === 'declined') {
                     _state = 'declined';
                 } else {
                     _state = 'anonymous';
@@ -339,11 +339,11 @@
             // ── Cases with URL segment ──────────────────────────────────────────
 
             // Case 2: URL matches stored username — the credential comes from the
-            // stored flag (the user's own device), so a bare link still works here.
-            if (flag && flag.state === 'accepted' && flag.username === urlUser) {
+            // stored consent (the user's own device), so a bare link still works here.
+            if (consent && consent.state === 'accepted' && consent.username === urlUser) {
                 _state = 'accepted';
                 _username = urlUser;
-                _token = flag.token || urlToken || null;
+                _token = consent.token || urlToken || null;
                 // Own device: merge server rows into local (last-write-wins). A
                 // failed GET is silently ignored — state is already 'accepted'.
                 return loadAccount(urlUser, mergeSection);
@@ -353,24 +353,24 @@
             // token from the link fragment. A bare link on a fresh device has no
             // credential, so there is nothing to load — keep current local state.
             if (!urlToken) {
-                if (flag && flag.state === 'accepted') {
+                if (consent && consent.state === 'accepted') {
                     _state = 'accepted';
-                    _username = flag.username;
-                    _token = flag.token || null;
+                    _username = consent.username;
+                    _token = consent.token || null;
                 } else {
-                    _state = flag && flag.state === 'declined' ? 'declined' : 'anonymous';
+                    _state = consent && consent.state === 'declined' ? 'declined' : 'anonymous';
                 }
                 return Promise.resolve();
             }
 
-            // Case 3: URL segment + token, no flag, localStorage empty.
+            // Case 3: URL segment + token, no consent, localStorage empty.
             // Loading a URL-sourced account binds this browser to it: every
             // future walk, favourite, and saved location syncs there, and anyone
             // holding the link can read it back. Even on an empty device this
             // must be consented to — otherwise a shared link silently hijacks a
             // fresh browser into uploading the visitor's data to a foreign
             // account. Gate it with the same confirm used for Cases 4/5.
-            if (!flag && isLocalStorageEmpty()) {
+            if (!consent && isLocalStorageEmpty()) {
                 var adoptConfirmed = window.confirm(
                     'Load shared backup account ' + urlUser + '?\n\n' +
                     'Your walks, favourites, and saved locations on this device will ' +
@@ -387,7 +387,7 @@
             }
 
             // Case 4/5: URL segment + token with non-empty localStorage or different stored user
-            var storedUser = (flag && flag.state === 'accepted') ? flag.username : null;
+            var storedUser = (consent && consent.state === 'accepted') ? consent.username : null;
             var msg = storedUser
                 ? 'Switching to account ' + urlUser + ' from ' + storedUser + ' — your local data will be replaced.'
                 : 'Loading account ' + urlUser + ' — this will replace your current local data.';
@@ -395,7 +395,7 @@
             var confirmed = window.confirm(msg + '\n\n[Continue / Cancel]');
             if (!confirmed) {
                 history.replaceState(null, '', '/explorer/');
-                _state = flag && flag.state === 'declined' ? 'declined' : 'anonymous';
+                _state = consent && consent.state === 'declined' ? 'declined' : 'anonymous';
                 return Promise.resolve();
             }
 
@@ -507,7 +507,7 @@
         mutate: function (section, op, id, data) {
             if (_state !== 'accepted') { return; }
             var outbox = parseOutbox();
-            outbox.push({ section: section, op: op, id: id, data: data, attempts: 0 });
+            outbox.push({ section: section, op: op, id: id, data: data });
             saveOutbox(outbox);
             scheduleFlush(0);
         },

@@ -797,7 +797,7 @@ describe('ExplorerSync coverage gaps (audit)', () => {
         // flush the shared outbox to their own (404) paths — silence that noise.
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         localStorage.setItem('walk_sync_outbox', JSON.stringify([
-            { section: 'visits', op: 'put', id: 'uuid-on', data: { id: 'uuid-on' }, attempts: 0 },
+            { section: 'visits', op: 'put', id: 'uuid-on', data: { id: 'uuid-on' } },
         ]));
         mockFetch({ 'PUT /explorer/api/windy-creek-9/visits/uuid-on': { status: 204 } });
         window.dispatchEvent(new Event('online'));

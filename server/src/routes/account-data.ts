@@ -1,3 +1,4 @@
+// GET /:username — full four-section account snapshot (cloud-backup read)
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
@@ -5,7 +6,7 @@ import { schema } from '../db.js';
 import { accountAuth } from '../middleware/auth.js';
 import { readRateLimit } from '../middleware/rate-limit.js';
 
-export function fetchRoutes(db: Db): Hono {
+export function accountDataRoutes(db: Db): Hono {
   const app = new Hono();
 
   // GET /:username — return all four sections. IP rate limit runs first

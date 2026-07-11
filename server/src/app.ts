@@ -4,7 +4,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import type { Db } from './db.js';
 import { accountsRoutes } from './routes/accounts.js';
-import { fetchRoutes } from './routes/fetch.js';
+import { accountDataRoutes } from './routes/account-data.js';
 import { importRoutes } from './routes/import.js';
 import { sectionsRoutes } from './routes/sections.js';
 
@@ -39,7 +39,7 @@ export function createApp(db: Db): Hono {
   app.route('/api', accountsRoutes(db));
   app.route('/api', sectionsRoutes(db));
   app.route('/api', importRoutes(db));
-  app.route('/api', fetchRoutes(db));
+  app.route('/api', accountDataRoutes(db));
 
   return app;
 }
