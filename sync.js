@@ -118,7 +118,23 @@
         return true;
     }
 
+    // The favorites section is stored server-side as {id, username, payload, updatedAt}
+    // where payload is the flat favorite blob; every other section already comes back
+    // flat (typed columns). Unwrap favorites to the flat shape the app + renderer read
+    // (f.destLat, f.destName, …), preserving id + updatedAt for last-write-wins. Without
+    // this a synced-down favorite stays {id, payload:{…}} and crashes the renderer (#2065).
+    function normalizeServerRows(section, serverRows) {
+        if (section !== 'favorites') { return serverRows; }
+        return serverRows.map(function (row) {
+            if (!row || typeof row.payload !== 'object' || row.payload === null) { return row; }
+            var flat = Object.assign({}, row.payload, { id: row.id });
+            if (row.updatedAt !== undefined) { flat.updatedAt = row.updatedAt; }
+            return flat;
+        });
+    }
+
     function mergeSection(section, serverRows) {
+        serverRows = normalizeServerRows(section, serverRows);
         // Last-write-wins by updatedAt per id
         var local = readSection(section);
         var byId = {};
@@ -139,7 +155,7 @@
     }
 
     function populateSection(section, serverRows) {
-        localStorage.setItem(DATA_KEYS[section], JSON.stringify(serverRows));
+        localStorage.setItem(DATA_KEYS[section], JSON.stringify(normalizeServerRows(section, serverRows)));
     }
 
     function wipeSections() {

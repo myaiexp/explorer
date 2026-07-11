@@ -63,8 +63,13 @@ export function validateVisit(row: unknown, username: string): typeof schema.vis
 
 function validateFavorite(row: unknown, username: string): typeof schema.favorites.$inferInsert | null {
   if (!isObject(row)) return null;
-  const { id, payload } = row;
+  const { id } = row;
   if (typeof id !== 'string' || !id) return null;
+  // Accept both the wrapped shape {id, payload} and the client's flat favorite
+  // (no payload key) — mirror the per-row PUT so favorites round-trip identically
+  // through bulk import and per-row sync (#2065). A present-but-null payload is
+  // malformed and still rejected (preserves the 400 contract + NOT NULL column).
+  const payload = 'payload' in row ? row.payload : row;
   if (payload === undefined || payload === null) return null;
   if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN) return null;
   return { id, username, payload };

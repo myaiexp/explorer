@@ -131,6 +131,42 @@ describe('POST /api/:username/import', () => {
     expect(history).toHaveLength(1);
   });
 
+  // The client (sync.js) stores favorites FLAT — {id, destLat, destName, …} with no
+  // `payload` wrapper — and bulk-imports them verbatim. import must accept the flat
+  // shape (mirroring the per-row PUT's `payload = body.payload ?? body`), or every
+  // favorite is silently dropped on account creation (#2065).
+  test('imports flat favorites (no payload wrapper) by wrapping the whole row', async () => {
+    const { username: u, token } = await createTestAccount();
+    const flatFav = { id: 'f-flat-1', destLat: 60.1, destLng: 24.9, destName: 'Park', distance: 3 };
+    const res = await app.request(`/api/${u}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ visits: [], favorites: [flatFav], savedLocations: [], history: [] }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+
+    const favorites = await db.select().from(schema.favorites).where(eq(schema.favorites.username, u));
+    expect(favorites).toHaveLength(1);
+    expect(favorites[0].id).toBe('f-flat-1');
+    // Stored as the jsonb payload, identical to the per-row PUT path.
+    expect(favorites[0].payload).toMatchObject({ destLat: 60.1, destName: 'Park' });
+  });
+
+  // A pre-wrapped favorite ({id, payload}) must still import unchanged — the flat-shape
+  // acceptance above must not double-wrap an already-wrapped payload.
+  test('imports pre-wrapped favorites without double-wrapping', async () => {
+    const { username: u, token } = await createTestAccount();
+    const res = await app.request(`/api/${u}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ visits: [], favorites: [{ id: 'f-wrap-1', payload: { destName: 'Lake' } }], savedLocations: [], history: [] }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+    const favorites = await db.select().from(schema.favorites).where(eq(schema.favorites.username, u));
+    expect(favorites).toHaveLength(1);
+    expect(favorites[0].payload).toEqual({ destName: 'Lake' });
+  });
+
   // Partial import (only a subset of section keys present). The route is replace-all:
   // an omitted section defaults to [] (body.<section> ?? []) and ALL four sections are
   // unconditionally deleted for the user inside the transaction before re-inserting.
