@@ -8,17 +8,14 @@ import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
 import { accountAuth } from '../middleware/auth.js';
-import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 import { isObject, type AnyRecord } from '../lib/type-guards.js';
+import { MAX_WRITE_BODY_BYTES } from '../lib/validate-fields.js';
 import {
-  MAX_LABEL_LEN,
-  MAX_NAME_LEN,
-  MAX_FAVORITE_PAYLOAD_LEN,
-  MAX_WRITE_BODY_BYTES,
-  isIsoDate,
-  tooLong,
-  payloadLength,
-} from '../lib/validate-fields.js';
+  validateTripRow,
+  validateVisitRow,
+  validateFavoriteRow,
+  validateSavedLocationRow,
+} from '../lib/validate-rows.js';
 
 // A section's domain rule: turn a validated object body into the row to upsert,
 // or a 400 error message. `id`/`username` come from the path.
@@ -87,58 +84,6 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
   });
 }
 
-// Validates the visit/history trip shape and extracts the columns common to both
-// tables (history is the trip shape; visits adds poiCategory).
-function buildTripBase(
-  id: string,
-  username: string,
-  body: AnyRecord
-): { error: string } | { base: typeof schema.history.$inferInsert } {
-  const { date, startLat, startLng, destLat, destLng, distance } = body;
-  if (typeof date !== 'string' || !date) return { error: 'Missing required field: date' };
-  if (!isIsoDate(date)) return { error: 'date must be an ISO-8601 timestamp' };
-  if (typeof startLat !== 'number') return { error: 'Missing required field: startLat' };
-  if (typeof startLng !== 'number') return { error: 'Missing required field: startLng' };
-  if (typeof destLat !== 'number') return { error: 'Missing required field: destLat' };
-  if (typeof destLng !== 'number') return { error: 'Missing required field: destLng' };
-  if (typeof distance !== 'number') return { error: 'Missing required field: distance' };
-  if (tooLong(body.startLabel, MAX_LABEL_LEN))
-    return { error: `startLabel exceeds maximum length of ${MAX_LABEL_LEN}` };
-  if (tooLong(body.destName, MAX_NAME_LEN))
-    return { error: `destName exceeds maximum length of ${MAX_NAME_LEN}` };
-  if (tooLong(body.tripMode, MAX_LABEL_LEN))
-    return { error: `tripMode exceeds maximum length of ${MAX_LABEL_LEN}` };
-
-  try {
-    assertRouteCoords(body.routeCoords, 'routeCoords');
-    assertRouteCoords(body.returnRouteCoords, 'returnRouteCoords');
-  } catch (e) {
-    if (e instanceof RouteCoordsError) return { error: e.message };
-    throw e;
-  }
-
-  return {
-    base: {
-      id,
-      username,
-      date,
-      startLat,
-      startLng,
-      startLabel: typeof body.startLabel === 'string' ? body.startLabel : null,
-      destLat,
-      destLng,
-      destName: typeof body.destName === 'string' ? body.destName : null,
-      tripMode: typeof body.tripMode === 'string' ? body.tripMode : null,
-      distance,
-      routeCoords: body.routeCoords !== undefined ? body.routeCoords : null,
-      routeDuration: typeof body.routeDuration === 'number' ? body.routeDuration : null,
-      returnRouteCoords: body.returnRouteCoords !== undefined ? body.returnRouteCoords : null,
-      returnRouteDuration:
-        typeof body.returnRouteDuration === 'number' ? body.returnRouteDuration : null,
-    },
-  };
-}
-
 export function sectionsRoutes(db: Db): Hono {
   const app = new Hono();
   const rl = sectionWriteRateLimit();
@@ -148,61 +93,32 @@ export function sectionsRoutes(db: Db): Hono {
     onError: (c) => c.json({ error: 'Request body too large' }, 413),
   });
 
+  // Each section delegates to the shared validator (lib/validate-rows.ts), which
+  // returns { error } | { row }; the PUT handler surfaces the error string as its
+  // 400 body. `id` comes from the path — for favorites that means `body` here
+  // never carries the id, so the no-wrapper fallback stores exactly the body.
   registerSection(app, db, rl, auth, writeBodyLimit, {
     path: 'visits',
     table: schema.visits,
-    buildRow: (id, username, body) => {
-      if (tooLong(body.poiCategory, MAX_LABEL_LEN))
-        return { error: `poiCategory exceeds maximum length of ${MAX_LABEL_LEN}` };
-      const r = buildTripBase(id, username, body);
-      if ('error' in r) return r;
-      return {
-        row: {
-          ...r.base,
-          poiCategory: typeof body.poiCategory === 'string' ? body.poiCategory : null,
-        },
-      };
-    },
+    buildRow: (id, username, body) => validateVisitRow(id, username, body),
   });
 
   registerSection(app, db, rl, auth, writeBodyLimit, {
     path: 'favorites',
     table: schema.favorites,
-    // The client PUTs the favorite object directly, with no `payload` wrapper
-    // (see toggleFavorite in app.js), so fall back to the whole body as the
-    // stored JSONB. Either way, size-cap it so an arbitrarily-large object can't
-    // be persisted (the bodyLimit middleware is a coarser outer bound on top).
-    buildRow: (id, username, body) => {
-      const payload = body.payload !== undefined ? body.payload : body;
-      if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN)
-        return { error: `payload exceeds maximum size of ${MAX_FAVORITE_PAYLOAD_LEN}` };
-      return { row: { id, username, payload } };
-    },
+    buildRow: (id, username, body) => validateFavoriteRow(id, username, body),
   });
 
   registerSection(app, db, rl, auth, writeBodyLimit, {
     path: 'saved-locations',
     table: schema.savedLocations,
-    buildRow: (id, username, body) => {
-      const { label, value } = body;
-      if (typeof label !== 'string') return { error: 'Missing required field: label' };
-      if (typeof value !== 'string') return { error: 'Missing required field: value' };
-      if (label.length > MAX_LABEL_LEN)
-        return { error: `label exceeds maximum length of ${MAX_LABEL_LEN}` };
-      if (value.length > MAX_LABEL_LEN)
-        return { error: `value exceeds maximum length of ${MAX_LABEL_LEN}` };
-      return { row: { id, username, label, value } };
-    },
+    buildRow: (id, username, body) => validateSavedLocationRow(id, username, body),
   });
 
   registerSection(app, db, rl, auth, writeBodyLimit, {
     path: 'history',
     table: schema.history,
-    buildRow: (id, username, body) => {
-      const r = buildTripBase(id, username, body);
-      if ('error' in r) return r;
-      return { row: r.base };
-    },
+    buildRow: (id, username, body) => validateTripRow(id, username, body),
   });
 
   return app;

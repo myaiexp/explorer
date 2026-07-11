@@ -84,13 +84,21 @@ describe('validateRouteRow (shared core)', () => {
     expect(out.returnRouteDuration).toBeNull();
   });
 
-  it('treats routeCoords/returnRouteCoords as present unless undefined (shape unchecked here)', () => {
-    // The shared validator only distinguishes undefined → null; deep shape validation
-    // happens later via assertRouteCoords at the call site, so a non-array passes through.
-    const out = validateRouteRow({ ...validRow(), routeCoords: 'not-an-array' }, USER)!;
-    expect(out.routeCoords).toBe('not-an-array');
-    const out2 = validateRouteRow({ ...validRow(), routeCoords: undefined }, USER)!;
-    expect(out2.routeCoords).toBeNull();
+  it('validates routeCoords shape (assertRouteCoords folded into the validator)', () => {
+    // assertRouteCoords now runs inside the shared validator, so a malformed
+    // routeCoords is rejected here (→ null via the adapter) rather than passing
+    // through to a separate call-site check.
+    expect(validateRouteRow({ ...validRow(), routeCoords: 'not-an-array' }, USER)).toBeNull();
+    expect(validateRouteRow({ ...validRow(), returnRouteCoords: [[999, 0]] }, USER)).toBeNull();
+    // undefined still normalizes to null (absent → null).
+    const out = validateRouteRow({ ...validRow(), routeCoords: undefined }, USER)!;
+    expect(out.routeCoords).toBeNull();
+    // a valid [lat, lng] array passes through unchanged.
+    const coords = [
+      [60.1, 24.9],
+      [60.2, 25.0],
+    ];
+    expect(validateRouteRow({ ...validRow(), routeCoords: coords }, USER)!.routeCoords).toEqual(coords);
   });
 
   it('does not carry a poiCategory field (visits-only)', () => {

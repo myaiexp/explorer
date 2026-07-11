@@ -2,91 +2,47 @@ import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
-import { assertRouteCoords, RouteCoordsError } from '../lib/route-coords.js';
 import { isObject, isArray } from '../lib/type-guards.js';
 import { accountAuth } from '../middleware/auth.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
 import {
-  MAX_LABEL_LEN,
-  MAX_NAME_LEN,
-  MAX_FAVORITE_PAYLOAD_LEN,
-  isIsoDate,
-  tooLong,
-  payloadLength,
-} from '../lib/validate-fields.js';
+  validateTripRow,
+  validateVisitRow,
+  validateFavoriteRow,
+  validateSavedLocationRow,
+} from '../lib/validate-rows.js';
 
-// Shared validation + normalization for route-shaped rows. `visits` and `history` have an
-// identical column shape except `visits` also carries `poiCategory`, so both call sites reuse
-// this core and `validateVisit` grafts the extra field on top. Returns the common (history)
-// insert shape, or null if any required field is missing/mistyped.
+// Bulk import wants a null short-circuit rather than an error string, so each
+// section is a thin adapter over the shared validator (lib/validate-rows.ts):
+// guard the row is an object, delegate, and collapse any { error } to null. The
+// row's own `id` is the identity here (per-row PUT uses the path id instead).
+// Coordinate-shape validation lives inside validateTripRow, so these no longer
+// need the assertRouteCoords try/catch the import loops used to repeat.
 export function validateRouteRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
   if (!isObject(row)) return null;
-  const { id, date, startLat, startLng, destLat, destLng, distance } = row;
-  if (typeof id !== 'string' || !id) return null;
-  if (!isIsoDate(date)) return null;
-  if (typeof startLat !== 'number') return null;
-  if (typeof startLng !== 'number') return null;
-  if (typeof destLat !== 'number') return null;
-  if (typeof destLng !== 'number') return null;
-  if (typeof distance !== 'number') return null;
-  if (tooLong(row.startLabel, MAX_LABEL_LEN)) return null;
-  if (tooLong(row.destName, MAX_NAME_LEN)) return null;
-  if (tooLong(row.tripMode, MAX_LABEL_LEN)) return null;
-
-  return {
-    id,
-    username,
-    date,
-    startLat,
-    startLng,
-    startLabel: typeof row.startLabel === 'string' ? row.startLabel : null,
-    destLat,
-    destLng,
-    destName: typeof row.destName === 'string' ? row.destName : null,
-    tripMode: typeof row.tripMode === 'string' ? row.tripMode : null,
-    distance,
-    routeCoords: row.routeCoords !== undefined ? row.routeCoords : null,
-    routeDuration: typeof row.routeDuration === 'number' ? row.routeDuration : null,
-    returnRouteCoords: row.returnRouteCoords !== undefined ? row.returnRouteCoords : null,
-    returnRouteDuration: typeof row.returnRouteDuration === 'number' ? row.returnRouteDuration : null,
-  };
+  const res = validateTripRow(row.id, username, row);
+  return 'error' in res ? null : res.row;
 }
 
 export function validateVisit(row: unknown, username: string): typeof schema.visits.$inferInsert | null {
-  const base = validateRouteRow(row, username);
-  if (!base) return null;
-  // base !== null guarantees row is an object; re-narrow to read the visit-only poiCategory.
-  if (isObject(row) && tooLong(row.poiCategory, MAX_LABEL_LEN)) return null;
-  const poiCategory = isObject(row) && typeof row.poiCategory === 'string' ? row.poiCategory : null;
-  return { ...base, poiCategory };
+  if (!isObject(row)) return null;
+  const res = validateVisitRow(row.id, username, row);
+  return 'error' in res ? null : res.row;
 }
 
 function validateFavorite(row: unknown, username: string): typeof schema.favorites.$inferInsert | null {
   if (!isObject(row)) return null;
-  const { id } = row;
-  if (typeof id !== 'string' || !id) return null;
-  // Accept both the wrapped shape {id, payload} and the client's flat favorite
-  // (no payload key) — mirror the per-row PUT so favorites round-trip identically
-  // through bulk import and per-row sync (#2065). A present-but-null payload is
-  // malformed and still rejected (preserves the 400 contract + NOT NULL column).
-  const payload = 'payload' in row ? row.payload : row;
-  if (payload === undefined || payload === null) return null;
-  if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN) return null;
-  return { id, username, payload };
+  const res = validateFavoriteRow(row.id, username, row);
+  return 'error' in res ? null : res.row;
 }
 
 function validateSavedLocation(row: unknown, username: string): typeof schema.savedLocations.$inferInsert | null {
   if (!isObject(row)) return null;
-  const { id, label, value } = row;
-  if (typeof id !== 'string' || !id) return null;
-  if (typeof label !== 'string') return null;
-  if (typeof value !== 'string') return null;
-  if (label.length > MAX_LABEL_LEN) return null;
-  if (value.length > MAX_LABEL_LEN) return null;
-  return { id, username, label, value };
+  const res = validateSavedLocationRow(row.id, username, row);
+  return 'error' in res ? null : res.row;
 }
 
-// History rows are exactly the shared route-row shape (no poiCategory) — thin delegate.
+// History rows are exactly the shared trip shape (no poiCategory) — thin delegate.
 export function validateHistoryRow(row: unknown, username: string): typeof schema.history.$inferInsert | null {
   return validateRouteRow(row, username);
 }
@@ -131,13 +87,6 @@ export function importRoutes(db: Db): Hono {
     for (const row of rawVisits) {
       const validated = validateVisit(row, username);
       if (!validated) return c.json({ error: 'Invalid visit row' }, 400);
-      try {
-        assertRouteCoords(validated.routeCoords, 'routeCoords');
-        assertRouteCoords(validated.returnRouteCoords, 'returnRouteCoords');
-      } catch (e) {
-        if (e instanceof RouteCoordsError) return c.json({ error: e.message }, 400);
-        throw e;
-      }
       visitRows.push(validated);
     }
 
@@ -159,13 +108,6 @@ export function importRoutes(db: Db): Hono {
     for (const row of rawHistory) {
       const validated = validateHistoryRow(row, username);
       if (!validated) return c.json({ error: 'Invalid history row' }, 400);
-      try {
-        assertRouteCoords(validated.routeCoords, 'routeCoords');
-        assertRouteCoords(validated.returnRouteCoords, 'returnRouteCoords');
-      } catch (e) {
-        if (e instanceof RouteCoordsError) return c.json({ error: e.message }, 400);
-        throw e;
-      }
       historyRows.push(validated);
     }
 
