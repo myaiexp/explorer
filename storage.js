@@ -19,6 +19,14 @@ function readStoredArray(key) {
     }
 }
 
+// Serialize an array back to localStorage — the write-side counterpart to
+// readStoredArray, so the JSON.stringify/setItem pairing lives in one place.
+// The cloud-mirror half (ExplorerSync.mutate) stays in app.js's syncedPut/
+// syncedDelete, which wrap this — storage.js itself does no network.
+function writeStoredArray(key, arr) {
+    localStorage.setItem(key, JSON.stringify(arr));
+}
+
 function getVisits() {
     return readStoredArray(STORAGE_KEY);
 }
@@ -42,6 +50,7 @@ globalThis.SAVED_LOCATIONS_KEY = SAVED_LOCATIONS_KEY;
 globalThis.FAVORITES_KEY = FAVORITES_KEY;
 globalThis.HISTORY_KEY = HISTORY_KEY;
 globalThis.readStoredArray = readStoredArray;
+globalThis.writeStoredArray = writeStoredArray;
 globalThis.getVisits = getVisits;
 globalThis.getSavedLocations = getSavedLocations;
 globalThis.getFavorites = getFavorites;

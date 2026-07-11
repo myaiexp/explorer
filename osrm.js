@@ -104,22 +104,35 @@ function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
     };
 }
 
+// Pure loop envelope geometry — the single source for the sin-envelope via
+// points, shared by both loop builders here and buildDirectionsUrl in app.js
+// (which draws the Google Maps link along the same oval). Built on
+// buildLoopSetup so the offset formula lives in exactly one place.
+// rightVias/leftVias are in forward (A→B) t-order; a leg that walks a side back
+// toward A reverses that side at the call site (self-documenting). Spreads the
+// setup fields (A, B, snapRadius, offsetKm, viaTs) so callers don't re-derive
+// them. Pure — no DOM, no network.
+function loopVias(startLat, startLng, destLat, destLng, spread) {
+    const setup = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
+    const { offsetKm, viaTs } = setup;
+    const rightVias = viaTs.map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
+    const leftVias = viaTs.map(t =>
+        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+    return { rightVias, leftVias, ...setup };
+}
+
 // Build a full oval loop: A → (right vias) → B → (left vias) → A.
 // Returns { outbound, return } where each is {coords, duration, distance} or null.
 // Builds a single chirality (right-side out, left-side back); buildJunctionLoop
 // is the variant that tries both chiralities and picks the lower-overlap one.
 // `spread` is the precomputed { offsetMult, viaTs } from computeSpreadParams.
 async function buildLoop(startLat, startLng, destLat, destLng, spread) {
-    const { offsetKm, viaTs, A, B, snapRadius } = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
+    const { rightVias, leftVias, A, B, snapRadius } = loopVias(startLat, startLng, destLat, destLng, spread);
 
-    // Generate via points on each side using sin-envelope
-    const viasRight = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const viasLeftReturn = viaTs.slice().reverse().map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-
-    // Snap all 6 vias to nearest roads in parallel (threshold: half the offset distance)
-    const allVias = [...viasRight, ...viasLeftReturn];
+    // Snap all 6 vias to nearest roads in parallel (threshold: half the offset
+    // distance). The return leg walks the left side back toward A, so reverse it.
+    const allVias = [...rightVias, ...leftVias.slice().reverse()];
     const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
     const snappedRight = snapped.slice(0, 3);
     const snappedLeft = snapped.slice(3);
@@ -209,14 +222,10 @@ function pickBetterLoop(outA, retA, outB, retB) {
 // maxKm: the caller's max-distance budget — forwarded to fetchCorridorJunctions
 // for the start-anchored cache key (replaces a former DOM read in that helper).
 async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions = null, winterMode = false, spread = undefined) {
-    const { offsetKm, viaTs, A, B, snapRadius } = buildLoopSetup(startLat, startLng, destLat, destLng, spread);
-
-    // Forward-order vias on each side. Reversal happens at call time on the
-    // leg that needs it (return-direction leg).
-    const viasRight = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const viasLeft = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+    // Forward-order vias on each side (loopVias owns the envelope geometry).
+    // Reversal happens at call time on the leg that needs it (return leg).
+    const { rightVias: viasRight, leftVias: viasLeft, offsetKm, A, B, snapRadius } =
+        loopVias(startLat, startLng, destLat, destLng, spread);
 
     let junctions = cachedJunctions;
     if (!junctions) {
@@ -267,6 +276,7 @@ globalThis.tryNearest = tryNearest;
 globalThis.snapToRoad = snapToRoad;
 globalThis.screeningTableFn = screeningTableFn;
 globalThis.buildLoopSetup = buildLoopSetup;
+globalThis.loopVias = loopVias;
 globalThis.buildLoop = buildLoop;
 globalThis.fetchCorridorJunctions = fetchCorridorJunctions;
 globalThis.snapToJunction = snapToJunction;

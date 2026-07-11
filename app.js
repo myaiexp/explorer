@@ -101,6 +101,23 @@ function maybeRequestConsent() {
     }
 }
 
+// Persist a synced collection and mirror the change to the cloud outbox in one
+// step. writeStoredArray (storage.js) owns the localStorage write; these keep
+// the persist-and-mirror invariant in one place so a new call site can't save
+// locally while forgetting to replicate (the bug class fixed in #2065). Every
+// mutation of the four synced collections (visits, savedLocations, favorites,
+// history) goes through one of these — except importVisits' batch put, which
+// writes once and mirrors each row in a loop.
+function syncedPut(key, arr, section, id, data) {
+    writeStoredArray(key, arr);
+    ExplorerSync.mutate(section, 'put', id, data);
+}
+
+function syncedDelete(key, arr, section, id) {
+    writeStoredArray(key, arr);
+    ExplorerSync.mutate(section, 'delete', id);
+}
+
 // ─── localStorage ─────────────────────────────────────────────────────────────
 // readStoredArray + the array accessors (getVisits, getSavedLocations,
 // getFavorites, getHistory) and their storage keys (STORAGE_KEY,
@@ -111,17 +128,29 @@ const SETTINGS_KEY = 'walk_settings';
 
 // ─── Settings persistence ────────────────────────────────────────────────────
 
+// Declarative spec for the persisted preferences, so save/restore/listen all
+// iterate one list instead of enumerating the same eight fields three times.
+// prop is the element property to read/write; skipEmpty fields (free-text-ish
+// inputs) are only restored when non-empty so a blank saved value never clobbers
+// a default. The tripMode radio pair and the distance-label sync stay explicit
+// in restoreSettings — they don't fit the one-element/one-prop shape.
+const SETTINGS_FIELDS = [
+    { key: 'location',     id: 'location',           prop: 'value',   skipEmpty: true },
+    { key: 'minDistance',  id: 'minDistance',        prop: 'value' },
+    { key: 'maxDistance',  id: 'maxDistance',        prop: 'value' },
+    { key: 'poiType',      id: 'locationTypeSelect', prop: 'value',   skipEmpty: true },
+    { key: 'spread',       id: 'spreadSlider',       prop: 'value' },
+    { key: 'winterMode',   id: 'winterMode',         prop: 'checked' },
+    { key: 'smartRouting', id: 'smartRouting',       prop: 'checked' },
+];
+
 function saveSettings() {
     const settings = {
-        location: document.getElementById('location').value,
         tripMode: document.querySelector('input[name="tripMode"]:checked').value,
-        minDistance: document.getElementById('minDistance').value,
-        maxDistance: document.getElementById('maxDistance').value,
-        poiType: document.getElementById('locationTypeSelect').value,
-        spread: document.getElementById('spreadSlider').value,
-        winterMode: document.getElementById('winterMode').checked,
-        smartRouting: document.getElementById('smartRouting').checked,
     };
+    for (const f of SETTINGS_FIELDS) {
+        settings[f.key] = document.getElementById(f.id)[f.prop];
+    }
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
@@ -129,16 +158,16 @@ function restoreSettings() {
     try {
         const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY));
         if (!settings) return;
-        if (settings.location) document.getElementById('location').value = settings.location;
+        for (const f of SETTINGS_FIELDS) {
+            const val = settings[f.key];
+            if (val == null) continue;
+            if (f.skipEmpty && !val) continue;
+            document.getElementById(f.id)[f.prop] = val;
+        }
+        // Trip mode is a radio pair (two elements, one stored value) — special-cased.
         if (settings.tripMode === 'round' || settings.tripMode === 'one-way') {
             document.getElementById(settings.tripMode === 'one-way' ? 'oneWay' : 'roundTrip').checked = true;
         }
-        if (settings.minDistance != null) document.getElementById('minDistance').value = settings.minDistance;
-        if (settings.maxDistance != null) document.getElementById('maxDistance').value = settings.maxDistance;
-        if (settings.poiType) document.getElementById('locationTypeSelect').value = settings.poiType;
-        if (settings.spread != null) document.getElementById('spreadSlider').value = settings.spread;
-        if (settings.winterMode != null) document.getElementById('winterMode').checked = settings.winterMode;
-        if (settings.smartRouting != null) document.getElementById('smartRouting').checked = settings.smartRouting;
         // Sync distance label with restored trip mode
         const isOneWay = document.getElementById('oneWay').checked;
         document.getElementById('distanceLabel').textContent =
@@ -148,14 +177,10 @@ function restoreSettings() {
 
 // Auto-save on input changes
 function initSettingsListeners() {
-    document.getElementById('location').addEventListener('change', saveSettings);
+    for (const f of SETTINGS_FIELDS) {
+        document.getElementById(f.id).addEventListener('change', saveSettings);
+    }
     document.querySelectorAll('input[name="tripMode"]').forEach(r => r.addEventListener('change', saveSettings));
-    document.getElementById('minDistance').addEventListener('change', saveSettings);
-    document.getElementById('maxDistance').addEventListener('change', saveSettings);
-    document.getElementById('locationTypeSelect').addEventListener('change', saveSettings);
-    document.getElementById('spreadSlider').addEventListener('change', saveSettings);
-    document.getElementById('winterMode').addEventListener('change', saveSettings);
-    document.getElementById('smartRouting').addEventListener('change', saveSettings);
 }
 
 // ─── Saved locations ─────────────────────────────────────────────────────────
@@ -169,16 +194,14 @@ function toggleSaveLocation() {
     if (existing >= 0) {
         const removed = saved[existing];
         saved.splice(existing, 1);
-        localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
-        ExplorerSync.mutate('savedLocations', 'delete', removed.id || String(removed.value));
+        syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value));
         showSuccess('Location removed from saved.');
     } else {
         const label = prompt('Name for this location:', input);
         if (label === null) return;
         const newLoc = { id: crypto.randomUUID(), label: label || input, value: input };
         saved.push(newLoc);
-        localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
-        ExplorerSync.mutate('savedLocations', 'put', newLoc.id, newLoc);
+        syncedPut(SAVED_LOCATIONS_KEY, saved, 'savedLocations', newLoc.id, newLoc);
         maybeRequestConsent();
         showSuccess('Location saved.');
     }
@@ -197,8 +220,7 @@ function deleteSavedLocation(index, event) {
     const saved = getSavedLocations();
     const removed = saved[index];
     saved.splice(index, 1);
-    localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify(saved));
-    ExplorerSync.mutate('savedLocations', 'delete', removed.id || String(removed.value));
+    syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value));
     renderSavedLocations();
     updateSaveLocationBtn();
 }
@@ -283,6 +305,22 @@ function drawRouteGlow(coords, color, { dashed = false } = {}) {
     }).addTo(map);
     routeLines.push(top);
     return top;
+}
+
+// Draw the outbound + return legs in the shared glow style and return the
+// combined coord list (empty if neither leg exists). Callers own fitBounds and
+// any no-route fallback, which differ between first render and spread reroute.
+function drawRoutePair(outbound, ret, color) {
+    const allCoords = [];
+    if (outbound) {
+        drawRouteGlow(outbound.coords, color);
+        allCoords.push(...outbound.coords);
+    }
+    if (ret) {
+        drawRouteGlow(ret.coords, color);
+        allCoords.push(...ret.coords);
+    }
+    return allCoords;
 }
 
 function clearMap() {
@@ -416,14 +454,17 @@ function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
 // Run an async task with the global loading spinner active and the generate
 // button disabled. Restores both and resets the loading caption in a finally,
 // so every caller gets identical setup/teardown even when the task throws.
-// Callers keep their own error handling (showError) inside fn.
+// Passes `fn` an onProgress(msg) callback that writes the loading caption —
+// withLoading already owns #loading, so this replaces the identical closure the
+// callers used to define. Callers keep their own error handling (showError).
 async function withLoading(fn) {
     const loadingEl = document.getElementById('loading');
     const genBtn = document.getElementById('generateBtn');
+    const onProgress = msg => { loadingEl.querySelector('p').textContent = msg; };
     loadingEl.classList.add('active');
     genBtn.disabled = true;
     try {
-        return await fn();
+        return await fn(onProgress);
     } finally {
         loadingEl.classList.remove('active');
         loadingEl.querySelector('p').textContent = 'Finding your random destination…';
@@ -688,15 +729,11 @@ function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
         return `${base}&origin=${startLat},${startLng}&destination=${destLat},${destLng}`;
     }
 
-    // Round-trip: synthesize the loop's via points geometrically so the Google
-    // Maps link traces the same oval the in-app route does.
-    const { offsetMult, viaTs } = getSpreadParams();
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
-    const outVias = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const retVias = viaTs.slice().reverse().map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
+    // Round-trip: reuse osrm.js's loopVias so the Google Maps link traces the
+    // same oval the in-app route does — one source for the envelope geometry.
+    // The return leg walks the left side back toward the start, so reverse it.
+    const { rightVias: outVias, leftVias } = loopVias(startLat, startLng, destLat, destLng, getSpreadParams());
+    const retVias = leftVias.slice().reverse();
 
     const waypoints = [
         ...outVias.map(p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`),
@@ -738,18 +775,10 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
 
     // Route polylines — single color, glow style. Outbound + return read as
     // one continuous walk; direction is conveyed by the start dot vs dest pin.
-    const allCoords = [];
-    if (outboundRoute) {
-        drawRouteGlow(outboundRoute.coords, routeColor);
-        allCoords.push(...outboundRoute.coords);
-    }
-    if (returnRoute) {
-        drawRouteGlow(returnRoute.coords, routeColor);
-        allCoords.push(...returnRoute.coords);
-    }
+    const allCoords = drawRoutePair(outboundRoute, returnRoute, routeColor);
 
     // Fallback: dashed straight line if no routes at all
-    if (!outboundRoute && !returnRoute) {
+    if (allCoords.length === 0) {
         drawRouteGlow([[startLat, startLng], [destLat, destLng]], routeColor, { dashed: true });
         allCoords.push([startLat, startLng], [destLat, destLng]);
     }
@@ -759,10 +788,8 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
 
     // Result panel
     const straightDistance = calculateDistance(startLat, startLng, destLat, destLng);
-    const outDist  = outboundRoute ? outboundRoute.distance / 1000 : straightDistance;
-    const retDist  = returnRoute   ? returnRoute.distance   / 1000 : straightDistance;
-    const totalWalkKm = outDist + retDist;
-    const totalDuration = (outboundRoute?.duration || 0) + (returnRoute?.duration || 0);
+    const { totalWalkKm, totalDuration } =
+        computeRouteTotals(outboundRoute, returnRoute, straightDistance, tripMode);
 
     const nameEl = document.getElementById('destName');
     if (destName) {
@@ -807,14 +834,7 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         tripMode: tripMode || 'round',
         poiCategory: document.getElementById('locationTypeSelect')?.value || null,
         distance: totalWalkKm,
-        routeCoords:         outboundRoute ? outboundRoute.coords    : null,
-        routeDistance:       outboundRoute ? outboundRoute.distance / 1000 : null,
-        routeDuration:       outboundRoute ? outboundRoute.duration  : null,
-        routeSteps:          outboundRoute ? outboundRoute.steps     : null,
-        returnRouteCoords:   returnRoute   ? returnRoute.coords      : null,
-        returnRouteDistance: returnRoute   ? returnRoute.distance / 1000 : null,
-        returnRouteDuration: returnRoute   ? returnRoute.duration    : null,
-        returnRouteSteps:    returnRoute   ? returnRoute.steps       : null,
+        ...routeSessionFields(outboundRoute, returnRoute),
     };
 
     updateFavoriteBtn();
@@ -980,10 +1000,8 @@ async function generateDestination() {
     document.getElementById('notification').classList.remove('active');
     currentSession = null;
     resetMarkVisitedBtn();
-    const loadingEl = document.getElementById('loading');
-    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
 
-    await withLoading(async () => {
+    await withLoading(async (onProgress) => {
         try {
             const { startLat, startLng, locationInput } = await resolveStart();
             clearMap();
@@ -1077,6 +1095,36 @@ function surpriseMe() {
 
 // ─── Pick destination mode ───────────────────────────────────────────────────
 
+// Shared 'clear → build → display → stash junctions' body for the two flows that
+// route to a known destination: pick-on-map and shared-link restore. Both clear
+// the map, build a route for the chosen trip mode (smart-routing read from the
+// DOM, never for one-way), render it, and stash the junction pool on the new
+// session. Callers differ only in where start/label/destName/tripMode come from
+// and which progress message precedes the build:
+//   loadingMessage   emitted via onProgress before the build (unconditional)
+//   buildingMessage  forwarded to buildRouteForMode (shown for non-smart builds)
+async function buildAndDisplay(startLat, startLng, destLat, destLng, {
+    tripMode, locationInput, destName, onProgress,
+    loadingMessage = null, buildingMessage = null,
+}) {
+    clearMap();
+    if (loadingMessage) onProgress(loadingMessage);
+    const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
+    const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
+        tripMode,
+        smartRouting,
+        winterMode: smartRouting && document.getElementById('winterMode').checked,
+        maxKm: parseFloat(document.getElementById('maxDistance').value),
+        onProgress,
+        cachedJunctions: null,
+        buildingMessage,
+        spread: getSpreadParams(),
+    });
+    displayRoute(startLat, startLng, destLat, destLng, 0, 0,
+                 r.outbound, r.return, locationInput, destName, tripMode);
+    if (currentSession) currentSession.junctions = r.junctions;
+}
+
 // Map-click handler installed while "pick on map" mode is active: resolve the
 // start, build a route to the clicked point, and render it. Hoisted to module
 // scope (was an inline closure in togglePickMode) so the two function scopes
@@ -1088,28 +1136,15 @@ async function handlePickClick(e) {
     const destLng = e.latlng.lng;
     currentSession = null;
     resetMarkVisitedBtn();
-    const loadingEl = document.getElementById('loading');
-    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
 
-    await withLoading(async () => {
+    await withLoading(async (onProgress) => {
         try {
-            const { startLat, startLng, locationInput: locInput } = await resolveStart();
-            clearMap();
+            const { startLat, startLng, locationInput } = await resolveStart();
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
-            const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
-            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-                tripMode,
-                smartRouting,
-                winterMode: smartRouting && document.getElementById('winterMode').checked,
-                maxKm: parseFloat(document.getElementById('maxDistance').value),
-                onProgress,
-                cachedJunctions: null,
+            await buildAndDisplay(startLat, startLng, destLat, destLng, {
+                tripMode, locationInput, destName: null, onProgress,
                 buildingMessage: 'Building route…',
-                spread: getSpreadParams(),
             });
-            displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                         r.outbound, r.return, locInput, null, tripMode);
-            if (currentSession) currentSession.junctions = r.junctions;
         } catch (error) {
             showError(error.message || 'An error occurred. Please try again.');
         }
@@ -1162,8 +1197,7 @@ function markAsVisited() {
     if (currentSession.visitId) {
         const undoneId = currentSession.visitId;
         const visits = getVisits().filter(v => v.id !== undoneId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
-        ExplorerSync.mutate('visits', 'delete', String(undoneId));
+        syncedDelete(STORAGE_KEY, visits, 'visits', String(undoneId));
         currentSession.visitId = null;
         btn.classList.remove('marked');
         btn.textContent = 'Mark as visited';
@@ -1172,30 +1206,13 @@ function markAsVisited() {
         return;
     }
 
-    const visit = {
-        id: crypto.randomUUID(),
-        date: new Date().toISOString(),
-        startLat:            currentSession.startLat,
-        startLng:            currentSession.startLng,
-        startLabel:          currentSession.startLabel,
-        destLat:             currentSession.destLat,
-        destLng:             currentSession.destLng,
-        distance:            currentSession.distance,
-        routeCoords:         currentSession.routeCoords         || null,
-        routeDistance:       currentSession.routeDistance       ?? null,
-        routeDuration:       currentSession.routeDuration       || null,
-        returnRouteCoords:   currentSession.returnRouteCoords   || null,
-        returnRouteDistance: currentSession.returnRouteDistance ?? null,
-        returnRouteDuration: currentSession.returnRouteDuration || null,
-        destName:            currentSession.destName            || null,
-        poiCategory:         currentSession.poiCategory         || null,
-        tripMode:            currentSession.tripMode,
-    };
+    const visit = snapshotSession(currentSession, {
+        poiCategory: currentSession.poiCategory || null,
+    });
 
     const visits = getVisits();
     visits.push(visit);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(visits));
-    ExplorerSync.mutate('visits', 'put', visit.id, visit);
+    syncedPut(STORAGE_KEY, visits, 'visits', visit.id, visit);
     maybeRequestConsent();
     currentSession.visitId = visit.id;
 
@@ -1301,46 +1318,32 @@ function buildListItem(label, meta, onSelect, onDelete) {
 // ─── Favorites ───────────────────────────────────────────────────────────────
 // FAVORITES_KEY + getFavorites live in storage.js; used here as globals.
 
+// Favorite-identity predicate: does this favorite point at the same destination
+// as `dest` (a session or another favorite)? Matched by dest coords at 6-decimal
+// precision. Sole owner of the match rule so the star button and the favorites
+// list can never disagree — change the precision (or match by id) here once.
+function sameFavoriteDest(fav, dest) {
+    return fav.destLat.toFixed(6) === dest.destLat.toFixed(6) &&
+           fav.destLng.toFixed(6) === dest.destLng.toFixed(6);
+}
+
 function toggleFavorite() {
     if (!currentSession) return;
     const btn = document.getElementById('favoriteBtn');
     const favs = getFavorites();
 
-    // Check if already favorited (match by dest coords)
-    const idx = favs.findIndex(f =>
-        f.destLat.toFixed(6) === currentSession.destLat.toFixed(6) &&
-        f.destLng.toFixed(6) === currentSession.destLng.toFixed(6)
-    );
+    const idx = favs.findIndex(f => sameFavoriteDest(f, currentSession));
 
     if (idx >= 0) {
         const removed = favs[idx];
         favs.splice(idx, 1);
         btn.classList.remove('active');
-        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
-        ExplorerSync.mutate('favorites', 'delete', String(removed.id));
+        syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
     } else {
-        const newFav = {
-            id: crypto.randomUUID(),
-            date: new Date().toISOString(),
-            startLat:            currentSession.startLat,
-            startLng:            currentSession.startLng,
-            startLabel:          currentSession.startLabel,
-            destLat:             currentSession.destLat,
-            destLng:             currentSession.destLng,
-            destName:            currentSession.destName || null,
-            tripMode:            currentSession.tripMode,
-            distance:            currentSession.distance,
-            routeCoords:         currentSession.routeCoords         || null,
-            routeDistance:       currentSession.routeDistance       ?? null,
-            routeDuration:       currentSession.routeDuration       || null,
-            returnRouteCoords:   currentSession.returnRouteCoords   || null,
-            returnRouteDistance: currentSession.returnRouteDistance ?? null,
-            returnRouteDuration: currentSession.returnRouteDuration || null,
-        };
+        const newFav = snapshotSession(currentSession);
         favs.unshift(newFav);
         btn.classList.add('active');
-        localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
-        ExplorerSync.mutate('favorites', 'put', newFav.id, newFav);
+        syncedPut(FAVORITES_KEY, favs, 'favorites', newFav.id, newFav);
         maybeRequestConsent();
     }
     renderFavoritesSection();
@@ -1349,11 +1352,7 @@ function toggleFavorite() {
 function updateFavoriteBtn() {
     const btn = document.getElementById('favoriteBtn');
     if (!currentSession) { btn.classList.remove('active'); return; }
-    const favs = getFavorites();
-    const isFav = favs.some(f =>
-        f.destLat.toFixed(6) === currentSession.destLat.toFixed(6) &&
-        f.destLng.toFixed(6) === currentSession.destLng.toFixed(6)
-    );
+    const isFav = getFavorites().some(f => sameFavoriteDest(f, currentSession));
     btn.classList.toggle('active', isFav);
 }
 
@@ -1362,8 +1361,7 @@ function deleteFavorite(index, event) {
     const favs = getFavorites();
     const removed = favs[index];
     favs.splice(index, 1);
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favs));
-    ExplorerSync.mutate('favorites', 'delete', String(removed.id));
+    syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
     renderFavoritesSection();
     updateFavoriteBtn();
 }
@@ -1424,7 +1422,7 @@ function importVisits(event) {
             for (const v of newEntries) {
                 if (!v.id) v.id = crypto.randomUUID();
             }
-            localStorage.setItem(STORAGE_KEY, JSON.stringify([...existing, ...newEntries]));
+            writeStoredArray(STORAGE_KEY, [...existing, ...newEntries]);
             for (const v of newEntries) {
                 ExplorerSync.mutate('visits', 'put', v.id, v);
             }
@@ -1495,27 +1493,12 @@ async function restoreFromHash() {
     if (m === 'one-way') document.getElementById('oneWay').checked = true;
     else document.getElementById('roundTrip').checked = true;
 
-    const loadingEl = document.getElementById('loading');
-    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
-
     try {
-        await withLoading(async () => {
-            clearMap();
-            onProgress('Loading shared route…');
-            const smartRouting = m !== 'one-way' && document.getElementById('smartRouting').checked;
-            const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-                tripMode: m,
-                smartRouting,
-                winterMode: smartRouting && document.getElementById('winterMode').checked,
-                maxKm: parseFloat(document.getElementById('maxDistance').value),
-                onProgress,
-                cachedJunctions: null,
-                buildingMessage: null,
-                spread: getSpreadParams(),
+        await withLoading(async (onProgress) => {
+            await buildAndDisplay(startLat, startLng, destLat, destLng, {
+                tripMode: m, locationInput: s, destName: n, onProgress,
+                loadingMessage: 'Loading shared route…',
             });
-            displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                         r.outbound, r.return, s, n, m);
-            if (currentSession) currentSession.junctions = r.junctions;
         });
         // Clear hash after a successful restore so it doesn't re-trigger.
         history.replaceState(null, '', location.pathname);
@@ -1683,12 +1666,10 @@ let spreadDebounce = null;
 async function rerouteWithCurrentSpread() {
     if (!currentSession) return;
     const { startLat, startLng, destLat, destLng } = currentSession;
-    const loadingEl = document.getElementById('loading');
-    const onProgress = msg => loadingEl.querySelector('p').textContent = msg;
     resetMarkVisitedBtn();
 
     try {
-        await withLoading(async () => {
+        await withLoading(async (onProgress) => {
             onProgress('Adjusting route…');
             // Keep markers and circles, only clear route lines
             routeLines.forEach(l => map.removeLayer(l));
@@ -1713,25 +1694,15 @@ async function rerouteWithCurrentSpread() {
 
             // Redraw routes (glow style, single color)
             const retryColor = getRouteColor();
-            const allCoords = [];
-            if (outbound) {
-                drawRouteGlow(outbound.coords, retryColor);
-                allCoords.push(...outbound.coords);
-            }
-            if (ret) {
-                drawRouteGlow(ret.coords, retryColor);
-                allCoords.push(...ret.coords);
-            }
+            const allCoords = drawRoutePair(outbound, ret, retryColor);
             if (allCoords.length > 0) {
                 map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
             }
 
             // Update badges
             const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-            const outDist = outbound ? outbound.distance / 1000 : straightDist;
-            const retDist = ret      ? ret.distance      / 1000 : (tripMode === 'one-way' ? 0 : straightDist);
-            const totalWalkKm = outDist + retDist;
-            const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
+            const { totalWalkKm, totalDuration } =
+                computeRouteTotals(outbound, ret, straightDist, tripMode);
 
             updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
@@ -1742,15 +1713,8 @@ async function rerouteWithCurrentSpread() {
             currentSession = {
                 ...currentSession,
                 distance: totalWalkKm,
-                routeCoords:         outbound ? outbound.coords    : null,
-                routeDistance:       outbound ? outbound.distance / 1000 : null,
-                routeDuration:       outbound ? outbound.duration  : null,
-                routeSteps:          outbound ? outbound.steps     : null,
-                returnRouteCoords:   ret      ? ret.coords         : null,
-                returnRouteDistance: ret      ? ret.distance / 1000 : null,
-                returnRouteDuration: ret      ? ret.duration       : null,
-                returnRouteSteps:    ret      ? ret.steps          : null,
-                junctions
+                ...routeSessionFields(outbound, ret),
+                junctions,
             };
 
             // Re-fetch elevation for new route
@@ -1819,29 +1783,11 @@ const HISTORY_VISIBLE = 3;
 let historyExpanded = false;
 
 function saveToHistory(session) {
-    const entry = {
-        id: crypto.randomUUID(),
-        date: new Date().toISOString(),
-        startLat:            session.startLat,
-        startLng:            session.startLng,
-        startLabel:          session.startLabel,
-        destLat:             session.destLat,
-        destLng:             session.destLng,
-        destName:            session.destName || null,
-        tripMode:            session.tripMode,
-        distance:            session.distance,
-        routeCoords:         session.routeCoords         || null,
-        routeDistance:       session.routeDistance       ?? null,
-        routeDuration:       session.routeDuration       || null,
-        returnRouteCoords:   session.returnRouteCoords   || null,
-        returnRouteDistance: session.returnRouteDistance ?? null,
-        returnRouteDuration: session.returnRouteDuration || null,
-    };
+    const entry = snapshotSession(session);
     const history = getHistory();
     history.unshift(entry);
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    ExplorerSync.mutate('history', 'put', entry.id, entry);
+    syncedPut(HISTORY_KEY, history, 'history', entry.id, entry);
     maybeRequestConsent();
     renderHistorySection();
 }
@@ -1850,8 +1796,7 @@ function deleteHistoryEntry(index) {
     const history = getHistory();
     const removed = history[index];
     history.splice(index, 1);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    ExplorerSync.mutate('history', 'delete', String(removed.id));
+    syncedDelete(HISTORY_KEY, history, 'history', String(removed.id));
     renderHistorySection();
 }
 
