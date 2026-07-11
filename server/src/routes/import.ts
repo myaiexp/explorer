@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
+import type { PgTable, PgColumn, PgInsertValue } from 'drizzle-orm/pg-core';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { isObject, isArray } from '../lib/type-guards.js';
@@ -11,6 +12,10 @@ import {
   validateFavoriteRow,
   validateSavedLocationRow,
 } from '../lib/validate-rows.js';
+
+// The four import tables share only the columns this route touches: a username
+// owner (delete key) — enough to drive the generic replace transaction below.
+type UserTable = PgTable & { username: PgColumn };
 
 // Bulk import wants a null short-circuit rather than an error string, so each
 // section is a thin adapter over the shared validator (lib/validate-rows.ts):
@@ -82,46 +87,44 @@ export function importRoutes(db: Db): Hono {
       return c.json({ error: 'Each section must be an array' }, 400);
     }
 
-    // Validate all rows before writing
-    const visitRows: (typeof schema.visits.$inferInsert)[] = [];
-    for (const row of rawVisits) {
-      const validated = validateVisit(row, username);
-      if (!validated) return c.json({ error: 'Invalid visit row' }, 400);
-      visitRows.push(validated);
+    // One descriptor per section: the error key for a bad row, its table, the
+    // raw rows to validate, and the adapter that turns a raw row into an insert
+    // row (or null to reject). This single list drives both the validate loop
+    // and the replace transaction, so the 400 shape and the delete/insert
+    // structure each live in exactly one place.
+    const sections: Array<{
+      key: string;
+      table: UserTable;
+      raw: unknown[];
+      validate: (row: unknown, username: string) => object | null;
+    }> = [
+      { key: 'visit', table: schema.visits, raw: rawVisits, validate: validateVisit },
+      { key: 'favorite', table: schema.favorites, raw: rawFavorites, validate: validateFavorite },
+      { key: 'savedLocation', table: schema.savedLocations, raw: rawSavedLocations, validate: validateSavedLocation },
+      { key: 'history', table: schema.history, raw: rawHistory, validate: validateHistoryRow },
+    ];
+
+    // Validate every row up front — a single bad row 400s before any write.
+    const collected: Array<{ table: UserTable; rows: object[] }> = [];
+    for (const { key, table, raw, validate } of sections) {
+      const rows: object[] = [];
+      for (const row of raw) {
+        const validated = validate(row, username);
+        if (!validated) return c.json({ error: `Invalid ${key} row` }, 400);
+        rows.push(validated);
+      }
+      collected.push({ table, rows });
     }
 
-    const favoriteRows: (typeof schema.favorites.$inferInsert)[] = [];
-    for (const row of rawFavorites) {
-      const validated = validateFavorite(row, username);
-      if (!validated) return c.json({ error: 'Invalid favorite row' }, 400);
-      favoriteRows.push(validated);
-    }
-
-    const savedLocationRows: (typeof schema.savedLocations.$inferInsert)[] = [];
-    for (const row of rawSavedLocations) {
-      const validated = validateSavedLocation(row, username);
-      if (!validated) return c.json({ error: 'Invalid savedLocation row' }, 400);
-      savedLocationRows.push(validated);
-    }
-
-    const historyRows: (typeof schema.history.$inferInsert)[] = [];
-    for (const row of rawHistory) {
-      const validated = validateHistoryRow(row, username);
-      if (!validated) return c.json({ error: 'Invalid history row' }, 400);
-      historyRows.push(validated);
-    }
-
-    // Atomic replace inside a transaction
+    // Atomic replace: wipe all four sections, then re-insert (same table order).
+    // The generic row type is opaque to TS at this boundary, hence the cast.
     await db.transaction(async (tx) => {
-      await tx.delete(schema.visits).where(eq(schema.visits.username, username));
-      await tx.delete(schema.favorites).where(eq(schema.favorites.username, username));
-      await tx.delete(schema.savedLocations).where(eq(schema.savedLocations.username, username));
-      await tx.delete(schema.history).where(eq(schema.history.username, username));
-
-      if (visitRows.length > 0) await tx.insert(schema.visits).values(visitRows);
-      if (favoriteRows.length > 0) await tx.insert(schema.favorites).values(favoriteRows);
-      if (savedLocationRows.length > 0) await tx.insert(schema.savedLocations).values(savedLocationRows);
-      if (historyRows.length > 0) await tx.insert(schema.history).values(historyRows);
+      for (const { table } of collected) {
+        await tx.delete(table).where(eq(table.username, username));
+      }
+      for (const { table, rows } of collected) {
+        if (rows.length > 0) await tx.insert(table).values(rows as PgInsertValue<UserTable>[]);
+      }
     });
 
     return new Response(null, { status: 204 });
