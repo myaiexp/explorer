@@ -743,10 +743,61 @@ function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
 
 // ─── Display route results on map ────────────────────────────────────────────
 
-function displayRoute(startLat, startLng, destLat, destLng, straightMax, straightMin,
-                      outboundRoute, returnRoute, locationInput, destName, tripMode) {
-    // Markers
+// Shared render tail for the two route-drawing paths — first render (displayRoute)
+// and spread reroute (rerouteWithCurrentSpread): draw the outbound + return
+// polylines in the glow style, fit the map to them, update the duration badges +
+// Google Maps directions link, and kick off the (non-blocking) elevation refetch.
+// Returns the computed { totalWalkKm, totalDuration } so callers can stamp the
+// session. `fallbackStraight` draws the dashed straight-line placeholder when
+// there are no route coords — first render only; reroute passes false so a spread
+// change that yields no route simply leaves the previous view in place.
+function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tripMode, color, { fallbackStraight = false } = {}) {
+    // Outbound + return read as one continuous walk; direction is conveyed by
+    // the start dot vs dest pin.
+    const allCoords = drawRoutePair(outbound, ret, color);
+    if (allCoords.length === 0 && fallbackStraight) {
+        drawRouteGlow([[startLat, startLng], [destLat, destLng]], color, { dashed: true });
+        allCoords.push([startLat, startLng], [destLat, destLng]);
+    }
+    if (allCoords.length > 0) {
+        map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
+    }
+
+    const straightDistance = calculateDistance(startLat, startLng, destLat, destLng);
+    const { totalWalkKm, totalDuration } =
+        computeRouteTotals(outbound, ret, straightDistance, tripMode);
+    updateDurationBadges(totalWalkKm, totalDuration, tripMode);
+
+    document.getElementById('directionsLink').href =
+        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
+
+    // Fetch elevation profile (non-blocking); hide any stale chart while it loads.
+    const routeCoords = [
+        ...(outbound ? outbound.coords : []),
+        ...(ret ? ret.coords : [])
+    ];
+    if (routeCoords.length > 0) {
+        document.getElementById('elevationContainer').classList.remove('active');
+        fetchElevations(routeCoords)
+            .then(renderElevationChart)
+            .catch(() => {});
+    }
+
+    return { totalWalkKm, totalDuration };
+}
+
+// Render a resolved route on the map + result panel and set it as the current
+// session. Pure display + session build — it does NOT persist. Callers that
+// create a genuinely new route (generateDestination, buildAndDisplay) call
+// saveToHistory(session) themselves; restoreResult re-displays an existing entry
+// and so must NOT (this function used to unshift a duplicate history entry and
+// sync it to the cloud as a side effect of every history/favorite click).
+// Returns the built session (also stored in the module-global currentSession).
+function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
+                        locationInput, destName, tripMode, straightMax = 0, straightMin = 0 }) {
     const routeColor = getRouteColor();
+
+    // Markers
     const startMarker = L.marker([startLat, startLng], { icon: createHereDotIcon() })
         .addTo(map).bindPopup(`<b>Start</b><br>${escapeHtml(locationInput)}`);
     markers.push(startMarker);
@@ -770,24 +821,12 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         }).addTo(map);
     }
 
-    // Route polylines — single color, glow style. Outbound + return read as
-    // one continuous walk; direction is conveyed by the start dot vs dest pin.
-    const allCoords = drawRoutePair(outboundRoute, returnRoute, routeColor);
+    // Draw polylines, fit bounds, badges, directions link, elevation.
+    const { totalWalkKm } = renderRouteTail(
+        startLat, startLng, destLat, destLng, outbound, ret, tripMode, routeColor,
+        { fallbackStraight: true });
 
-    // Fallback: dashed straight line if no routes at all
-    if (allCoords.length === 0) {
-        drawRouteGlow([[startLat, startLng], [destLat, destLng]], routeColor, { dashed: true });
-        allCoords.push([startLat, startLng], [destLat, destLng]);
-    }
-
-    // Fit bounds to show the entire loop
-    map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
-
-    // Result panel
-    const straightDistance = calculateDistance(startLat, startLng, destLat, destLng);
-    const { totalWalkKm, totalDuration } =
-        computeRouteTotals(outboundRoute, returnRoute, straightDistance, tripMode);
-
+    // Result panel (dest-specific bits the reroute path doesn't touch)
     const nameEl = document.getElementById('destName');
     if (destName) {
         const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(destName)}/@${destLat},${destLng},17z`;
@@ -804,26 +843,10 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
 
     document.getElementById('destCoords').textContent =
         `${destLat.toFixed(6)}, ${destLng.toFixed(6)}`;
-    updateDurationBadges(totalWalkKm, totalDuration, tripMode);
-
-    document.getElementById('directionsLink').href =
-        buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
     document.getElementById('streetViewLink').href =
         `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${destLat},${destLng}`;
 
     document.getElementById('resultPanel').classList.add('active');
-
-    // Fetch elevation profile (non-blocking)
-    const allRouteCoords = [
-        ...(outboundRoute ? outboundRoute.coords : []),
-        ...(returnRoute ? returnRoute.coords : [])
-    ];
-    if (allRouteCoords.length > 0) {
-        document.getElementById('elevationContainer').classList.remove('active');
-        fetchElevations(allRouteCoords)
-            .then(renderElevationChart)
-            .catch(() => {});
-    }
 
     currentSession = {
         startLat, startLng, startLabel: locationInput,
@@ -831,11 +854,11 @@ function displayRoute(startLat, startLng, destLat, destLng, straightMax, straigh
         tripMode: tripMode || 'round',
         poiCategory: document.getElementById('locationTypeSelect')?.value || null,
         distance: totalWalkKm,
-        ...routeSessionFields(outboundRoute, returnRoute),
+        ...routeSessionFields(outbound, ret),
     };
 
     updateFavoriteBtn();
-    saveToHistory(currentSession);
+    return currentSession;
 }
 
 // ─── Resolve start location ──────────────────────────────────────────────────
@@ -1070,9 +1093,13 @@ async function generateDestination() {
                 returnRoute = r.return;
             }
 
-            displayRoute(startLat, startLng, dest.lat, dest.lng,
-                         straightMax, straightMin, outboundRoute, returnRoute, locationInput, destName, tripMode);
-            if (currentSession) currentSession.junctions = junctions;
+            const session = displayRoute({
+                startLat, startLng, destLat: dest.lat, destLng: dest.lng,
+                outbound: outboundRoute, ret: returnRoute,
+                locationInput, destName, tripMode, straightMax, straightMin,
+            });
+            session.junctions = junctions;
+            saveToHistory(session);
 
             if (waterLocked) {
                 showWarning('This area is mostly water — try a different start or larger radius.');
@@ -1133,9 +1160,13 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         buildingMessage,
         spread: getSpreadParams(),
     });
-    displayRoute(startLat, startLng, destLat, destLng, 0, 0,
-                 r.outbound, r.return, locationInput, destName, tripMode);
-    if (currentSession) currentSession.junctions = r.junctions;
+    const session = displayRoute({
+        startLat, startLng, destLat, destLng,
+        outbound: r.outbound, ret: r.return,
+        locationInput, destName, tripMode,
+    });
+    session.junctions = r.junctions;
+    saveToHistory(session);
 }
 
 // Map-click handler installed while "pick on map" mode is active: resolve the
@@ -1700,41 +1731,19 @@ async function rerouteWithCurrentSpread() {
             const ret = r.return;
             if (tripMode !== 'one-way') junctions = r.junctions;
 
-            // Redraw routes (glow style, single color)
-            const retryColor = getRouteColor();
-            const allCoords = drawRoutePair(outbound, ret, retryColor);
-            if (allCoords.length > 0) {
-                map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
-            }
+            // Redraw routes, refit, badges, directions link, elevation — the same
+            // render tail displayRoute uses. No straight-line fallback: keep the
+            // previous view in place if a spread change yields no route.
+            const { totalWalkKm } = renderRouteTail(
+                startLat, startLng, destLat, destLng, outbound, ret, tripMode, getRouteColor(),
+                { fallbackStraight: false });
 
-            // Update badges
-            const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
-            const { totalWalkKm, totalDuration } =
-                computeRouteTotals(outbound, ret, straightDist, tripMode);
-
-            updateDurationBadges(totalWalkKm, totalDuration, tripMode);
-
-            document.getElementById('directionsLink').href =
-                buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);
-
-            // Update session
             currentSession = {
                 ...currentSession,
                 distance: totalWalkKm,
                 ...routeSessionFields(outbound, ret),
                 junctions,
             };
-
-            // Re-fetch elevation for new route
-            const rerouteCoords = [
-                ...(outbound ? outbound.coords : []),
-                ...(ret ? ret.coords : [])
-            ];
-            if (rerouteCoords.length > 0) {
-                fetchElevations(rerouteCoords)
-                    .then(renderElevationChart)
-                    .catch(() => {});
-            }
         });
     } catch (error) {
         showError(error.message || 'Failed to adjust route.');
@@ -1826,12 +1835,14 @@ function restoreResult(entry) {
             distance: (hasLegDist ? (entry.returnRouteDistance || 0) : 0) * 1000,
             duration: entry.returnRouteDuration || 0 }
         : null;
-    displayRoute(
-        entry.startLat, entry.startLng,
-        entry.destLat, entry.destLng,
-        0, 0, outbound, ret,
-        entry.startLabel, entry.destName, entry.tripMode
-    );
+    // No saveToHistory here: re-displaying an existing history/favorite entry
+    // must not create a new one (the old side effect in displayRoute did).
+    displayRoute({
+        startLat: entry.startLat, startLng: entry.startLng,
+        destLat: entry.destLat, destLng: entry.destLng,
+        outbound, ret,
+        locationInput: entry.startLabel, destName: entry.destName, tripMode: entry.tripMode,
+    });
 }
 
 function renderHistorySection() {
