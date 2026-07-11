@@ -11,13 +11,25 @@ function minDistanceToExisting(c, existingDests) {
     );
 }
 
-// Fisher-Yates in place. Returns the same array for chaining.
-function shuffleInPlace(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+// Fisher-Yates on the first `k` positions of `arr`, in place. Each of the first
+// `k` slots receives a uniformly-random pick from the not-yet-placed tail, so a
+// partial shuffle (k < length) samples k uniform elements in O(k) without paying
+// for a full O(n) shuffle. k >= length - 1 is a full uniform shuffle. Returns the
+// same array for chaining. This is the single swap loop shared by shuffleInPlace
+// (full) and screening.js capPool (partial, k = SCREENING_POOL_CAP).
+function partialShuffle(arr, k) {
+    const n = arr.length;
+    const limit = Math.min(k, n - 1);
+    for (let i = 0; i < limit; i++) {
+        const j = i + Math.floor(Math.random() * (n - i));
         [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
+}
+
+// Fisher-Yates in place (full shuffle). Returns the same array for chaining.
+function shuffleInPlace(arr) {
+    return partialShuffle(arr, arr.length);
 }
 
 // Order candidates for retry use: most-novel half (shuffled) first, rest
@@ -39,5 +51,6 @@ function rankByNovelty(candidates, existingDests) {
 }
 
 globalThis.minDistanceToExisting = minDistanceToExisting;
+globalThis.partialShuffle = partialShuffle;
 globalThis.shuffleInPlace = shuffleInPlace;
 globalThis.rankByNovelty = rankByNovelty;

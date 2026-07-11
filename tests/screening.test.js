@@ -15,10 +15,12 @@ import { resolve } from 'path';
 import vm from 'node:vm';
 
 const GEO_SRC       = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
+const NOVELTY_SRC   = readFileSync(resolve(__dirname, '../novelty.js'), 'utf8');
 const SCREENING_SRC = readFileSync(resolve(__dirname, '../screening.js'), 'utf8');
 
 beforeAll(() => {
-    new vm.Script(GEO_SRC).runInThisContext();  // exposes globalThis.haversineM
+    new vm.Script(GEO_SRC).runInThisContext();      // exposes globalThis.haversineM
+    new vm.Script(NOVELTY_SRC).runInThisContext();  // exposes globalThis.partialShuffle (capPool dep)
     new vm.Script(SCREENING_SRC).runInThisContext();
 });
 

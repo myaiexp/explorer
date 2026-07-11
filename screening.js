@@ -1,6 +1,8 @@
 // Water-aware reachability filtering for destination candidates.
-// Dependency (globalThis): haversineM — the canonical Haversine from geo-utils.js,
-// which must load before this file. No other cross-file globals are read.
+// Dependencies (globalThis): haversineM — the canonical Haversine from
+// geo-utils.js; partialShuffle — the shared Fisher-Yates swap loop from
+// novelty.js. Both must load before this file (index.html order: geo-utils →
+// novelty → screening). No other cross-file globals are read.
 // Pure module, no DOM access. OSRM I/O is dependency-injected as a single
 // `tableFn(start, candidates) → [{snapM, routeM} | null, ...]` so the caller
 // can collapse Stage 1 (snap) and Stage 2 (detour) into one OSRM /table query.
@@ -14,11 +16,7 @@ const SCREENING_POOL_CAP   = 45;   // bound parallel OSRM fan-out for Overpass p
 // Returns the input untouched if it's already at or below the cap.
 function capPool(candidates) {
     if (!candidates || candidates.length <= SCREENING_POOL_CAP) return candidates;
-    const copy = candidates.slice();
-    for (let i = 0; i < SCREENING_POOL_CAP; i++) {
-        const j = i + Math.floor(Math.random() * (copy.length - i));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
+    const copy = globalThis.partialShuffle(candidates.slice(), SCREENING_POOL_CAP);
     return copy.slice(0, SCREENING_POOL_CAP);
 }
 
@@ -29,6 +27,16 @@ function capPool(candidates) {
 function detourRatio(routeMeters, straightKm) {
     if (!routeMeters || !straightKm) return Infinity;
     return (routeMeters / 1000) / straightKm;
+}
+
+// Element with the smallest numeric `key`, or null if the array is empty.
+// Ties resolve to the earliest element (strict `<` keeps the first seen).
+function minBy(arr, key) {
+    let best = null;
+    for (const el of arr) {
+        if (best === null || el[key] < best[key]) best = el;
+    }
+    return best;
 }
 
 async function screenCandidates(start, candidates, { tableFn }) {
@@ -87,22 +95,13 @@ async function screenCandidates(start, candidates, { tableFn }) {
     // copied so annotations don't leak onto caller inputs.
     let bestRejected = null;
     const rejects = states.filter(s => s.stage !== 'survived');
-    if (rejects.length > 0) {
-        const withDetour = rejects.filter(s => s.detour !== null);
-        let pick = null;
-        if (withDetour.length > 0) {
-            withDetour.sort((a, b) => a.detour - b.detour);
-            pick = withDetour[0];
-        } else {
-            const withSnap = rejects.filter(s => s.snapM !== null);
-            if (withSnap.length > 0) {
-                withSnap.sort((a, b) => a.snapM - b.snapM);
-                pick = withSnap[0];
-            }
-        }
-        if (pick) {
-            bestRejected = { ...pick.candidate, snapM: pick.snapM, detour: pick.detour };
-        }
+    // Two-tier fallback: lowest-detour reject (Stage 2 ran), else smallest-snapM
+    // reject (Stage 1 only). `??` keeps the second minBy from running when the
+    // first tier has a pick.
+    const pick = minBy(rejects.filter(s => s.detour !== null), 'detour')
+              ?? minBy(rejects.filter(s => s.snapM !== null), 'snapM');
+    if (pick) {
+        bestRejected = { ...pick.candidate, snapM: pick.snapM, detour: pick.detour };
     }
 
     const diagnostics = states.map(s => ({
