@@ -1257,6 +1257,20 @@ document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
     });
 });
 
+// Re-render every localStorage-backed view. Fired on explorer-sync-state-change
+// so a cloud sync that lands AFTER the initial paint — the own-device merge or
+// adopting a backup link, both of which rewrite localStorage once init's GET
+// resolves — becomes visible immediately instead of waiting for a manual reload.
+// (init's synchronous render calls below still paint pre-sync local data first.)
+function refreshDataViews() {
+    renderVisitedLayer();
+    updateVisitedCounter();
+    renderFavoritesSection();
+    renderHistorySection();
+    renderSavedLocations();
+}
+window.addEventListener('explorer-sync-state-change', refreshDataViews);
+
 restoreSettings();
 initSettingsListeners();
 renderSavedLocations();
