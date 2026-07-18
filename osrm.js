@@ -1,8 +1,9 @@
 // OSRM routing + loop building — self-hosted OSRM-foot wrappers (route / nearest
 // / table), road/junction snapping, and the envelope/junction loop builders.
-// No DOM: callers pass a precomputed `spread`. Loaded after geometry.js (for
-// calculateDistance / envelopeOffsetPoint / computeSpreadParams) and
-// loop-quality.js (for loopOverlapFraction), before route-dispatch.js + app.js.
+// No DOM: callers pass a precomputed `spread`. Loaded after net.js (for
+// fetchWithTimeout), geometry.js (for calculateDistance / envelopeOffsetPoint /
+// computeSpreadParams) and loop-quality.js (for loopOverlapFraction), before
+// route-dispatch.js + app.js.
 
 // Self-hosted OSRM-foot for Finland.
 const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
@@ -12,7 +13,7 @@ const OSRM_FI_TABLE   = 'https://mase.fi/api/osrm-fi/table/v1/foot';
 // Internal: fetch + parse OSRM /route response. Returns null on any failure.
 async function tryOsrm(url) {
     try {
-        const res = await fetch(url);
+        const res = await fetchWithTimeout(url);
         if (!res.ok) return null;
         const data = await res.json();
         if (!data.routes || data.routes.length === 0) return null;
@@ -37,7 +38,7 @@ async function fetchRouteThrough(waypoints) {
 // Internal: OSRM /nearest call. Returns {lat, lng} or null on any failure.
 async function tryNearest(url) {
     try {
-        const res = await fetch(url);
+        const res = await fetchWithTimeout(url);
         if (!res.ok) return null;
         const data = await res.json();
         if (!data.waypoints || !data.waypoints.length) return null;
@@ -45,13 +46,15 @@ async function tryNearest(url) {
     } catch { return null; }
 }
 
-// Snap a geometric via to the nearest road point within maxKm.
+// Snap a geometric via to the nearest road point within maxSnapKm.
 // Returns the snapped point, or the original if snapping fails or is too far.
-async function snapToRoad(via, maxKm = 0.5) {
+// maxSnapKm is a snap-search radius (callers pass snapRadius) — NOT the route
+// distance budget that other functions here call maxKm.
+async function snapToRoad(via, maxSnapKm = 0.5) {
     const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
     if (!snapped) return via;
     const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
-    return dist <= maxKm ? snapped : via;
+    return dist <= maxSnapKm ? snapped : via;
 }
 
 // Adapter for screenCandidates' tableFn contract: one OSRM /table call
@@ -68,7 +71,7 @@ async function screeningTableFn(start, candidates) {
         ...candidates.map(c => `${c.lng},${c.lat}`)
     ].join(';');
     const url = `${OSRM_FI_TABLE}/${coords}?sources=0&annotations=distance`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) throw new Error(`osrm table http ${res.status}`);
     const data = await res.json();
     if (data.code !== 'Ok') throw new Error(`osrm table ${data.code}`);
@@ -173,7 +176,7 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     }
     const url = `/api/junctions/junctions?${params.toString()}`;
     if (onProgress) onProgress('Searching for junctions…');
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) {
         throw new Error('POI search is busy. Please try again.');
     }
@@ -181,16 +184,18 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     return data.junctions || [];
 }
 
-// Find the closest junction in the pool to `via` within maxKm. Returns the
-// junction, or the original `via` if no junction is in range.
-function snapToJunction(via, junctionPool, maxKm) {
+// Find the closest junction in the pool to `via` within maxSnapKm. Returns the
+// junction, or the original `via` if no junction is in range. maxSnapKm is a
+// snap-search radius (callers pass snapRadius) — NOT the route distance budget
+// that other functions here call maxKm.
+function snapToJunction(via, junctionPool, maxSnapKm) {
     if (!junctionPool || junctionPool.length === 0) return via;
     let best = null, bestDist = Infinity;
     for (const j of junctionPool) {
         const d = calculateDistance(via.lat, via.lng, j.lat, j.lng);
         if (d < bestDist) { bestDist = d; best = j; }
     }
-    return bestDist <= maxKm ? best : via;
+    return bestDist <= maxSnapKm ? best : via;
 }
 
 // Pick lower-overlap of two candidate (outbound, return) pairs. Falls back

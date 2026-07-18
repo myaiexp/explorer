@@ -22,6 +22,9 @@ import SYNC_SRC from '../sync.js?raw';
 // ExplorerSync method runs (mirrors prod, where both scripts have executed by the
 // time init() is called). Values are constant, so a single load suffices.
 import '../storage.js';
+// Side-effect import: net.js registers globalThis.fetchWithTimeout, which
+// sync.js's apiFetch now calls. Load it before loadSync() runs the IIFE.
+import '../net.js';
 
 // ── Load the sync scripts once ────────────────────────────────────────────────
 

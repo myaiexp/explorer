@@ -1,6 +1,13 @@
 // Overpass querying — raw interpreter calls plus POI / road fetchers. No DOM.
-// Loaded after geometry.js (for calculateDistance) and before app.js; the
-// fetchers take all inputs as params and return plain {lat,lng[,name]} arrays.
+// Loaded after net.js (for fetchWithTimeout) and geometry.js (for
+// calculateDistance) and before app.js; the fetchers take all inputs as params
+// and return plain {lat,lng[,name]} arrays.
+
+// Client-side timeouts. The interpreter query embeds its own server-side
+// [timeout:N]; give the client a comfortable margin over that. The status probe
+// is a tiny GET, so a short ceiling is plenty.
+const OVERPASS_QUERY_TIMEOUT_MS  = 30000;
+const OVERPASS_STATUS_TIMEOUT_MS = 5000;
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -10,7 +17,7 @@ async function queryOverpass(query, onProgress) {
         if (attempt > 0) {
             // Check status endpoint for actual wait time
             try {
-                const status = await fetch('https://overpass-api.de/api/status').then(r => r.text());
+                const status = await fetchWithTimeout('https://overpass-api.de/api/status', {}, OVERPASS_STATUS_TIMEOUT_MS).then(r => r.text());
                 const match = status.match(/Slot available after: .+, in (\d+) seconds/);
                 const waitSec = match ? Math.min(parseInt(match[1]) + 2, 60) : 15;
                 if (onProgress) onProgress(`POI search is busy, retrying in ${waitSec}s…`);
@@ -19,11 +26,11 @@ async function queryOverpass(query, onProgress) {
                 await sleep(15000);
             }
         }
-        const response = await fetch('https://overpass-api.de/api/interpreter', {
+        const response = await fetchWithTimeout('https://overpass-api.de/api/interpreter', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'data=' + encodeURIComponent(query)
-        });
+        }, OVERPASS_QUERY_TIMEOUT_MS);
         if (response.ok) return response.json();
         if (response.status === 429 || response.status === 504) continue;
         throw new Error('Failed to fetch POI data. Please try again.');

@@ -87,7 +87,7 @@ function parseLocation(input) {
 }
 
 async function geocodeAddress(address) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
     );
     const data = await response.json();

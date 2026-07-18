@@ -29,24 +29,32 @@ function saveSettings() {
 }
 
 function restoreSettings() {
+    // Only the parse is guarded — corrupt localStorage JSON is external data we
+    // tolerate. The DOM application below runs OUTSIDE the catch so a drifted
+    // element id (getElementById → null) throws loudly instead of silently
+    // no-op'ing the whole restore behind a guard meant for bad JSON.
+    let settings;
     try {
-        const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY));
-        if (!settings) return;
-        for (const f of SETTINGS_FIELDS) {
-            const val = settings[f.key];
-            if (val == null) continue;
-            if (f.skipEmpty && !val) continue;
-            document.getElementById(f.id)[f.prop] = val;
-        }
-        // Trip mode is a radio pair (two elements, one stored value) — special-cased.
-        if (settings.tripMode === 'round' || settings.tripMode === 'one-way') {
-            document.getElementById(settings.tripMode === 'one-way' ? 'oneWay' : 'roundTrip').checked = true;
-        }
-        // Sync distance label with restored trip mode
-        const isOneWay = document.getElementById('oneWay').checked;
-        document.getElementById('distanceLabel').textContent =
-            isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
-    } catch {}
+        settings = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+    } catch {
+        return;
+    }
+    if (!settings) return;
+
+    for (const f of SETTINGS_FIELDS) {
+        const val = settings[f.key];
+        if (val == null) continue;
+        if (f.skipEmpty && !val) continue;
+        document.getElementById(f.id)[f.prop] = val;
+    }
+    // Trip mode is a radio pair (two elements, one stored value) — special-cased.
+    if (settings.tripMode === 'round' || settings.tripMode === 'one-way') {
+        document.getElementById(settings.tripMode === 'one-way' ? 'oneWay' : 'roundTrip').checked = true;
+    }
+    // Sync distance label with restored trip mode
+    const isOneWay = document.getElementById('oneWay').checked;
+    document.getElementById('distanceLabel').textContent =
+        isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
 }
 
 // Auto-save on input changes

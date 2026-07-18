@@ -40,7 +40,11 @@ let fetchCorridorJunctions;
 
 beforeAll(() => {
     // fetchCorridorJunctions pads its bbox via geo-utils.js's kmToDegLat/kmToDegLng
-    // globals; load the real source so they resolve through the new Function scope.
+    // globals and fetches through net.js's fetchWithTimeout; load both real
+    // sources so they resolve through the new Function scope. fetchWithTimeout
+    // internally calls the faked global `fetch`, so the per-test fakeFetch still
+    // observes the request (and its timer is cleared once the fake resolves).
+    new vm.Script(readFileSync(resolve(__dirname, '../net.js'), 'utf8')).runInThisContext();
     new vm.Script(readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8')).runInThisContext();
     const src = extractFn('fetchCorridorJunctions');
     // Evaluate the declaration and hand back a reference. new Function() bootstraps

@@ -24,16 +24,12 @@ export function accountsRoutes(db: Db): Hono {
     }
   });
 
-  // DELETE /:username — cascade deletes all child rows via FK
+  // DELETE /:username — cascade deletes all child rows via FK.
+  // accountAuth already 401s any missing account (identical to a wrong token, by
+  // the anti-enumeration design), so the handler may assume :username exists —
+  // same convention as sections.ts. No existence re-check here.
   app.delete('/:username', accountAuth(db), async (c) => {
     const username = c.req.param('username')!;
-    const rows = await db
-      .select({ username: schema.accounts.username })
-      .from(schema.accounts)
-      .where(eq(schema.accounts.username, username));
-    if (rows.length === 0) {
-      return c.json({ error: 'User not found' }, 404);
-    }
     await db.delete(schema.accounts).where(eq(schema.accounts.username, username));
     return new Response(null, { status: 204 });
   });

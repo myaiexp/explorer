@@ -8,7 +8,8 @@
 //   showConsentToast() must return a Promise that resolves to 'accepted' or 'declined'.
 //   If window.ExplorerSyncUI?.showConsentToast is not set, requestConsent() falls back to window.confirm().
 //
-// Load order: sync-flush.js + sync-sections.js BEFORE this; this BEFORE app.js.
+// Load order: net.js (for fetchWithTimeout) + sync-flush.js + sync-sections.js
+// BEFORE this; this BEFORE app.js.
 
 (function () {
     'use strict';
@@ -84,7 +85,11 @@
         if (body !== undefined) {
             opts.body = JSON.stringify(body);
         }
-        return fetch(API_BASE + path, opts);
+        // Timeout so a stalled request rejects instead of wedging the flush pump
+        // (a hung apiFetch would keep _flushing = true and freeze the outbox).
+        // The flush worker's .catch already treats a rejection as a retryable
+        // failure, so the abort just triggers its normal backoff-and-retry.
+        return fetchWithTimeout(API_BASE + path, opts);
     }
 
     // Download an account's four sections and apply each via applyRow
