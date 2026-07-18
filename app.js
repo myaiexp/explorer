@@ -24,67 +24,22 @@ const POI_CATEGORIES = [
     ]},
 ];
 
-// Flat lookup for POI definitions
+// Flat lookup for POI definitions. Exposed as a global so destination-resolve.js
+// (loaded before app.js) can resolve POI filters/labels at call time.
 const POI_TYPES = POI_CATEGORIES.flatMap(c => c.pois);
+globalThis.POI_TYPES = POI_TYPES;
 
-// ─── Map init ────────────────────────────────────────────────────────────────
-
-const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-});
-
-const satelliteLayer = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-    maxZoom: 19
-});
-
-const map = L.map('map').setView([64.5, 26.0], 5);
-osmLayer.addTo(map);
-
-L.control.layers({ 'OpenStreetMap': osmLayer, 'Satellite': satelliteLayer }).addTo(map);
-
-// Visited layer group (toggleable)
-const visitedLayerGroup = L.layerGroup().addTo(map);
+// ─── Map view ────────────────────────────────────────────────────────────────
+// The Leaflet map, its mutable state (markers/destMarker/circle/innerCircle/
+// routeLines), marker/route/circle drawing, the visited-routes overlay, route
+// color persistence (getRouteColor/setRouteColor + ROUTE_COLORS), escapeHtml,
+// and the pin/here-dot icons live in map-view.js (loaded before app.js). `map`,
+// `visitedLayerGroup`, and every draw/clear/render helper are used here as
+// globals. visitedLayerVisible (the overlay toggle state) stays here — the
+// toggle itself is app.js UI; see toggleVisitedLayer below.
 let visitedLayerVisible = true;
 
-// ─── Utilities ───────────────────────────────────────────────────────────────
-
-function escapeHtml(str) {
-    const el = document.createElement('span');
-    el.textContent = str;
-    return el.innerHTML;
-}
-
-// ─── Route color palette (colorblind-safe, Wong/Tol-derived) ──────────────────
-
-const ROUTE_COLORS = [
-    { name: 'Coral',   hex: '#E66100' },
-    { name: 'Sky',     hex: '#56B4E9' },
-    { name: 'Teal',    hex: '#009E73' },
-    { name: 'Magenta', hex: '#CC79A7' },
-    { name: 'Gold',    hex: '#F0E442' }
-];
-const DEFAULT_ROUTE_COLOR = ROUTE_COLORS[0].hex;
-const ROUTE_COLOR_KEY = 'walk_route_color';
-
-function getRouteColor() {
-    const stored = localStorage.getItem(ROUTE_COLOR_KEY);
-    if (stored && ROUTE_COLORS.some(c => c.hex === stored)) return stored;
-    return DEFAULT_ROUTE_COLOR;
-}
-
-function setRouteColor(hex) {
-    localStorage.setItem(ROUTE_COLOR_KEY, hex);
-}
-
-// ─── Mutable map state ────────────────────────────────────────────────────────
-
-let markers = [];
-let destMarker = null;  // ref to the destination pin so we can recolor on the fly
-let circle = null;
-let innerCircle = null;
-let routeLines = [];  // all polylines for the loop
+// ─── Session state ────────────────────────────────────────────────────────────
 
 // Current in-progress destination (reset on each generation)
 let currentSession = null;
@@ -110,77 +65,9 @@ let pickMode = false;
 // before app.js; wired in the Init section below.
 
 // ─── Map helpers ─────────────────────────────────────────────────────────────
-
-function createPinIcon(color) {
-    return L.divIcon({
-        className: '',
-        html: `<svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 0C5.373 0 0 5.373 0 12c0 9 12 24 12 24s12-15 12-24C24 5.373 18.627 0 12 0z" fill="${color}"/>
-            <circle cx="12" cy="12" r="5" fill="white" fill-opacity="0.9"/>
-        </svg>`,
-        iconSize: [24, 36],
-        iconAnchor: [12, 36],
-        popupAnchor: [0, -38]
-    });
-}
-
-// "You are here" dot — universal current-location convention. Shape carries
-// the meaning, so we can keep the color fixed regardless of route color.
-function createHereDotIcon() {
-    return L.divIcon({
-        className: 'user-here-dot',
-        html: `<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="11" cy="11" r="10" fill="#3b82f6" fill-opacity="0.18"/>
-            <circle cx="11" cy="11" r="6" fill="#3b82f6" stroke="white" stroke-width="2.5"/>
-        </svg>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
-        popupAnchor: [0, -12]
-    });
-}
-
-// Strava-style glow polyline: thick low-opacity halo + crisp top stroke.
-// Pushes both layers into routeLines so clearMap() removes them together.
-function drawRouteGlow(coords, color, { dashed = false } = {}) {
-    const halo = L.polyline(coords, {
-        color, weight: 10, opacity: 0.22,
-        lineCap: 'round', lineJoin: 'round'
-    }).addTo(map);
-    routeLines.push(halo);
-    const top = L.polyline(coords, {
-        color, weight: 3.5, opacity: 0.95,
-        lineCap: 'round', lineJoin: 'round',
-        dashArray: dashed ? '10, 10' : null
-    }).addTo(map);
-    routeLines.push(top);
-    return top;
-}
-
-// Draw the outbound + return legs in the shared glow style and return the
-// combined coord list (empty if neither leg exists). Callers own fitBounds and
-// any no-route fallback, which differ between first render and spread reroute.
-function drawRoutePair(outbound, ret, color) {
-    const allCoords = [];
-    if (outbound) {
-        drawRouteGlow(outbound.coords, color);
-        allCoords.push(...outbound.coords);
-    }
-    if (ret) {
-        drawRouteGlow(ret.coords, color);
-        allCoords.push(...ret.coords);
-    }
-    return allCoords;
-}
-
-function clearMap() {
-    markers.forEach(m => map.removeLayer(m));
-    markers = [];
-    destMarker = null;
-    if (circle)      { map.removeLayer(circle);      circle = null; }
-    if (innerCircle) { map.removeLayer(innerCircle); innerCircle = null; }
-    routeLines.forEach(l => map.removeLayer(l));
-    routeLines = [];
-}
+// createPinIcon/createHereDotIcon, drawRouteGlow/drawRoutePair, clearMap,
+// clearRouteLines, addStartMarker/addDestMarker/addRadiusCircles live in
+// map-view.js; used below as globals.
 
 // ─── Location helpers ────────────────────────────────────────────────────────
 
@@ -239,18 +126,11 @@ function useMyLocation() {
 // as globals.
 
 // ─── Novelty helpers ──────────────────────────────────────────────────────────
+// pickMostNovelDestination lives in destination-resolve.js. getAllExistingDestinations
+// stays here — it reads the visits store and is passed down as existingDests.
 
 function getAllExistingDestinations() {
     return getVisits().map(v => [v.destLat, v.destLng]);
-}
-
-// Single-pick novelty selection: delegate to rankByNovelty (novelty.js), which
-// owns the min-distance scoring + most-novel-half selection. rankByNovelty
-// shuffles the top half internally, so [0] is a uniformly random pick from the
-// most-novel half (or from all candidates when there's no history). Returns
-// undefined on an empty pool — same as the previous implementation.
-function pickMostNovelDestination(candidates, existingDests) {
-    return rankByNovelty(candidates, existingDests)[0];
 }
 
 // ─── Overpass / OSRM ──────────────────────────────────────────────────────────
@@ -423,29 +303,10 @@ function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
                         locationInput, destName, tripMode, straightMax = 0, straightMin = 0 }) {
     const routeColor = getRouteColor();
 
-    // Markers
-    const startMarker = L.marker([startLat, startLng], { icon: createHereDotIcon() })
-        .addTo(map).bindPopup(`<b>Start</b><br>${escapeHtml(locationInput)}`);
-    markers.push(startMarker);
-
-    destMarker = L.marker([destLat, destLng], { icon: createPinIcon(routeColor) })
-        .addTo(map).bindPopup('<b>Destination</b><br>Turnaround point');
-    markers.push(destMarker);
-
-    // Radius circles
-    if (straightMax > 0) {
-        circle = L.circle([startLat, startLng], {
-            color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08,
-            radius: straightMax * 1000
-        }).addTo(map);
-    }
-    if (straightMin > 0) {
-        innerCircle = L.circle([startLat, startLng], {
-            color: '#3b82f6', fillColor: 'transparent', fillOpacity: 0,
-            weight: 1.5, opacity: 0.4, dashArray: '6, 4',
-            radius: straightMin * 1000
-        }).addTo(map);
-    }
+    // Markers + radius circles (map-view.js owns the mutable Leaflet state).
+    addStartMarker(startLat, startLng, locationInput);
+    addDestMarker(destLat, destLng, routeColor);
+    addRadiusCircles(startLat, startLng, straightMax, straightMin);
 
     // Draw polylines, fit bounds, badges, directions link, elevation.
     const { totalWalkKm } = renderRouteTail(
@@ -507,189 +368,11 @@ async function resolveStart() {
 }
 
 // ─── Destination resolution ──────────────────────────────────────────────────
-
-// Orchestration-layer routing policy. These are app.js's own knobs — the size
-// of the random-annulus candidate pool and the smart-routing retry budget for
-// findBestLoop — homed here rather than in the pure helper modules they used to
-// borrow. (Don't confuse RANDOM_POOL_SIZE with screening.js's SCREENING_POOL_CAP:
-// this seeds the pool, that caps the OSRM fan-out over it.)
-const RANDOM_POOL_SIZE = 15;
-// 3 candidates: deepest novel candidate is usually the best-shape POI in the
-// area; if none of the top 3 work, the area is structurally bad.
-const MAX_RETRY_ATTEMPTS = 3;
-
-// A pool of fully random points in the annulus — the fallback when Overpass
-// fails or returns nothing, and the pool for 'any' (random-point-anywhere).
-function randomCandidatePool(startLat, startLng, straightMin, straightMax) {
-    return Array.from({ length: RANDOM_POOL_SIZE }, () =>
-        generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
-}
-
-// The random-annulus resolution shape: pool + initial novelty pick, no name.
-// Used both as the Overpass fallback and for the 'any' strategy.
-function randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests) {
-    const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
-    return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
-}
-
-// Resolve the destination candidate pool for the chosen routing strategy.
-// POI/road strategies hit Overpass and fall back to a random annulus pool; 'any'
-// goes straight to a random pool. `rawLocationType` is the underlying <select>
-// value — only meaningful in the 'poi' branch, where it names the specific POI
-// key to look up. Two distinct fallbacks with accurate progress messages: a
-// genuine fetch failure (only the fetch call is in the try) vs. a
-// successful-but-empty response. Errors from capPool/pickMostNovelDestination
-// are NOT caught here — they surface to generateDestination's handler instead of
-// being silently masked as "Overpass unavailable". Returns the full pool plus an
-// initial novelty pick: { candidatePool, dest, destName }.
-async function resolveCandidatePool(routingStrategy, rawLocationType, startLat, startLng, straightMin, straightMax, onProgress, existingDests) {
-    if (routingStrategy === 'roads') {
-        onProgress('Searching for roads in the area…');
-        let roads;
-        try {
-            const winterMode = document.getElementById('winterMode').checked;
-            roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
-        } catch {
-            onProgress('Overpass unavailable, using random point…');
-            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
-        }
-        if (roads.length === 0) {
-            onProgress('No roads found nearby, using random point…');
-            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
-        }
-        const candidatePool = capPool(roads);
-        return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
-    }
-    if (routingStrategy === 'any_poi' || routingStrategy === 'poi') {
-        const filters = routingStrategy === 'any_poi'
-            ? POI_TYPES.map(p => p.filter)
-            : [POI_TYPES.find(p => p.key === rawLocationType)?.filter].filter(Boolean);
-        const label = routingStrategy === 'any_poi'
-            ? 'any POI'
-            : POI_TYPES.find(p => p.key === rawLocationType)?.label || 'places';
-        onProgress(`Searching for ${label}…`);
-        let pois;
-        try {
-            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
-        } catch {
-            onProgress('Overpass unavailable, using random point…');
-            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
-        }
-        if (pois.length === 0) {
-            onProgress('No matching places found nearby, using random point…');
-            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
-        }
-        const candidatePool = capPool(pois);
-        const dest = pickMostNovelDestination(candidatePool, existingDests);
-        return { candidatePool, dest, destName: dest.name };
-    }
-    // routingStrategy === 'any': a fully random point anywhere in the annulus.
-    return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
-}
-
-// Screen the candidate pool for water-reachability before route building.
-// Survivors replace the pool and get a fresh novelty pick; if none survive, the
-// best-rejected candidate is used and waterLocked is flagged. On screening
-// failure (or no screened result) the unscreened pool/dest/destName pass through
-// unchanged. Returns { candidatePool, dest, destName, waterLocked }.
-async function screenCandidatePool(startLat, startLng, candidatePool, dest, destName, existingDests, onProgress) {
-    try {
-        onProgress('Checking reachability…');
-        const screened = await screenCandidates(
-            { lat: startLat, lng: startLng },
-            candidatePool,
-            { tableFn: screeningTableFn }
-        );
-        if (screened.survivors.length > 0) {
-            const pool = screened.survivors;
-            const pick = pickMostNovelDestination(pool, existingDests);
-            return { candidatePool: pool, dest: pick, destName: pick.name || destName, waterLocked: false };
-        }
-        if (screened.bestRejected) {
-            return {
-                candidatePool: [screened.bestRejected],
-                dest: screened.bestRejected,
-                destName: screened.bestRejected.name || destName,
-                waterLocked: true,
-            };
-        }
-    } catch (err) {
-        console.warn('Screening failed, falling back to unscreened pool:', err);
-    }
-    return { candidatePool, dest, destName, waterLocked: false };
-}
-
-// True when `candidate` should replace the current best loop: no incumbent yet,
-// or the candidate has a real (non-null) overlap that's lower. A measured
-// overlap always beats a null (unknown) overlap; two nulls never displace.
-function isBetterLoop(candidate, best) {
-    if (!best) return true;
-    if (candidate.overlap === null) return false;
-    return best.overlap === null || candidate.overlap < best.overlap;
-}
-
-// Smart-routing retry loop: rank the pool by novelty and build a junction loop
-// for each candidate (reusing the corridor junction pool across attempts),
-// keeping the lowest-overlap result. Stops early once a loop beats the overlap
-// threshold. Returns the best { dest, destName, outbound, return, overlap,
-// junctions } seen, or null if nothing was built.
-async function findBestLoop(startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress) {
-    const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
-    const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
-
-    let cachedJunctions = null;
-    let bestSeen = null;
-
-    for (let i = 0; i < retryBudget; i++) {
-        const tryDest = ranked[i];
-        if (!tryDest) break;
-
-        onProgress(retryBudget > 1
-            ? `Building route… (attempt ${i + 1}/${retryBudget})`
-            : 'Building route…');
-        const result = await buildJunctionLoop(startLat, startLng,
-            tryDest.lat, tryDest.lng, maxKm, onProgress, cachedJunctions, winterMode, spread);
-        if (cachedJunctions === null) cachedJunctions = result.junctions;
-
-        const candidate = {
-            dest: tryDest,
-            destName: tryDest.name || null,
-            outbound: result.outbound,
-            return: result.return,
-            overlap: result.overlap,
-            junctions: result.junctions,
-        };
-        if (isBetterLoop(candidate, bestSeen)) bestSeen = candidate;
-
-        if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
-    }
-    return bestSeen;
-}
-
-// Build the route for a resolved destination. Smart round-trips run the
-// novelty-retry loop (findBestLoop), which may substitute a different,
-// lower-overlap destination; one-way and plain loops dispatch straight through
-// buildRouteForMode. Reads the smart-routing/winter-mode toggles from the DOM.
-// Returns the (possibly updated) dest/destName plus the built legs, junctions,
-// and loop overlap (null when not a measured smart loop, and outbound/return are
-// undefined when a smart build produced nothing).
-async function buildRouteForDestination(startLat, startLng, candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, onProgress) {
-    if (tripMode !== 'one-way' && document.getElementById('smartRouting').checked) {
-        const winterMode = document.getElementById('winterMode').checked;
-        const best = await findBestLoop(
-            startLat, startLng, candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress);
-        if (best) {
-            return { dest: best.dest, destName: best.destName, outbound: best.outbound,
-                return: best.return, junctions: best.junctions, overlap: best.overlap };
-        }
-        return { dest, destName, outbound: undefined, return: undefined, junctions: null, overlap: null };
-    }
-    const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
-        tripMode, smartRouting: false, winterMode: false, onProgress,
-        buildingMessage: 'Building route…', spread,
-    });
-    return { dest, destName, outbound: r.outbound, return: r.return, junctions: null, overlap: null };
-}
+// The pipeline — resolveCandidatePool / screenCandidatePool / findBestLoop /
+// isBetterLoop / buildRouteForDestination, plus pickMostNovelDestination,
+// randomCandidatePool/randomPoolResult and RANDOM_POOL_SIZE/MAX_RETRY_ATTEMPTS —
+// lives in destination-resolve.js (loaded before app.js). It reads no DOM:
+// generateDestination below reads winterMode/smartRouting and passes them in.
 
 // ─── Main: generate random destination ───────────────────────────────────────
 
@@ -724,20 +407,26 @@ async function generateDestination() {
             const straightMin = minKm / scale;
             const straightMax = maxKm / scale;
 
+            // Mode toggles read once here, at the UI layer, and passed down so
+            // the destination-resolve pipeline stays DOM-free.
+            const winterMode = document.getElementById('winterMode').checked;
+            const smartRouting = document.getElementById('smartRouting').checked;
+
             // Resolve a candidate pool, then screen it for water-reachability.
-            const resolved = await resolveCandidatePool(
-                routingStrategy, rawLocationType, startLat, startLng, straightMin, straightMax, onProgress, existingDests);
-            const screened = await screenCandidatePool(
-                startLat, startLng, resolved.candidatePool, resolved.dest, resolved.destName, existingDests, onProgress);
+            const resolved = await resolveCandidatePool(startLat, startLng, {
+                routingStrategy, rawLocationType, straightMin, straightMax, existingDests, onProgress, winterMode });
+            const screened = await screenCandidatePool(startLat, startLng, {
+                candidatePool: resolved.candidatePool, dest: resolved.dest, destName: resolved.destName,
+                existingDests, onProgress });
             const { candidatePool, waterLocked } = screened;
 
             // Build route (the spread is read from the DOM here, at the UI layer,
             // and passed down). Smart round-trips may substitute a lower-overlap
             // destination, so read dest/destName back from the build result.
             const spread = getSpreadParams();
-            const built = await buildRouteForDestination(
-                startLat, startLng, candidatePool, screened.dest, screened.destName,
-                existingDests, maxKm, tripMode, spread, onProgress);
+            const built = await buildRouteForDestination(startLat, startLng, {
+                candidatePool, dest: screened.dest, destName: screened.destName,
+                existingDests, maxKm, tripMode, spread, smartRouting, winterMode, onProgress });
             const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
             const session = displayRoute({
@@ -910,36 +599,8 @@ function markAsVisited() {
 }
 
 // ─── Visited layer ────────────────────────────────────────────────────────────
-
-function renderVisitedLayer() {
-    visitedLayerGroup.clearLayers();
-    const color = getRouteColor();
-    for (const visit of getVisits()) {
-        if (visit.routeCoords?.length > 0) {
-            L.polyline(visit.routeCoords, {
-                color, weight: 2, opacity: 0.4
-            }).addTo(visitedLayerGroup);
-        }
-        if (visit.returnRouteCoords?.length > 0) {
-            L.polyline(visit.returnRouteCoords, {
-                color, weight: 2, opacity: 0.4
-            }).addTo(visitedLayerGroup);
-        }
-        // Start: hollow ring (matches "you are here" semantic but compact for overlay)
-        L.circleMarker([visit.startLat, visit.startLng], {
-            radius: 4, color: '#3b82f6', fillColor: '#fff', fillOpacity: 1, weight: 2
-        })
-        .bindPopup(`<b>${escapeHtml(visit.startLabel)}</b><br>${new Date(visit.date).toLocaleDateString()}`)
-        .addTo(visitedLayerGroup);
-
-        // Destination: filled in route color (matches the active route's pin)
-        L.circleMarker([visit.destLat, visit.destLng], {
-            radius: 5, color, fillColor: color, fillOpacity: 0.85, weight: 1
-        })
-        .bindPopup(`${visit.distance.toFixed(1)} km<br>${new Date(visit.date).toLocaleDateString()}`)
-        .addTo(visitedLayerGroup);
-    }
-}
+// renderVisitedLayer (the visited-routes overlay) lives in map-view.js; the
+// visibility toggle below is app.js UI and owns visitedLayerVisible.
 
 function toggleVisitedLayer() {
     const btn = document.getElementById('toggleVisitedBtn');
@@ -1101,13 +762,8 @@ function renderRouteColorSwatches() {
     }
 }
 
-// Apply the current routeColor to all live map layers without re-running OSRM.
-function applyRouteColor() {
-    const color = getRouteColor();
-    routeLines.forEach(l => l.setStyle({ color }));
-    if (destMarker) destMarker.setIcon(createPinIcon(color));
-    renderVisitedLayer();
-}
+// applyRouteColor (recolor live map layers without re-running OSRM) lives in
+// map-view.js; called from renderRouteColorSwatches above as a global.
 
 // ─── Keyboard shortcuts ───────────────────────────────────────────────────────
 
@@ -1144,8 +800,7 @@ async function rerouteWithCurrentSpread() {
         await withLoading(async (onProgress) => {
             onProgress('Adjusting route…');
             // Keep markers and circles, only clear route lines
-            routeLines.forEach(l => map.removeLayer(l));
-            routeLines = [];
+            clearRouteLines();
 
             const { tripMode } = currentSession;
             let junctions = currentSession.junctions || null;
@@ -1256,6 +911,20 @@ document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
             isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
     });
 });
+
+// Re-render every localStorage-backed view. Fired on explorer-sync-state-change
+// so a cloud sync that lands AFTER the initial paint — the own-device merge or
+// adopting a backup link, both of which rewrite localStorage once init's GET
+// resolves — becomes visible immediately instead of waiting for a manual reload.
+// (init's synchronous render calls below still paint pre-sync local data first.)
+function refreshDataViews() {
+    renderVisitedLayer();
+    updateVisitedCounter();
+    renderFavoritesSection();
+    renderHistorySection();
+    renderSavedLocations();
+}
+window.addEventListener('explorer-sync-state-change', refreshDataViews);
 
 restoreSettings();
 initSettingsListeners();

@@ -221,10 +221,16 @@ function pickBetterLoop(outA, retA, outB, retB) {
 // but snaps each via to the closest OSM junction in a corridor pool instead
 // of OSRM nearest-snap. Builds both chiralities in parallel and returns the
 // lower-overlap one. Falls back to buildLoop on Overpass/OSRM failure.
-// cachedJunctions: pass a previously returned `junctions` to skip Overpass.
-// maxKm: the caller's max-distance budget — forwarded to fetchCorridorJunctions
-// for the start-anchored cache key (replaces a former DOM read in that helper).
-async function buildJunctionLoop(startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions = null, winterMode = false, spread = undefined) {
+// The four lat/lng leaders stay positional; the rest is a named-options object:
+//   maxKm            the caller's max-distance budget — forwarded to
+//                    fetchCorridorJunctions for the start-anchored cache key
+//   onProgress       msg => void progress callback
+//   cachedJunctions  a previously returned `junctions` pool to skip Overpass
+//   winterMode       excludes winter-unmaintained ways from the junction fetch
+//   spread           precomputed { offsetMult, viaTs } from computeSpreadParams
+async function buildJunctionLoop(startLat, startLng, destLat, destLng, {
+    maxKm, onProgress, cachedJunctions = null, winterMode = false, spread = undefined,
+} = {}) {
     // Forward-order vias on each side (loopVias owns the envelope geometry).
     // Reversal happens at call time on the leg that needs it (return leg).
     const { rightVias: viasRight, leftVias: viasLeft, offsetKm, A, B, snapRadius } =

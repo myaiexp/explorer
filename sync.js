@@ -162,7 +162,9 @@
                 _token = consent.token || urlToken || null;
                 // Own device: merge server rows into local (last-write-wins). A
                 // failed GET is silently ignored — state is already 'accepted'.
-                return loadAccount(urlUser, Sections.mergeSection);
+                // fireStateChange on success so the UI re-renders the merged rows
+                // (the adopt paths below already fire it via bindAdoptedAccount).
+                return loadAccount(urlUser, Sections.mergeSection, fireStateChange);
             }
 
             // Loading a NEW/different account from the URL requires the secret

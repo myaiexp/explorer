@@ -554,6 +554,46 @@ describe('#1566 mergeSection last-write-wins', () => {
     });
 });
 
+// ── restored backup invisible until reload (audit) ────────────────────────────
+// init Case 2's own-device merge rewrites localStorage but historically fired no
+// explorer-sync-state-change event, so app.js never re-rendered the merged rows —
+// a restored backup stayed invisible until a manual reload. The merge path now
+// fires the event on success (via loadAccount's onSuccess = fireStateChange) so
+// the app.js refreshDataViews hook runs; a failed GET must NOT fire it.
+
+describe('init Case 2 merge fires state-change so the UI re-renders', () => {
+    function setupCase2(fetchConfig) {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+        });
+        mockFetch({ '/explorer/api/rugged-pine-42': fetchConfig });
+    }
+
+    test('own-device merge dispatches explorer-sync-state-change on success', async () => {
+        setupCase2({
+            visits: [{ id: 'server-1', updatedAt: '2024-06-01T00:00:00Z' }],
+            favorites: [], savedLocations: [], history: [],
+        });
+        const eventSpy = vi.fn();
+        window.addEventListener('explorer-sync-state-change', eventSpy);
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(eventSpy).toHaveBeenCalled();
+        window.removeEventListener('explorer-sync-state-change', eventSpy);
+    });
+
+    test('a failed merge GET does NOT fire state-change (fires only on success)', async () => {
+        setupCase2({ status: 500 });
+        const eventSpy = vi.fn();
+        window.addEventListener('explorer-sync-state-change', eventSpy);
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(eventSpy).not.toHaveBeenCalled();
+        window.removeEventListener('explorer-sync-state-change', eventSpy);
+    });
+});
+
 // ── #1567 — outbox flush: DELETE op, 5xx backoff, multi-entry drain ────────────
 
 describe('#1567 outbox flush DELETE / backoff / drain', () => {

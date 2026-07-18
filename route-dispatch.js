@@ -38,7 +38,7 @@ async function buildRouteForMode(startLat, startLng, destLat, destLng, {
     }
     if (smartRouting) {
         const result = await buildJunctionLoop(
-            startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode, spread);
+            startLat, startLng, destLat, destLng, { maxKm, onProgress, cachedJunctions, winterMode, spread });
         return { outbound: result.outbound, return: result.return, junctions: result.junctions };
     }
     if (buildingMessage && onProgress) onProgress(buildingMessage);
