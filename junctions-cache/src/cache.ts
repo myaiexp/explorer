@@ -18,6 +18,25 @@ const CACHE_PATH = process.env.CACHE_PATH ?? './data/cache.json';
 const QUANTIZE_DECIMALS = 4;        // ~11m at the equator (legacy bbox path)
 const START_QUANTIZE_DECIMALS = 3;  // ~111m — coarse enough to merge nearby starts
 
+function envPositiveInt(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// Freshness + size bounds so neither the in-memory store nor the JSON snapshot
+// grows without limit (env-overridable for tuning on shelly, parity with
+// CACHE_PATH). Without these every distinct quantized bbox/start key minted a
+// permanent entry, cachedAt was never read (stale OSM roads served forever), and
+// saveCache re-serialized an ever-growing store on every write.
+//   TTL: OSM road-junction data changes slowly; 30 days keeps entries useful
+//        while forcing an eventual refetch of stale roads.
+//   CAP: a 50 km anchored fetch can hold tens of thousands of points, so bound
+//        the entry COUNT and evict the oldest (by cachedAt) first.
+const CACHE_TTL_MS = envPositiveInt('CACHE_TTL_MS', 30 * 24 * 60 * 60 * 1000);
+const CACHE_MAX_ENTRIES = envPositiveInt('CACHE_MAX_ENTRIES', 500);
+
 type Entry = { junctions: LatLng[]; cachedAt: number };
 
 const store = new Map<string, Entry>();
@@ -92,6 +111,13 @@ export async function loadCache(): Promise<void> {
             // Overpass on demand — but surface the loss so it isn't silent.
             log('WARN', { event: 'cache_entries_dropped', dropped, kept: store.size, path: CACHE_PATH });
         }
+        // Apply the TTL + cap to the loaded snapshot so a large or stale on-disk
+        // file can't repopulate the store past its bounds; persist the shrunk set.
+        const pruned = prune(Date.now());
+        if (pruned > 0) {
+            log('INFO', { event: 'cache_pruned_on_load', pruned, kept: store.size, path: CACHE_PATH });
+            scheduleSave();
+        }
         log('INFO', { event: 'cache_loaded', entries: store.size, path: CACHE_PATH });
     } catch (e) {
         const err = e as NodeJS.ErrnoException;
@@ -130,13 +156,47 @@ function scheduleSave(): void {
     });
 }
 
+// Read a live entry, evicting it (and scheduling a snapshot rewrite) once its TTL
+// has passed so the caller falls through to a refetch. A hot key with no further
+// inserts would otherwise be served stale forever — prune() only runs on
+// insert/load, so this per-read check is what actually enforces freshness.
+function readFresh(key: string): Entry | undefined {
+    const entry = store.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+        store.delete(key);
+        scheduleSave();
+        return undefined;
+    }
+    return entry;
+}
+
+// Bound the store: drop everything past the TTL, then evict oldest-cachedAt-first
+// until at or under the entry cap. Runs after every insert (overflow ≤ 1) and once
+// after a bulk load (may drop many). Returns the count removed, for load logging.
+function prune(now: number): number {
+    let removed = 0;
+    for (const [k, v] of store) {
+        if (now - v.cachedAt > CACHE_TTL_MS) { store.delete(k); removed++; }
+    }
+    if (store.size > CACHE_MAX_ENTRIES) {
+        const byAge = [...store.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+        const overflow = store.size - CACHE_MAX_ENTRIES;
+        for (let i = 0; i < overflow; i++) {
+            const oldest = byAge[i];
+            if (oldest) { store.delete(oldest[0]); removed++; }
+        }
+    }
+    return removed;
+}
+
 export type LookupResult =
     | { cache: 'hit'; junctions: LatLng[] }
     | { cache: 'miss'; junctions: LatLng[]; overpassMs: number };
 
 export async function getJunctions(bbox: Bbox, exclude: ExcludePreset): Promise<LookupResult> {
     const key = keyFor(bbox, exclude);
-    const cached = store.get(key);
+    const cached = readFresh(key);
     if (cached) return { cache: 'hit', junctions: cached.junctions };
 
     const existing = inflight.get(key);
@@ -154,6 +214,7 @@ export async function getJunctions(bbox: Bbox, exclude: ExcludePreset): Promise<
         const junctions = await promise;
         const overpassMs = Date.now() - t0;
         store.set(key, { junctions, cachedAt: Date.now() });
+        prune(Date.now());
         scheduleSave();
         return { cache: 'miss', junctions, overpassMs };
     } finally {
@@ -173,7 +234,7 @@ export async function getJunctionsAnchored(
     requested: Bbox
 ): Promise<AnchoredLookupResult> {
     const key = startKeyFor(start, exclude);
-    const cached = store.get(key);
+    const cached = readFresh(key);
     if (cached) {
         return {
             cache: 'hit',
@@ -200,6 +261,7 @@ export async function getJunctionsAnchored(
         const all = await promise;
         const overpassMs = Date.now() - t0;
         store.set(key, { junctions: all, cachedAt: Date.now() });
+        prune(Date.now());
         scheduleSave();
         return {
             cache: 'miss',

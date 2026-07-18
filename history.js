@@ -13,8 +13,22 @@ function saveToHistory(session) {
     const entry = snapshotSession(session);
     const history = getHistory();
     history.unshift(entry);
-    if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+    // Keep the most-recent HISTORY_MAX by date, and MIRROR the cap to the cloud.
+    // Sorting first makes the cap correct even after an init merge (mergeSection
+    // appends server-only rows unsorted), so the rows that fall off the tail are
+    // genuinely the oldest. Those dropped ids must also be DELETEd server-side:
+    // truncating locally alone leaves them on the server forever (unbounded
+    // per-account growth) and the next merge unions them back by id — resurrecting
+    // capped entries and ballooning local history past HISTORY_MAX (the cap and the
+    // sync engine otherwise implement contradictory invariants). splice() both
+    // truncates `history` in place and returns the aged-off tail.
+    history.sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0));
+    const dropped = history.splice(HISTORY_MAX);
     syncedPut(HISTORY_KEY, history, 'history', entry.id, entry);
+    // syncedDelete re-persists the already-capped array (idempotent) and enqueues
+    // the cloud delete; ExplorerSync.mutate no-ops for anonymous users, so an
+    // un-synced browser just gets the local cap, exactly as before.
+    dropped.forEach(d => { if (d && d.id != null) syncedDelete(HISTORY_KEY, history, 'history', String(d.id)); });
     maybeRequestConsent();
     renderHistorySection();
 }

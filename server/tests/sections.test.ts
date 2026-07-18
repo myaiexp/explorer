@@ -500,6 +500,47 @@ describe('cross-account id isolation (PUT is owner-scoped)', () => {
   });
 });
 
+// The DELETE handler scopes to (id ∧ username) — an authenticated caller can only
+// remove their OWN rows. accountAuth proves the caller owns :username, but that
+// alone wouldn't stop a DELETE of an id owned by a DIFFERENT account from wiping
+// the victim's row if the WHERE dropped the username predicate. The PUT isolation
+// above pinned the upsert side; this pins the delete side so the `and(id, username)`
+// scoping can't silently regress. (The handler is generic across all four sections,
+// so visits covers the shared path.)
+describe('cross-account id isolation (DELETE is owner-scoped)', () => {
+  test("DELETE of another account's id is a no-op that leaves the victim's row untouched", async () => {
+    const victim = await createTestAccount();
+    const attacker = await createTestAccount();
+    const id = 'shared-del-uuid';
+
+    // Victim owns a row under this id.
+    await db.insert(schema.visits).values({
+      id, username: victim.username, date: VISIT_BODY.date,
+      startLat: 60, startLng: 25, destLat: 60.1, destLng: 25.1, distance: 5,
+    });
+
+    // Attacker DELETEs the SAME id under their own account. The delete is scoped
+    // to (id ∧ attacker.username), which matches nothing → a 204 no-op.
+    const res = await app.request(`/api/${attacker.username}/visits/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(attacker.token),
+    });
+    expect(res.status).toBe(204);
+
+    // The victim's row is byte-identical and still present — not collaterally deleted.
+    const victimRow = await db
+      .select()
+      .from(schema.visits)
+      .where(and(eq(schema.visits.id, id), eq(schema.visits.username, victim.username)));
+    expect(victimRow).toHaveLength(1);
+    expect(victimRow[0].distance).toBe(5);
+
+    // And the id still exists exactly once globally (only the victim's copy).
+    const all = await db.select().from(schema.visits).where(eq(schema.visits.id, id));
+    expect(all).toHaveLength(1);
+  });
+});
+
 // The PUT handler is generic over all four sections: parse JSON (→ 400 'Invalid
 // JSON' on failure), then reject any non-object body (→ 400 'Body must be an
 // object', e.g. a JSON array). Both branches sit before buildRow, so exercising

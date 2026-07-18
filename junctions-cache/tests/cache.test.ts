@@ -84,6 +84,10 @@ afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();   // un-patch any vi.spyOn (e.g. the JSON.stringify save counter)
     vi.clearAllMocks();
+    // The TTL / cap tests set these before loadFresh; clear them so they don't
+    // leak into other tests (the module reads them once at import).
+    delete process.env.CACHE_TTL_MS;
+    delete process.env.CACHE_MAX_ENTRIES;
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -433,7 +437,9 @@ describe('loadCache', () => {
     test('a valid snapshot is loaded into the store and served as a hit', async () => {
         const file = tmpCacheFile();
         const key = '60.0000,24.0000,61.0000,25.0000|default'; // keyFor(BBOX,'default')
-        writeFileSync(file, JSON.stringify({ [key]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: 123 } }));
+        // cachedAt must be recent: loadCache now applies the TTL, so a 1970-era
+        // placeholder would be pruned as stale before the assertions run.
+        writeFileSync(file, JSON.stringify({ [key]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: Date.now() } }));
         const { cache, fetchMock, log } = await loadFresh(file);
 
         await cache.loadCache();
@@ -452,7 +458,7 @@ describe('loadCache', () => {
         const file = tmpCacheFile();
         const goodKey = '60.0000,24.0000,61.0000,25.0000|default';
         writeFileSync(file, JSON.stringify({
-            [goodKey]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: 123 },
+            [goodKey]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: Date.now() }, // recent → survives the load TTL
             'bad:junctions-not-array': { junctions: 'nope', cachedAt: 1 },
             'bad:missing-cachedAt': { junctions: [] },
             'bad:cachedAt-not-number': { junctions: [], cachedAt: 'soon' },
@@ -477,7 +483,9 @@ describe('loadCache', () => {
     test('a fully valid snapshot drops nothing and logs no cache_entries_dropped WARN', async () => {
         const file = tmpCacheFile();
         const key = '60.0000,24.0000,61.0000,25.0000|default';
-        writeFileSync(file, JSON.stringify({ [key]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: 123 } }));
+        // cachedAt must be recent: loadCache now applies the TTL, so a 1970-era
+        // placeholder would be pruned as stale before the assertions run.
+        writeFileSync(file, JSON.stringify({ [key]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: Date.now() } }));
         const { cache, log } = await loadFresh(file);
 
         await cache.loadCache();
@@ -522,6 +530,132 @@ describe('saveCache (driven via a getJunctions miss)', () => {
         expect(fresh.cache.cacheSize()).toBe(1);
         const r = await fresh.cache.getJunctions(BBOX, 'default'); // 'hit' ⇒ served from the loaded file, not re-fetched
         expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+    });
+});
+
+// ── TTL + max-entry cap — bounded store, no stale serving (audit) ─────────────
+//
+// Before this fix nothing ever deleted an entry: cachedAt was recorded but never
+// read (stale OSM roads served forever) and distinct keys minted permanent
+// entries without limit. These pin the three enforcement points — TTL on read,
+// oldest-first eviction at the cap on insert, and pruning the loaded snapshot.
+
+describe('TTL on read', () => {
+    test('an entry past the TTL is treated as a miss and refetched, not served stale', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_TTL_MS = String(60_000);   // 60s TTL for the test
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValueOnce([{ lat: 60.5, lng: 24.5 }]);
+        fetchMock.mockResolvedValueOnce([{ lat: 61.5, lng: 25.5 }]);
+
+        expect((await cache.getJunctions(BBOX, 'default')).cache).toBe('miss');   // stored at t0
+        expect((await cache.getJunctions(BBOX, 'default')).cache).toBe('hit');    // still within TTL
+
+        vi.setSystemTime(Date.now() + 61_000);        // advance the clock past the TTL
+        const afterTtl = await cache.getJunctions(BBOX, 'default');
+        expect(afterTtl.cache).toBe('miss');          // expired → refetched, not served stale
+        expect(afterTtl.junctions).toEqual([{ lat: 61.5, lng: 25.5 }]);  // the fresh fetch, not the old data
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    test('an expired entry is served fresh after the refetch, replacing the stale data', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_TTL_MS = String(60_000);
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValueOnce([{ lat: 1, lng: 1 }]);
+        fetchMock.mockResolvedValueOnce([{ lat: 2, lng: 2 }]);
+
+        await cache.getJunctions(BBOX, 'default');    // miss → {1,1}
+        vi.setSystemTime(Date.now() + 61_000);
+        await cache.getJunctions(BBOX, 'default');    // expired → refetch → {2,2}
+        const next = await cache.getJunctions(BBOX, 'default');
+        expect(next).toEqual({ cache: 'hit', junctions: [{ lat: 2, lng: 2 }] }); // fresh value now cached
+    });
+});
+
+describe('max-entry cap (oldest-first eviction)', () => {
+    test('inserting past the cap evicts the oldest entry by cachedAt, keeping newer ones', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_MAX_ENTRIES = '2';
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValue([{ lat: 1, lng: 1 }]);
+
+        const A = { minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 };
+        const B = { minLat: 62, minLng: 26, maxLat: 63, maxLng: 27 };
+        const C = { minLat: 64, minLng: 28, maxLat: 65, maxLng: 29 };
+
+        await cache.getJunctions(A, 'default');       // oldest
+        vi.setSystemTime(Date.now() + 1000);
+        await cache.getJunctions(B, 'default');
+        vi.setSystemTime(Date.now() + 1000);
+        await cache.getJunctions(C, 'default');        // 3rd insert → cap 2 → evicts A
+
+        expect(cache.cacheSize()).toBe(2);
+        // A was evicted → re-requesting it re-fetches; B and C are still hits.
+        expect((await cache.getJunctions(B, 'default')).cache).toBe('hit');
+        expect((await cache.getJunctions(C, 'default')).cache).toBe('hit');
+        const a = await cache.getJunctions(A, 'default');
+        expect(a.cache).toBe('miss');
+    });
+});
+
+describe('loadCache pruning (TTL + cap on the snapshot)', () => {
+    test('drops entries past the TTL on load, keeps fresh ones, and shrinks the file', async () => {
+        vi.useRealTimers();
+        const file = tmpCacheFile();
+        const freshKey = '60.0000,24.0000,61.0000,25.0000|default';
+        const staleKey = '10.0000,10.0000,11.0000,11.0000|default';
+        const now = Date.now();
+        writeFileSync(file, JSON.stringify({
+            [freshKey]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: now },
+            [staleKey]: { junctions: [{ lat: 10.5, lng: 10.5 }], cachedAt: now - 40 * 24 * 60 * 60 * 1000 }, // 40d old
+        }));
+        const { cache, log } = await loadFresh(file);
+
+        await cache.loadCache();
+
+        expect(cache.cacheSize()).toBe(1);            // stale one pruned in memory
+        expect(log).toHaveBeenCalledWith('INFO', expect.objectContaining({ event: 'cache_pruned_on_load', pruned: 1 }));
+        // The debounced save shrinks the on-disk snapshot to just the fresh key.
+        await waitFor(() => Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length === 1);
+        expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual([freshKey]);
+    });
+
+    test('enforces the entry cap on load, keeping the newest by cachedAt', async () => {
+        vi.useRealTimers();
+        process.env.CACHE_MAX_ENTRIES = '1';
+        const file = tmpCacheFile();
+        const now = Date.now();
+        const oldKey = '10.0000,10.0000,11.0000,11.0000|default';
+        const newKey = '60.0000,24.0000,61.0000,25.0000|default';
+        writeFileSync(file, JSON.stringify({
+            [oldKey]: { junctions: [{ lat: 10.5, lng: 10.5 }], cachedAt: now - 1000 },
+            [newKey]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: now },
+        }));
+        const { cache } = await loadFresh(file);
+
+        await cache.loadCache();
+
+        expect(cache.cacheSize()).toBe(1);
+        // The newer entry survived the cap; the older one was evicted.
+        const r = await cache.getJunctions(BBOX, 'default');
+        expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+        // Drain the prune-on-load save (real timer) so its debounced write can't
+        // leak past this test into a later one's JSON.stringify save counter.
+        await waitFor(() => Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length === 1);
+    });
+
+    test('a snapshot fully within the TTL and cap is not pruned (no cache_pruned_on_load)', async () => {
+        vi.useRealTimers();
+        const file = tmpCacheFile();
+        const key = '60.0000,24.0000,61.0000,25.0000|default';
+        writeFileSync(file, JSON.stringify({ [key]: { junctions: [{ lat: 60.5, lng: 24.5 }], cachedAt: Date.now() } }));
+        const { cache, log } = await loadFresh(file);
+
+        await cache.loadCache();
+
+        expect(cache.cacheSize()).toBe(1);
+        expect(log).not.toHaveBeenCalledWith('INFO', expect.objectContaining({ event: 'cache_pruned_on_load' }));
     });
 });
 

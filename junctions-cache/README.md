@@ -12,6 +12,8 @@ pnpm build && pnpm start    # production
 
 Listens on `127.0.0.1:5001` (override with `PORT`/`HOST`). Persists cache to `./data/cache.json` (override with `CACHE_PATH`).
 
+The store is bounded so neither memory nor the JSON snapshot grows without limit: entries expire after `CACHE_TTL_MS` (default 30 days — a stale entry is refetched on the next read, not served forever), and the entry count is capped at `CACHE_MAX_ENTRIES` (default 500, oldest-`cachedAt`-first eviction on insert). Both bounds are also applied when the snapshot is loaded at startup.
+
 ## Tests
 
 ```bash
