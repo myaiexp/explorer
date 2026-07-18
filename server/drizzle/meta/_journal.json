@@ -15,6 +15,13 @@
       "when": 1782031199725,
       "tag": "0001_silly_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784343780281,
+      "tag": "0002_cool_union_jack",
+      "breakpoints": true
     }
   ]
 }

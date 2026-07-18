@@ -2,7 +2,7 @@
 // four user-scoped tables (visits / favorites / saved-locations / history).
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import type { PgTable, PgColumn, PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
@@ -61,15 +61,25 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
     const built = buildRow(id, username, body);
     if ('error' in built) return c.json({ error: built.error }, 400);
 
-    // The conflict set updates every column except the conflict keys (id) and
-    // the ownership key (username) — derived from the row itself, so there is
-    // no second hand-maintained field list to drift from buildRow. (The generic
-    // row type is opaque to TS at this boundary, hence the localized casts.)
-    const { id: _id, username: _username, ...set } = built.row as AnyRecord;
+    // Upsert scoped to the OWNER: the conflict target is the composite PK
+    // (username, id), so a PUT of an id that already exists under a DIFFERENT
+    // account inserts a fresh row under the caller instead of rewriting the
+    // other account's row (audit #4832/#4855). The conflict set updates every
+    // column except the PK keys (username, id) — derived from the row itself, so
+    // there's no second hand-maintained field list to drift from buildRow — plus
+    // a fresh updatedAt (buildRow omits it), which the client's last-write-wins
+    // merge in sync-sections.js orders by. now() keeps the update on the same DB
+    // clock as the insert default. (The generic row type is opaque to TS at this
+    // boundary, hence the localized casts.)
+    const { id: _id, username: _username, ...cols } = built.row as AnyRecord;
+    const set = { ...cols, updatedAt: sql`now()` };
     await db
       .insert(table)
       .values(built.row)
-      .onConflictDoUpdate({ target: table.id, set: set as PgUpdateSetSource<T> });
+      .onConflictDoUpdate({
+        target: [table.username, table.id],
+        set: set as PgUpdateSetSource<T>,
+      });
 
     return new Response(null, { status: 204 });
   });

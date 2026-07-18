@@ -52,6 +52,33 @@ describe('POST /api/:username/import', () => {
     expect(res.status).toBe(401);
   });
 
+  // audit #4832 — importVisits preserves the exported row ids, so two accounts
+  // importing the same shared walks-export JSON carry identical ids. Under the old
+  // global-id PK the second import's insert collided and aborted with an opaque
+  // 500. The composite PK (username, id) makes each account's rows independent.
+  test("importing another account's exported ids succeeds independently (no cross-account collision)", async () => {
+    const a = await createTestAccount();
+    const b = await createTestAccount();
+    const shared = { visits: [makeVisit('shared-1'), makeVisit('shared-2')], favorites: [], savedLocations: [], history: [] };
+
+    const rA = await app.request(`/api/${a.username}/import`, {
+      method: 'POST', body: JSON.stringify(shared),
+      headers: { 'content-type': 'application/json', ...authHeaders(a.token) },
+    });
+    expect(rA.status).toBe(204);
+
+    const rB = await app.request(`/api/${b.username}/import`, {
+      method: 'POST', body: JSON.stringify(shared),
+      headers: { 'content-type': 'application/json', ...authHeaders(b.token) },
+    });
+    expect(rB.status).toBe(204);
+
+    const rowsA = await db.select().from(schema.visits).where(eq(schema.visits.username, a.username));
+    const rowsB = await db.select().from(schema.visits).where(eq(schema.visits.username, b.username));
+    expect(rowsA.map((r) => r.id).sort()).toEqual(['shared-1', 'shared-2']);
+    expect(rowsB.map((r) => r.id).sort()).toEqual(['shared-1', 'shared-2']);
+  });
+
   test('returns 400 when unknown section is present', async () => {
     const { username: u, token } = await createTestAccount();
     const res = await app.request(`/api/${u}/import`, {

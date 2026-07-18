@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, authHeaders, VISIT_BODY, resetRateLimiter } from './helpers.js';
 import { schema } from '../src/db.js';
 
@@ -416,6 +416,87 @@ describe('history', () => {
       headers: authHeaders('any-token'),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+// audit #4832/#4855 — the section id is unique only WITHIN an account (composite
+// PK (username, id)), not globally. accountAuth proves the caller owns :username,
+// but nothing tied the row id to that owner, so a PUT of an id owned by another
+// account used to conflict on the global id and silently rewrite the victim's row
+// (and hand the writer a 204 for a row that never appeared under their account).
+// This fires non-adversarially too: two accounts importing the same shared
+// walks-export JSON preserve identical ids. These pin per-owner isolation.
+describe('cross-account id isolation (PUT is owner-scoped)', () => {
+  test("PUT of another account's id creates a new owned row and never touches the victim", async () => {
+    const victim = await createTestAccount();
+    const attacker = await createTestAccount();
+    const id = 'shared-uuid';
+
+    // Victim writes their row first.
+    const v = await app.request(`/api/${victim.username}/visits/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload(id, 5)),
+      headers: { 'content-type': 'application/json', ...authHeaders(victim.token) },
+    });
+    expect(v.status).toBe(204);
+
+    // Attacker PUTs the SAME id under their own account with different data.
+    const a = await app.request(`/api/${attacker.username}/visits/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload(id, 999)),
+      headers: { 'content-type': 'application/json', ...authHeaders(attacker.token) },
+    });
+    expect(a.status).toBe(204);
+
+    // The victim's row is untouched — same owner, same data.
+    const victimRow = await db
+      .select()
+      .from(schema.visits)
+      .where(and(eq(schema.visits.id, id), eq(schema.visits.username, victim.username)));
+    expect(victimRow).toHaveLength(1);
+    expect(victimRow[0].distance).toBe(5);
+
+    // The attacker got their OWN row (not a silent no-op / lost write).
+    const attackerRow = await db
+      .select()
+      .from(schema.visits)
+      .where(and(eq(schema.visits.id, id), eq(schema.visits.username, attacker.username)));
+    expect(attackerRow).toHaveLength(1);
+    expect(attackerRow[0].distance).toBe(999);
+
+    // Two distinct rows share the id — one per owner.
+    const all = await db.select().from(schema.visits).where(eq(schema.visits.id, id));
+    expect(all).toHaveLength(2);
+  });
+
+  // The conflict set must bump updatedAt so the client's last-write-wins merge
+  // (sync-sections.js) can order an update after the row's original insert.
+  test('a genuine update bumps updatedAt', async () => {
+    const { username: u, token } = await createTestAccount();
+    const id = 'v-stamp';
+    const stale = new Date('2020-01-01T00:00:00Z');
+
+    // Seed with an explicitly old timestamp so the bump is unambiguous.
+    await db.insert(schema.visits).values({
+      id, username: u, date: VISIT_BODY.date,
+      startLat: 60, startLng: 25, destLat: 60.1, destLng: 25.1, distance: 5,
+      updatedAt: stale,
+    });
+
+    const res = await app.request(`/api/${u}/visits/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload(id, 7)),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+
+    const rows = await db
+      .select()
+      .from(schema.visits)
+      .where(and(eq(schema.visits.id, id), eq(schema.visits.username, u)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].distance).toBe(7);
+    expect(rows[0].updatedAt.getTime()).toBeGreaterThan(stale.getTime());
   });
 });
 

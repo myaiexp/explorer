@@ -133,7 +133,8 @@ describe('visits PUT', () => {
     expect(ops).toHaveLength(1);
     expect(ops[0].op).toBe('insert');
     expect(ops[0].table).toBe(schema.visits);
-    expect(ops[0].conf?.target).toBe(schema.visits.id);
+    // Conflict target is the composite PK (username, id) — owner-scoped upsert.
+    expect(ops[0].conf?.target).toEqual([schema.visits.username, schema.visits.id]);
     // id + username come from the path; payload fields from the body.
     expect(ops[0].row).toMatchObject({
       id: 'v1',
@@ -156,7 +157,9 @@ describe('visits PUT', () => {
       returnRouteCoords: null,
       returnRouteDuration: null,
     });
-    // set clause = every column except id + username (the conflict keys)
+    // set clause = every column except the PK keys (id + username), plus a fresh
+    // updatedAt bump (buildRow omits it) that the client's last-write-wins merge
+    // orders by.
     const setKeys = Object.keys(ops[0].conf!.set).sort();
     expect(setKeys).toEqual(
       [
@@ -174,6 +177,7 @@ describe('visits PUT', () => {
         'startLat',
         'startLng',
         'tripMode',
+        'updatedAt',
       ].sort()
     );
     expect(setKeys).not.toContain('id');
@@ -264,9 +268,9 @@ describe('favorites PUT', () => {
     const res = await app.request('/alice/favorites/f1', jsonReq('PUT', { payload: { name: 'X' } }));
     expect(res.status).toBe(204);
     expect(ops[0].table).toBe(schema.favorites);
-    expect(ops[0].conf?.target).toBe(schema.favorites.id);
+    expect(ops[0].conf?.target).toEqual([schema.favorites.username, schema.favorites.id]);
     expect(ops[0].row).toEqual({ id: 'f1', username: 'alice', payload: { name: 'X' } });
-    expect(Object.keys(ops[0].conf!.set)).toEqual(['payload']);
+    expect(Object.keys(ops[0].conf!.set).sort()).toEqual(['payload', 'updatedAt']);
   });
 
   it('uses the whole body as payload when no payload field is present (client contract)', async () => {
@@ -320,9 +324,9 @@ describe('saved-locations PUT', () => {
     );
     expect(res.status).toBe(204);
     expect(ops[0].table).toBe(schema.savedLocations);
-    expect(ops[0].conf?.target).toBe(schema.savedLocations.id);
+    expect(ops[0].conf?.target).toEqual([schema.savedLocations.username, schema.savedLocations.id]);
     expect(ops[0].row).toEqual({ id: 's1', username: 'alice', label: 'Work', value: '60.1,24.9' });
-    expect(Object.keys(ops[0].conf!.set).sort()).toEqual(['label', 'value']);
+    expect(Object.keys(ops[0].conf!.set).sort()).toEqual(['label', 'updatedAt', 'value']);
   });
 
   it('rejects missing label with 400', async () => {
@@ -364,7 +368,7 @@ describe('history PUT', () => {
     );
     expect(res.status).toBe(204);
     expect(ops[0].table).toBe(schema.history);
-    expect(ops[0].conf?.target).toBe(schema.history.id);
+    expect(ops[0].conf?.target).toEqual([schema.history.username, schema.history.id]);
     expect(ops[0].row).toMatchObject({
       id: 'h1',
       username: 'alice',
@@ -380,6 +384,7 @@ describe('history PUT', () => {
     expect(setKeys).not.toContain('id');
     expect(setKeys).not.toContain('username');
     expect(setKeys).toContain('tripMode');
+    expect(setKeys).toContain('updatedAt');
   });
 
   it('rejects missing destLat with 400', async () => {
