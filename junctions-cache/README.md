@@ -25,7 +25,7 @@ pnpm typecheck   # tsc over src + tests via tsconfig.test.json
 
 - **Per-IP rate limits** (token bucket, keyed on `X-Forwarded-For` then socket): `/junctions` 60/min, `/logs` 30/min, `/health` 120/min. These are defense-in-depth behind the nginx edge `limit_req` and also cover direct tailnet access that bypasses nginx.
 - **Global Overpass concurrency cap** (`overpass-limit.ts`): at most 2 outbound Overpass fetches run at once (with a bounded wait queue; overflow → 502). In-flight dedup only collapses identical bboxes, so this is what stops a burst of *distinct* misses from fanning out into many parallel Overpass queries and getting the shared public instance banned.
-- **`LOGS_TOKEN`** (optional env var): when set, `/logs` requires `Authorization: Bearer <LOGS_TOKEN>` (constant-time check). Unset ⇒ `/logs` stays open (default), since it's used for remote debugging and discloses only bbox lookups + cache stats.
+- **`LOGS_TOKEN`** (env var): `/logs` is **closed by default** — it echoes anchored-lookup events that include the walker's `start` at ~110 m precision (≈ home) and roaming radius, and is publicly reachable via the VPS proxy at `/api/junctions/logs`. Set `LOGS_TOKEN` to reopen it behind an `Authorization: Bearer <LOGS_TOKEN>` (constant-time check); unset ⇒ `401`. journald (see [Logs](#logs)) is the primary, already-authenticated log path, so leaving it closed loses nothing operationally.
 
 ## Endpoint
 

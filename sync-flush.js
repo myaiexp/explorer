@@ -103,26 +103,35 @@
 
             apiFetch(method, path, body).then(function (res) {
                 _flushing = false;
-                _backoffMs = 0;
 
+                // Reset the ladder only on outcomes that aren't a server fault:
+                // success (2xx), server-directed throttling (429), and 4xx drops.
+                // The 5xx/unexpected branch must NOT reset — it reads the
+                // accumulated value so the ladder actually escalates. Resetting
+                // here (the old bug) made every 5xx call nextBackoff(0) → a
+                // constant ~1s retry that hammered a down server forever.
                 if (res.status >= 200 && res.status < 300) {
+                    _backoffMs = 0;
                     consumeOutboxHead();
                     return;
                 }
 
                 if (res.status === 429) {
+                    _backoffMs = 0;
                     var retryAfter = parseInt(res.headers.get('Retry-After') || '5', 10);
                     scheduleFlush(retryAfter * 1000);
                     return;
                 }
 
                 if (res.status >= 400 && res.status < 500) {
+                    _backoffMs = 0;
                     console.warn('[ExplorerSync] Dropping outbox entry due to ' + res.status, entry);
                     consumeOutboxHead();
                     return;
                 }
 
-                // 5xx or unexpected — exponential backoff
+                // 5xx or unexpected — escalate the exponential backoff ladder
+                // (1s→2s→…→60s) off the accumulated value.
                 _backoffMs = nextBackoff(_backoffMs);
                 scheduleFlush(_backoffMs);
 

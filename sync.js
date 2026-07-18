@@ -92,17 +92,22 @@
         return fetchWithTimeout(API_BASE + path, opts);
     }
 
-    // Download an account's four sections and apply each via applyRow
+    // Download an account's four sections and apply each via applySection
     // (mergeSection on the user's own device, populateSection on a fresh load).
+    // beforeApply, if given, runs once the download has succeeded and BEFORE any
+    // section is written — the account-switch path uses it to wipe local data,
+    // deferred to here so a failed fetch can't destroy the user's walks before
+    // the replacement has actually arrived.
     // onSuccess runs after a successful download (bind + persist consent); onFail
     // runs on a non-ok response or a network error (roll back partial auth state).
-    // Shared by init's three load paths — they differ only in applyRow and hooks.
-    function loadAccount(username, applyRow, onSuccess, onFail) {
+    // Shared by init's three load paths — they differ only in the appliers/hooks.
+    function loadAccount(username, applySection, onSuccess, onFail, beforeApply) {
         return apiFetch('GET', '/' + username).then(function (res) {
             if (!res.ok) { if (onFail) { onFail(); } return; }
             return res.json().then(function (data) {
+                if (beforeApply) { beforeApply(); }
                 Sections.DATA_SECTIONS.forEach(function (s) {
-                    if (Array.isArray(data[s])) { applyRow(s, data[s]); }
+                    if (Array.isArray(data[s])) { applySection(s, data[s]); }
                 });
                 if (onSuccess) { onSuccess(); }
             });
@@ -222,10 +227,14 @@
                 return Promise.resolve();
             }
 
-            // Confirmed — wipe and load
+            // Confirmed — download first, wipe-and-populate only once the account
+            // data has actually landed. Wiping up front meant a failed GET (network
+            // error or non-ok) erased the user's walks/favourites/history with
+            // nothing loaded in exchange — one transient failure = permanent data
+            // loss. Passing wipeSections as beforeApply defers the wipe into
+            // loadAccount's success path, so a failure leaves the device untouched.
             _token = urlToken;
-            Sections.wipeSections();
-            return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken);
+            return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken, Sections.wipeSections);
         },
 
         getState: function () {

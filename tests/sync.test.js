@@ -557,6 +557,50 @@ describe('#1566 mergeSection last-write-wins', () => {
     });
 });
 
+// ── account-switch data-loss guard (audit) ────────────────────────────────────
+// Case 4/5 confirms, then downloads the new account and wipes+populates local
+// storage. The wipe is deferred into loadAccount's success path, so a GET that
+// fails AFTER the user confirmed (network error or non-ok) must leave the
+// device's existing walks/favourites/history exactly as they were — a single
+// transient failure must never be permanent data loss. Sibling of the
+// success-path wipe test above; this pins the failure path.
+
+describe('account switch: a failed download after confirm preserves local data', () => {
+    function setupSwitch(fetchConfig) {
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+            walk_history: JSON.stringify([{ id: 'local-h' }]),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        mockFetch({ '/explorer/api/mossy-fern-7': fetchConfig });
+        loadSync();
+    }
+
+    function expectLocalDataSurvived() {
+        // The wipe never ran — both local sections are byte-for-byte intact.
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
+        expect(JSON.parse(localStorage.getItem('walk_history'))).toEqual([{ id: 'local-h' }]);
+        // rollbackToken nulled the tentatively-set token; no foreign account bound.
+        const state = window.ExplorerSync.getState();
+        expect(state.token).toBeNull();
+        expect(state.username).toBeNull();
+    }
+
+    test('non-ok response (500) after confirm: local sections survive, token rolled back', async () => {
+        setupSwitch({ status: 500 });
+        await window.ExplorerSync.init();
+        expectLocalDataSurvived();
+    });
+
+    test('network error after confirm: local sections survive, token rolled back', async () => {
+        setupSwitch('OFFLINE');
+        await window.ExplorerSync.init();
+        expectLocalDataSurvived();
+    });
+});
+
 // ── restored backup invisible until reload (audit) ────────────────────────────
 // init Case 2's own-device merge rewrites localStorage but historically fired no
 // explorer-sync-state-change event, so app.js never re-rendered the merged rows —
@@ -657,6 +701,52 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
 
         expect(callCount).toBe(2);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
+    });
+
+    test('consecutive 5xx escalate the backoff ladder (1000ms → 2000ms), not a constant 1s', async () => {
+        vi.useFakeTimers();
+        await setupAccepted('rugged-pine-42');
+
+        // Server is persistently down — every attempt 500s.
+        let callCount = 0;
+        global.fetch = vi.fn(() => {
+            callCount++;
+            return Promise.resolve({
+                ok: false, status: 500,
+                headers: new Headers(),
+                json: () => Promise.resolve({}),
+            });
+        });
+
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        // First attempt fires on the microtask-scheduled flush.
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(callCount).toBe(1);
+
+        // BACKOFF_STEPS[0] = 1000ms — the second attempt waits exactly that long.
+        await vi.advanceTimersByTimeAsync(999);
+        expect(callCount).toBe(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(callCount).toBe(2);
+
+        // The second 5xx must ESCALATE to BACKOFF_STEPS[1] = 2000ms. Under the
+        // reset bug (_backoffMs zeroed at the top of .then) the ladder stayed at
+        // 1000ms, so a third attempt would fire here at +1000ms — assert it does
+        // NOT, and only fires at +2000ms.
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(callCount).toBe(2);   // RED under the bug: would already be 3
+        await vi.advanceTimersByTimeAsync(999);
+        expect(callCount).toBe(2);
+        await vi.advanceTimersByTimeAsync(1);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(callCount).toBe(3);
     });
 
     test('two queued entries drain in order via post-flush reschedule', async () => {

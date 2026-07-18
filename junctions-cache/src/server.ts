@@ -22,12 +22,16 @@ const junctionsRateLimit = ipRateLimit(60);
 const logsRateLimit = ipRateLimit(30);
 const healthRateLimit = ipRateLimit(120);
 
-// /logs serves recent request events back to a remote caller (debugging). It is
-// open by default to keep that workflow frictionless; setting LOGS_TOKEN gates it
-// behind a constant-time bearer-token check (audit: unauthenticated log dump).
+// /logs serves recent request events back to a remote caller (debugging). Those
+// events include the walker's anchored `start` at ~110 m precision (≈ home) and
+// roaming radius, and the endpoint is publicly reachable via the VPS proxy at
+// /api/junctions/logs — so it is CLOSED by default (audit: unauthenticated log
+// dump leaking home coords). Set LOGS_TOKEN to reopen it behind a constant-time
+// bearer-token check; unset ⇒ refuse. journald (`ssh shelly journalctl -u
+// wander-junctions`) remains the primary, already-authenticated log path.
 function logsTokenOk(c: Context): boolean {
     const expected = process.env.LOGS_TOKEN;
-    if (!expected) return true;
+    if (!expected) return false;
     const got = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
     const a = Buffer.from(got);
     const b = Buffer.from(expected);

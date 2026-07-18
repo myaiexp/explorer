@@ -336,17 +336,22 @@ describe('GET /junctions — partial start params → 400', () => {
     });
 });
 
-// ── GET /logs ─────────────────────────────────────────────────────────────────
+// ── GET /logs — n-param parsing (authorized) ──────────────────────────────────
 // server.ts parses `n` and applies a NaN fallback (→ 100) before handing it to
 // getRecentLogs; the clamp to [1,500] lives in log.ts (out of scope here, mocked).
+// /logs is CLOSED by default (see the auth-gate block below), so these parse-path
+// tests must present the LOGS_TOKEN bearer to reach getRecentLogs at all.
 // SUT vs finding: there is NO log file — getRecentLogs reads an in-memory ring
 // buffer, so "absent log file" maps to "empty ring ⇒ []" (last test below).
 
-describe('GET /logs', () => {
+describe('GET /logs — n parsing', () => {
+    const AUTH = { Authorization: 'Bearer sekret' };
+    beforeEach(() => { process.env.LOGS_TOKEN = 'sekret'; });
+
     test('valid n is parsed and passed through to getRecentLogs', async () => {
         const { fetch, getRecentLogs } = await loadServer();
         getRecentLogs.mockReturnValue([{ ts: 't', level: 'INFO', fields: {} }]);
-        const { status, body } = await get(fetch, '/logs?n=5');
+        const { status, body } = await getWith(fetch, '/logs?n=5', AUTH);
         expect(status).toBe(200);
         expect(getRecentLogs).toHaveBeenCalledWith(5);
         expect(body).toEqual({ logs: [{ ts: 't', level: 'INFO', fields: {} }] });
@@ -355,7 +360,7 @@ describe('GET /logs', () => {
     test('non-numeric n falls back to the default of 100', async () => {
         const { fetch, getRecentLogs } = await loadServer();
         getRecentLogs.mockReturnValue([]);
-        const { status } = await get(fetch, '/logs?n=abc');
+        const { status } = await getWith(fetch, '/logs?n=abc', AUTH);
         expect(status).toBe(200);
         expect(getRecentLogs).toHaveBeenCalledWith(100);
     });
@@ -363,25 +368,36 @@ describe('GET /logs', () => {
     test('absent n defaults to 100', async () => {
         const { fetch, getRecentLogs } = await loadServer();
         getRecentLogs.mockReturnValue([]);
-        await get(fetch, '/logs');
+        await getWith(fetch, '/logs', AUTH);
         expect(getRecentLogs).toHaveBeenCalledWith(100);
     });
 
     test('empty ring (no logs yet — there is no log file) → { logs: [] }', async () => {
         const { fetch, getRecentLogs } = await loadServer();
         getRecentLogs.mockReturnValue([]);
-        const { status, body } = await get(fetch, '/logs?n=10');
+        const { status, body } = await getWith(fetch, '/logs?n=10', AUTH);
         expect(status).toBe(200);
         expect(body).toEqual({ logs: [] });
     });
 });
 
-// ── GET /logs — optional LOGS_TOKEN bearer gate ────────────────────────────────
-// Unset LOGS_TOKEN ⇒ /logs is open (default, covered above). When LOGS_TOKEN is
-// set, /logs requires Authorization: Bearer <LOGS_TOKEN> (constant-time check) and
-// 401s on a missing/wrong token without ever touching getRecentLogs.
+// ── GET /logs — LOGS_TOKEN bearer gate (closed by default) ─────────────────────
+// /logs echoes anchored-lookup events that include the walker's `start` (~110 m,
+// ≈ home) + radius and is publicly reachable via the VPS proxy, so it is CLOSED
+// by default: unset LOGS_TOKEN ⇒ 401 without touching getRecentLogs. Setting
+// LOGS_TOKEN reopens it behind Authorization: Bearer <LOGS_TOKEN> (constant-time),
+// which still 401s on a missing/wrong token, never reading logs.
 
 describe('GET /logs — LOGS_TOKEN auth gate', () => {
+    test('unset LOGS_TOKEN → 401 by default (closed), no log read', async () => {
+        // afterEach deletes LOGS_TOKEN, so it is unset here — the secure default.
+        const { fetch, getRecentLogs } = await loadServer();
+        const { status, body } = await get(fetch, '/logs');
+        expect(status).toBe(401);
+        expect(body).toEqual({ error: 'unauthorized' });
+        expect(getRecentLogs).not.toHaveBeenCalled();
+    });
+
     test('with LOGS_TOKEN set, a missing token → 401 and no log read', async () => {
         process.env.LOGS_TOKEN = 'sekret';
         const { fetch, getRecentLogs } = await loadServer();
