@@ -95,6 +95,14 @@ export async function fetchJunctionsFromOverpass(bbox: Bbox, exclude: ExcludePre
         } catch (e) {
             lastErr = e as Error;
             log('WARN', { event: 'overpass_attempt_failed', attempt, err: lastErr.message });
+            // Non-transient client errors (4xx except 429, which continues above)
+            // won't change on retry — rethrow immediately so we don't burn two more
+            // status-endpoint fetches + back-off sleeps (idea #1601).
+            const m = lastErr.message.match(/^overpass http (\d+)$/);
+            if (m) {
+                const code = parseInt(m[1]!, 10);
+                if (code >= 400 && code < 500) throw lastErr;
+            }
         }
     }
     // A caught exception (e.g. http 400, network/timeout) already carries a clear

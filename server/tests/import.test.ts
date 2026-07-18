@@ -116,6 +116,35 @@ describe('POST /api/:username/import', () => {
     expect(rows[0].id).toBe('existing');
   });
 
+  // idea #2485 — two rows sharing an id in one section violate the composite
+  // (username, id) PK. Must 400 with a clear message before the tx, not 500.
+  test('returns 400 when a section has two rows with the same id', async () => {
+    const { username: u, token } = await createTestAccount();
+    await insertTestVisit(u, 'existing');
+
+    const payload = {
+      visits: [makeVisit('dup-1'), makeVisit('dup-1')],
+      favorites: [],
+      savedLocations: [],
+      history: [],
+    };
+
+    const res = await app.request(`/api/${u}/import`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toMatch(/duplicate/i);
+    expect(body.error).toMatch(/dup-1/);
+
+    // Pre-check failure — no write, original visit intact
+    const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('existing');
+  });
+
   test('accepts empty body (all sections default to empty)', async () => {
     const { username: u, token } = await createTestAccount();
     await insertTestVisit(u, 'old');

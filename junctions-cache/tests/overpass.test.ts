@@ -230,15 +230,34 @@ describe('fetchJunctionsFromOverpass — request + retry/timeout', () => {
         expect(msg).not.toBe('overpass exhausted'); // no longer swallowed
     });
 
-    // SUT vs finding #1563: a non-retry status does NOT throw immediately. The
-    // `throw new Error('overpass http 400')` is inside the try, so it is caught and
-    // the loop retries all 3 attempts before surfacing the last error.
-    test('a 400 is caught, retried 3× and finally throws "overpass http 400"', async () => {
+    // Idea #1601 / audit sibling: non-transient 4xx (malformed query, etc.) must
+    // not burn the retry budget — rethrow on the first response so we skip the
+    // status-endpoint probes + back-off sleeps that only help 429/504/5xx.
+    test('a 400 fails immediately without retrying (one interpreter call)', async () => {
         const fetchMock = installFetch({ interpreter: [errStatus(400)], statusBody: '' });
         const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
         await vi.runAllTimersAsync();
         const err = await errP;
         expect((err as Error).message).toBe('overpass http 400');
+        expect(urlCalls(fetchMock)).toBe(1);
+    });
+
+    test('a 403 fails immediately without retrying', async () => {
+        const fetchMock = installFetch({ interpreter: [errStatus(403)], statusBody: '' });
+        const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
+        await vi.runAllTimersAsync();
+        const err = await errP;
+        expect((err as Error).message).toBe('overpass http 403');
+        expect(urlCalls(fetchMock)).toBe(1);
+    });
+
+    // 5xx other than 504 still get the retry budget (transient upstream).
+    test('a 500 is retried up to the attempt cap', async () => {
+        const fetchMock = installFetch({ interpreter: [errStatus(500)], statusBody: '' });
+        const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
+        await vi.runAllTimersAsync();
+        const err = await errP;
+        expect((err as Error).message).toBe('overpass http 500');
         expect(urlCalls(fetchMock)).toBe(3);
     });
 });
