@@ -175,10 +175,19 @@
             scheduleFlush(0);
         }
 
+        // Nudge the pump once — used on page load to drain a queue that survived a
+        // restart (a mutation persisted to the outbox but not flushed before the
+        // tab closed). Fresh worker instance, so there's no backoff state to reset
+        // (unlike onOnline); doFlush's own guards no-op when not accepted or empty.
+        function kick() {
+            scheduleFlush(0);
+        }
+
         return {
             enqueue: enqueue,
             flush: flush,
             onOnline: onOnline,
+            kick: kick,
             peek: parseOutbox,
             length: function () { return parseOutbox().length; },
             clear: clearOutbox

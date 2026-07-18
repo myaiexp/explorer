@@ -132,7 +132,9 @@
 
     var ExplorerSync = {
 
-        init: function () {
+        // The consent/URL state machine. Wrapped by init() below, which kicks the
+        // flush pump once this settles so a queue that survived a restart drains.
+        _runInit: function () {
             var consent = readConsentRecord();
             var urlUser = parseUrlUsername();
             var urlToken = parseUrlToken();
@@ -235,6 +237,20 @@
             // loadAccount's success path, so a failure leaves the device untouched.
             _token = urlToken;
             return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken, Sections.wipeSections);
+        },
+
+        init: function () {
+            // Kick the flush pump once the state machine settles: a mutation
+            // persisted to the durable outbox but not drained before the tab
+            // closed is otherwise only pumped by a fresh enqueue() or the 'online'
+            // event — neither fires on a normal reload while already online. So a
+            // queue that survived the restart would strand until the next mutation.
+            // doFlush's own guards no-op the kick unless accepted with a pending
+            // queue (see sync-flush.js).
+            return ExplorerSync._runInit().then(function (result) {
+                if (_state === 'accepted') { flushWorker.kick(); }
+                return result;
+            });
         },
 
         getState: function () {

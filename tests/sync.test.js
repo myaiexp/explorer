@@ -264,6 +264,58 @@ describe('ExplorerSync.init', () => {
     });
 });
 
+// ── outbox resume on startup (audit) ──────────────────────────────────────────
+// A mutation persisted to the durable outbox but not drained before the tab
+// closed (queued offline, app closed; or a request mid-backoff) is otherwise only
+// pumped by a fresh enqueue() or the window 'online' event — neither fires on a
+// normal reload while already online. So init() must kick the pump once it
+// settles on an accepted account, draining a queue that survived the restart
+// without waiting for the user to mutate again. Before the fix nothing did this,
+// so the last session's queued walks silently never reached the cloud backup.
+
+describe('outbox resume on startup (audit)', () => {
+    test('init drains a persisted outbox for an accepted account with no further mutate', async () => {
+        // Case 1: accepted flag, no URL segment (reopen at the base URL). The
+        // stranded entry was written last session and must PUT on this load.
+        setLocation('/explorer/');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_sync_outbox: JSON.stringify([
+                { section: 'visits', op: 'put', id: 'uuid-stranded', data: { id: 'uuid-stranded' } },
+            ]),
+        });
+        mockFetch({
+            'PUT /explorer/api/rugged-pine-42/visits/uuid-stranded': { status: 204 },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        await flushPromises();
+        const putCall = global.fetch.mock.calls.find(
+            c => (c[1] && c[1].method) === 'PUT' && c[0] === '/explorer/api/rugged-pine-42/visits/uuid-stranded'
+        );
+        expect(putCall).toBeTruthy();
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
+    });
+
+    test('init does NOT flush a stray outbox when not accepted (anonymous)', async () => {
+        // getUsername() gates the pump on accepted state, so a leftover queue on an
+        // anonymous device must never upload — the kick no-ops via doFlush's guard.
+        setLocation('/explorer/');
+        setLocalStorage({
+            walk_sync_outbox: JSON.stringify([
+                { section: 'visits', op: 'put', id: 'uuid-x', data: { id: 'uuid-x' } },
+            ]),
+        });
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await window.ExplorerSync.init();
+        await flushPromises();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
+    });
+});
+
 // ── ExplorerSync.mutate ───────────────────────────────────────────────────────
 
 describe('ExplorerSync.mutate', () => {
