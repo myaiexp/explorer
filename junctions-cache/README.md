@@ -69,4 +69,4 @@ Format: ISO timestamp + level + key=value pairs.
 
 ## Deploy
 
-Lives at `/srv/wander-junctions/junctions-cache` on shelly. Pushed via the `shelly` git remote — the bare repo's `post-receive` hook checks out, runs `pnpm install --frozen-lockfile && pnpm build`, and restarts `wander-junctions.service`. VPS nginx proxies `https://mase.fi/api/junctions/` → `100.69.160.113:5001`.
+Lives at `/home/shelly/Projects/explorer/junctions-cache` on shelly (`WorkingDirectory` of `wander-junctions.service`; bare repo `ssh://shelly/home/shelly/explorer.git`). Pushed via the `shelly` git remote — the post-receive hook checks out, runs `pnpm install --frozen-lockfile && pnpm build` when `junctions-cache/` changed, and restarts the unit. Persistent cache: `CACHE_PATH=/home/shelly/.local/state/wander-junctions/cache.json`. VPS nginx proxies `https://mase.fi/api/junctions/` → `100.69.160.113:5001`.
