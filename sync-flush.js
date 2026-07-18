@@ -13,17 +13,19 @@
     var OUTBOX_KEY = 'walk_sync_outbox';
     var BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 60000];
 
+    // The outbox rides on storage.js's readStoredArray/writeStoredArray so the
+    // parse-or-default + quota-aware write contract lives in exactly one place
+    // (the pattern sync-sections.js already uses for the walk_* keys). Resolved
+    // off globalThis at call time because storage.js loads AFTER this script —
+    // both are defined well before any outbox op runs. writeStoredArray's quota
+    // handler frees space by trimming old visit geometry, so a full localStorage
+    // no longer silently drops queued mutations here either.
     function parseOutbox() {
-        try {
-            var raw = localStorage.getItem(OUTBOX_KEY);
-            return raw ? JSON.parse(raw) : [];
-        } catch (e) {
-            return [];
-        }
+        return globalThis.readStoredArray(OUTBOX_KEY);
     }
 
     function saveOutbox(entries) {
-        localStorage.setItem(OUTBOX_KEY, JSON.stringify(entries));
+        globalThis.writeStoredArray(OUTBOX_KEY, entries);
     }
 
     function clearOutbox() {

@@ -72,12 +72,17 @@ function mergeRouteCoords(out, ret) {
     return dup ? a.concat(b.slice(1)) : a.concat(b);
 }
 
-function triggerDownload(data, name, ext, mime) {
+// Trigger a browser download of `data`. By default the file is named by
+// sanitizing `name` into `<slug>.<ext>`; pass an explicit `filename` when the
+// caller already has the exact name (e.g. the date-stamped visits backup, whose
+// hyphens/dots the sanitizer would mangle).
+function triggerDownload(data, name, ext, mime, filename) {
     const blob = new Blob([data], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.${ext}`;
+    a.download = filename ||
+        `${name.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase() || 'route'}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
 }

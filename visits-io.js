@@ -2,20 +2,15 @@
 
 // getVisits/VISITS_KEY/writeStoredArray live in storage.js; ExplorerSync in
 // sync.js; maybeRequestConsent in sync-helpers.js; showError/showSuccess in
-// toast.js; updateVisitedCounter/renderVisitedLayer in app.js — all resolved as
-// globals at call time.
+// toast.js; triggerDownload in export.js; updateVisitedCounter/renderVisitedLayer
+// in app.js — all resolved as globals at call time.
 
 function exportVisits() {
     const visits = getVisits();
     if (visits.length === 0) { showError('No visits to export yet.'); return; }
     const date = new Date().toISOString().split('T')[0];
-    const blob = new Blob([JSON.stringify(visits, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `walks-${date}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // Explicit filename — a date-stamped name the download sanitizer would mangle.
+    triggerDownload(JSON.stringify(visits, null, 2), '', '', 'application/json', `walks-${date}.json`);
 }
 
 function importVisits(event) {
