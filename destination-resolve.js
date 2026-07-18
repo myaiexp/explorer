@@ -1,0 +1,217 @@
+// Destination-resolution pipeline — resolve a candidate pool, screen it for
+// water-reachability, and build the best route for it. Pure orchestration of
+// pieces that live in sibling modules (overpass fetchers, screening, novelty
+// ranking, junction/route builders); reads NO DOM — mode flags (winterMode,
+// smartRouting) are passed in, matching route-dispatch.js. The four lat/lng
+// leaders stay positional; the rest is a named-options object. Every cross-file
+// dependency (rankByNovelty, generateRandomPointAnnulus, capPool,
+// screenCandidates, screeningTableFn, fetchRoadsInRadius, fetchPOIsInRadius,
+// buildJunctionLoop, buildRouteForMode, OVERLAP_BAD_THRESHOLD, POI_TYPES) is
+// resolved from globalThis at call time. Loaded after route-dispatch.js +
+// osrm.js + overpass.js, before app.js; app.js's generateDestination wires it.
+
+// Orchestration-layer routing policy — the size of the random-annulus candidate
+// pool and the smart-routing retry budget for findBestLoop. (Don't confuse
+// RANDOM_POOL_SIZE with screening.js's SCREENING_POOL_CAP: this seeds the pool,
+// that caps the OSRM fan-out over it.)
+const RANDOM_POOL_SIZE = 15;
+// 3 candidates: deepest novel candidate is usually the best-shape POI in the
+// area; if none of the top 3 work, the area is structurally bad.
+const MAX_RETRY_ATTEMPTS = 3;
+
+// Single-pick novelty selection: delegate to rankByNovelty (novelty.js), which
+// owns the min-distance scoring + most-novel-half selection. rankByNovelty
+// shuffles the top half internally, so [0] is a uniformly random pick from the
+// most-novel half (or from all candidates when there's no history). Returns
+// undefined on an empty pool.
+function pickMostNovelDestination(candidates, existingDests) {
+    return rankByNovelty(candidates, existingDests)[0];
+}
+
+// A pool of fully random points in the annulus — the fallback when Overpass
+// fails or returns nothing, and the pool for 'any' (random-point-anywhere).
+function randomCandidatePool(startLat, startLng, straightMin, straightMax) {
+    return Array.from({ length: RANDOM_POOL_SIZE }, () =>
+        generateRandomPointAnnulus(startLat, startLng, straightMin, straightMax));
+}
+
+// The random-annulus resolution shape: pool + initial novelty pick, no name.
+// Used both as the Overpass fallback and for the 'any' strategy.
+function randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests) {
+    const candidatePool = randomCandidatePool(startLat, startLng, straightMin, straightMax);
+    return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+}
+
+// Resolve the destination candidate pool for the chosen routing strategy.
+// POI/road strategies hit Overpass and fall back to a random annulus pool; 'any'
+// goes straight to a random pool. `rawLocationType` is the underlying <select>
+// value — only meaningful in the 'poi' branch, where it names the specific POI
+// key to look up. `winterMode` (roads branch) is passed in, not read from the
+// DOM. Two distinct fallbacks with accurate progress messages: a genuine fetch
+// failure (only the fetch call is in the try) vs. a successful-but-empty
+// response. Errors from capPool/pickMostNovelDestination are NOT caught here —
+// they surface to generateDestination's handler instead of being silently masked
+// as "Overpass unavailable". Returns the full pool plus an initial novelty pick:
+// { candidatePool, dest, destName }.
+async function resolveCandidatePool(startLat, startLng, {
+    routingStrategy, rawLocationType, straightMin, straightMax, existingDests, onProgress, winterMode = false,
+}) {
+    if (routingStrategy === 'roads') {
+        onProgress('Searching for roads in the area…');
+        let roads;
+        try {
+            roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
+        } catch {
+            onProgress('Overpass unavailable, using random point…');
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+        }
+        if (roads.length === 0) {
+            onProgress('No roads found nearby, using random point…');
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+        }
+        const candidatePool = capPool(roads);
+        return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
+    }
+    if (routingStrategy === 'any_poi' || routingStrategy === 'poi') {
+        const filters = routingStrategy === 'any_poi'
+            ? POI_TYPES.map(p => p.filter)
+            : [POI_TYPES.find(p => p.key === rawLocationType)?.filter].filter(Boolean);
+        const label = routingStrategy === 'any_poi'
+            ? 'any POI'
+            : POI_TYPES.find(p => p.key === rawLocationType)?.label || 'places';
+        onProgress(`Searching for ${label}…`);
+        let pois;
+        try {
+            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
+        } catch {
+            onProgress('Overpass unavailable, using random point…');
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+        }
+        if (pois.length === 0) {
+            onProgress('No matching places found nearby, using random point…');
+            return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+        }
+        const candidatePool = capPool(pois);
+        const dest = pickMostNovelDestination(candidatePool, existingDests);
+        return { candidatePool, dest, destName: dest.name };
+    }
+    // routingStrategy === 'any': a fully random point anywhere in the annulus.
+    return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+}
+
+// Screen the candidate pool for water-reachability before route building.
+// Survivors replace the pool and get a fresh novelty pick; if none survive, the
+// best-rejected candidate is used and waterLocked is flagged. On screening
+// failure (or no screened result) the unscreened pool/dest/destName pass through
+// unchanged. Returns { candidatePool, dest, destName, waterLocked }.
+async function screenCandidatePool(startLat, startLng, { candidatePool, dest, destName, existingDests, onProgress }) {
+    try {
+        onProgress('Checking reachability…');
+        const screened = await screenCandidates(
+            { lat: startLat, lng: startLng },
+            candidatePool,
+            { tableFn: screeningTableFn }
+        );
+        if (screened.survivors.length > 0) {
+            const pool = screened.survivors;
+            const pick = pickMostNovelDestination(pool, existingDests);
+            return { candidatePool: pool, dest: pick, destName: pick.name || destName, waterLocked: false };
+        }
+        if (screened.bestRejected) {
+            return {
+                candidatePool: [screened.bestRejected],
+                dest: screened.bestRejected,
+                destName: screened.bestRejected.name || destName,
+                waterLocked: true,
+            };
+        }
+    } catch (err) {
+        console.warn('Screening failed, falling back to unscreened pool:', err);
+    }
+    return { candidatePool, dest, destName, waterLocked: false };
+}
+
+// True when `candidate` should replace the current best loop: no incumbent yet,
+// or the candidate has a real (non-null) overlap that's lower. A measured
+// overlap always beats a null (unknown) overlap; two nulls never displace.
+function isBetterLoop(candidate, best) {
+    if (!best) return true;
+    if (candidate.overlap === null) return false;
+    return best.overlap === null || candidate.overlap < best.overlap;
+}
+
+// Smart-routing retry loop: rank the pool by novelty and build a junction loop
+// for each candidate (reusing the corridor junction pool across attempts),
+// keeping the lowest-overlap result. Stops early once a loop beats the overlap
+// threshold. Returns the best { dest, destName, outbound, return, overlap,
+// junctions } seen, or null if nothing was built.
+async function findBestLoop(startLat, startLng, { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress }) {
+    const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
+    const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
+
+    let cachedJunctions = null;
+    let bestSeen = null;
+
+    for (let i = 0; i < retryBudget; i++) {
+        const tryDest = ranked[i];
+        if (!tryDest) break;
+
+        onProgress(retryBudget > 1
+            ? `Building route… (attempt ${i + 1}/${retryBudget})`
+            : 'Building route…');
+        const result = await buildJunctionLoop(startLat, startLng, tryDest.lat, tryDest.lng,
+            { maxKm, onProgress, cachedJunctions, winterMode, spread });
+        if (cachedJunctions === null) cachedJunctions = result.junctions;
+
+        const candidate = {
+            dest: tryDest,
+            destName: tryDest.name || null,
+            outbound: result.outbound,
+            return: result.return,
+            overlap: result.overlap,
+            junctions: result.junctions,
+        };
+        if (isBetterLoop(candidate, bestSeen)) bestSeen = candidate;
+
+        if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
+    }
+    return bestSeen;
+}
+
+// Build the route for a resolved destination. Smart round-trips run the
+// novelty-retry loop (findBestLoop), which may substitute a different,
+// lower-overlap destination; one-way and plain loops dispatch straight through
+// buildRouteForMode. `smartRouting`/`winterMode` are passed in (read from the
+// DOM by the caller). Returns the (possibly updated) dest/destName plus the
+// built legs, junctions, and loop overlap (null when not a measured smart loop,
+// and outbound/return are undefined when a smart build produced nothing).
+async function buildRouteForDestination(startLat, startLng, {
+    candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, smartRouting, winterMode, onProgress,
+}) {
+    if (tripMode !== 'one-way' && smartRouting) {
+        const best = await findBestLoop(startLat, startLng,
+            { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress });
+        if (best) {
+            return { dest: best.dest, destName: best.destName, outbound: best.outbound,
+                return: best.return, junctions: best.junctions, overlap: best.overlap };
+        }
+        return { dest, destName, outbound: undefined, return: undefined, junctions: null, overlap: null };
+    }
+    const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
+        tripMode, smartRouting: false, winterMode: false, onProgress,
+        buildingMessage: 'Building route…', spread,
+    });
+    return { dest, destName, outbound: r.outbound, return: r.return, junctions: null, overlap: null };
+}
+
+// ─── globalThis exports ───────────────────────────────────────────────────────
+globalThis.RANDOM_POOL_SIZE = RANDOM_POOL_SIZE;
+globalThis.MAX_RETRY_ATTEMPTS = MAX_RETRY_ATTEMPTS;
+globalThis.pickMostNovelDestination = pickMostNovelDestination;
+globalThis.randomCandidatePool = randomCandidatePool;
+globalThis.randomPoolResult = randomPoolResult;
+globalThis.resolveCandidatePool = resolveCandidatePool;
+globalThis.screenCandidatePool = screenCandidatePool;
+globalThis.isBetterLoop = isBetterLoop;
+globalThis.findBestLoop = findBestLoop;
+globalThis.buildRouteForDestination = buildRouteForDestination;

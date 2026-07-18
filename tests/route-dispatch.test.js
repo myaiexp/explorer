@@ -81,8 +81,9 @@ describe('buildRouteForMode dispatch', () => {
             cachedJunctions: cached, buildingMessage: 'Building route…', spread,
         });
         expect(buildJunctionLoop).toHaveBeenCalledTimes(1);
-        // signature: (startLat, startLng, destLat, destLng, maxKm, onProgress, cachedJunctions, winterMode, spread)
-        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, 12, onProgress, cached, true, spread);
+        // signature: (startLat, startLng, destLat, destLng, { maxKm, onProgress, cachedJunctions, winterMode, spread })
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25,
+            { maxKm: 12, onProgress, cachedJunctions: cached, winterMode: true, spread });
         expect(buildOneWay).not.toHaveBeenCalled();
         expect(buildLoop).not.toHaveBeenCalled();
         expect(r).toEqual({
@@ -99,7 +100,8 @@ describe('buildRouteForMode dispatch', () => {
             tripMode: 'round', smartRouting: true, winterMode: false, onProgress: vi.fn(),
         });
         // maxKm + spread omitted from opts → forwarded as undefined
-        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, expect.any(Function), null, false, undefined);
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25,
+            { maxKm: undefined, onProgress: expect.any(Function), cachedJunctions: null, winterMode: false, spread: undefined });
     });
 
     // ── Branch: plain loop ───────────────────────────────────────────────────
