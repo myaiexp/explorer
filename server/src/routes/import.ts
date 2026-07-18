@@ -97,12 +97,22 @@ export function importRoutes(db: Db): Hono {
     ];
 
     // Validate every row up front — a single bad row 400s before any write.
+    // Also reject duplicate ids within a section: the composite PK (username, id)
+    // would abort the insert with an opaque 500 otherwise (idea #2485).
     const collected: Array<{ table: UserTable; rows: object[] }> = [];
     for (const { key, table, raw, validate } of sections) {
       const rows: object[] = [];
+      const seenIds = new Set<string>();
       for (const row of raw) {
         const validated = validate(row, username);
         if (!validated) return c.json({ error: `Invalid ${key} row` }, 400);
+        const id = (validated as { id?: unknown }).id;
+        if (typeof id === 'string') {
+          if (seenIds.has(id)) {
+            return c.json({ error: `Duplicate ${key} id: ${id}` }, 400);
+          }
+          seenIds.add(id);
+        }
         rows.push(validated);
       }
       collected.push({ table, rows });
