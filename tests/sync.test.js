@@ -199,11 +199,52 @@ describe('ExplorerSync.init', () => {
         await window.ExplorerSync.init();
         expect(confirmSpy).toHaveBeenCalled();
         expect(confirmSpy.mock.calls[0][0]).toContain('Switching to account mossy-fern-7 from rugged-pine-42');
-        // cancel: URL reset, no GET issued, local data preserved, state falls back
+        // cancel: URL reset, no GET issued, local data preserved
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/explorer/');
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        // …and the device stays bound to the account it already owned. Dropping to
+        // 'anonymous' here (audit #5426) desynced the session from localStorage,
+        // which still said accepted/rugged-pine-42.
+        expect(window.ExplorerSync.getState()).toMatchObject({
+            state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
+        });
+    });
+
+    // The user-visible consequence of that state drop: mutate() gates on
+    // _state === 'accepted', so a cancelled switch used to silently stop backing
+    // up the account the device still owns — for the rest of the session, with no
+    // UI signal. Pins the behaviour, not just the state fields.
+    test('Case 4/5 cancel: the still-bound account keeps queueing mutations', async () => {
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(false);
+        mockFetch({});
+        loadSync();
+        await window.ExplorerSync.init();
+        window.ExplorerSync.mutate('visits', 'upsert', 'v1', { id: 'v1' });
+        // Synchronous assertion: enqueue schedules the flush on a microtask, so
+        // the entry is still queued here regardless of what the pump does next.
+        expect(window.ExplorerSync.getState().outboxLength).toBe(1);
+    });
+
+    // Same rule for a device whose stored decision is 'declined': cancelling a
+    // link-sourced switch must leave it declined, not silently anonymous (which
+    // would let maybeRequestConsent re-prompt someone who already said no).
+    test('Case 4/5 cancel with a declined record stays declined', async () => {
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'declined' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(false);
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(window.ExplorerSync.getState()).toMatchObject({
+            state: 'declined', username: null, token: null,
+        });
     });
 });
 

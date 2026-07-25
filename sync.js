@@ -49,6 +49,27 @@
         localStorage.removeItem(BACKUP_KEY);
     }
 
+    // Derive the in-memory state from the stored consent record — the single
+    // answer to "what is this device bound to when we are NOT adopting a URL
+    // account?". Every such path routes through here: no URL segment, a bare link
+    // with no token, a cancelled adopt/switch, and a switch whose download failed.
+    // The rule used to be written out at each site (an if/else chain in one, a
+    // nested ternary in another), and the copies diverged: the account-switch
+    // paths only handled 'declined' and dropped an already-bound device to
+    // 'anonymous' while localStorage still said accepted — mutate() then no-oped
+    // for the rest of the session, so walks stopped syncing with no UI signal.
+    function restoreFromConsent(consent) {
+        if (consent && consent.state === 'accepted') {
+            _state = 'accepted';
+            _username = consent.username;
+            _token = consent.token || null;
+            return;
+        }
+        _state = (consent && consent.state === 'declined') ? 'declined' : 'anonymous';
+        _username = null;
+        _token = null;
+    }
+
     function parseUrlUsername() {
         // Matches /explorer/<username> anywhere in pathname
         var m = location.pathname.match(/\/explorer\/([^/?#]+)/);
@@ -99,17 +120,28 @@
         if (typeof globalThis.showError === 'function') { globalThis.showError(message); }
     }
 
-    // Download an account's four sections and apply each via applySection
+    // Download an account's four sections and apply each via hooks.applySection
     // (mergeSection on the user's own device, populateSection on a fresh load).
-    // beforeApply, if given, runs once the download has succeeded and BEFORE any
-    // section is written — the account-switch path uses it to wipe local data,
-    // deferred to here so a failed fetch can't destroy the user's walks before
-    // the replacement has actually arrived.
-    // onSuccess runs after a successful download (bind + persist consent); onFail
-    // runs on a non-ok response, a network error, or an apply that could not be
-    // completed after a destructive beforeApply (roll back partial auth state).
-    // Shared by init's three load paths — they differ only in the appliers/hooks.
-    function loadAccount(username, applySection, onSuccess, onFail, beforeApply) {
+    // Shared by init's three load paths — they differ only in the hooks, which
+    // are named rather than positional so a call site reads without a trip to
+    // this definition (and so beforeApply's ordering isn't implied by its slot).
+    //
+    // hooks:
+    //   applySection(section, rows) → false on a write that didn't land. Required.
+    //   beforeApply()  runs once the download has SUCCEEDED and before any section
+    //                  is written — the account-switch path wipes local data here,
+    //                  deferred so a failed fetch can't destroy the user's walks
+    //                  before the replacement has actually arrived.
+    //   onSuccess()    after a successful download (bind + persist consent).
+    //   onFail()       on a non-ok response, a network error, or an apply that
+    //                  could not be completed after a destructive beforeApply —
+    //                  roll back the tentatively-set auth state.
+    function loadAccount(username, hooks) {
+        var applySection = hooks.applySection;
+        var beforeApply = hooks.beforeApply;
+        var onSuccess = hooks.onSuccess;
+        var onFail = hooks.onFail;
+
         return apiFetch('GET', '/' + username).then(function (res) {
             if (!res.ok) { if (onFail) { onFail(); } return; }
             return res.json().then(function (data) {
@@ -201,19 +233,14 @@
                 _username = urlUser;
                 fireStateChange();
             }
-            function rollbackToken() { _token = null; }
+            // The adopt failed after _token was set tentatively: fall back to
+            // whatever this device was already bound to. Nulling only the token
+            // (the old behaviour) left an accepted device stranded at 'anonymous'.
+            function rollbackAdopt() { restoreFromConsent(consent); }
 
             // ── Case 1: no URL segment ──────────────────────────────────────────
             if (!urlUser) {
-                if (consent && consent.state === 'accepted') {
-                    _state = 'accepted';
-                    _username = consent.username;
-                    _token = consent.token || null;
-                } else if (consent && consent.state === 'declined') {
-                    _state = 'declined';
-                } else {
-                    _state = 'anonymous';
-                }
+                restoreFromConsent(consent);
                 return Promise.resolve();
             }
 
@@ -229,20 +256,17 @@
                 // failed GET is silently ignored — state is already 'accepted'.
                 // fireStateChange on success so the UI re-renders the merged rows
                 // (the adopt paths below already fire it via bindAdoptedAccount).
-                return loadAccount(urlUser, Sections.mergeSection, fireStateChange);
+                return loadAccount(urlUser, {
+                    applySection: Sections.mergeSection,
+                    onSuccess: fireStateChange
+                });
             }
 
             // Loading a NEW/different account from the URL requires the secret
             // token from the link fragment. A bare link on a fresh device has no
             // credential, so there is nothing to load — keep current local state.
             if (!urlToken) {
-                if (consent && consent.state === 'accepted') {
-                    _state = 'accepted';
-                    _username = consent.username;
-                    _token = consent.token || null;
-                } else {
-                    _state = consent && consent.state === 'declined' ? 'declined' : 'anonymous';
-                }
+                restoreFromConsent(consent);
                 return Promise.resolve();
             }
 
@@ -262,11 +286,15 @@
                 );
                 if (!adoptConfirmed) {
                     history.replaceState(null, '', '/explorer/');
-                    _state = 'anonymous';
+                    restoreFromConsent(consent);
                     return Promise.resolve();
                 }
                 _token = urlToken;
-                return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken);
+                return loadAccount(urlUser, {
+                    applySection: Sections.populateSection,
+                    onSuccess: bindAdoptedAccount,
+                    onFail: rollbackAdopt
+                });
             }
 
             // Case 4/5: URL segment + token with non-empty localStorage or different stored user
@@ -278,7 +306,7 @@
             var confirmed = window.confirm(msg + '\n\n[Continue / Cancel]');
             if (!confirmed) {
                 history.replaceState(null, '', '/explorer/');
-                _state = consent && consent.state === 'declined' ? 'declined' : 'anonymous';
+                restoreFromConsent(consent);
                 return Promise.resolve();
             }
 
@@ -289,7 +317,12 @@
             // loss. Passing wipeSections as beforeApply defers the wipe into
             // loadAccount's success path, so a failure leaves the device untouched.
             _token = urlToken;
-            return loadAccount(urlUser, Sections.populateSection, bindAdoptedAccount, rollbackToken, Sections.wipeSections);
+            return loadAccount(urlUser, {
+                applySection: Sections.populateSection,
+                beforeApply: Sections.wipeSections,
+                onSuccess: bindAdoptedAccount,
+                onFail: rollbackAdopt
+            });
         },
 
         init: function () {

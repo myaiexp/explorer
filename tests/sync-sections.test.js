@@ -118,10 +118,16 @@ describe('account switch: a failed download after confirm preserves local data',
         // The wipe never ran — both local sections are byte-for-byte intact.
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
         expect(JSON.parse(localStorage.getItem('walk_history'))).toEqual([{ id: 'local-h' }]);
-        // rollbackToken nulled the tentatively-set token; no foreign account bound.
-        const state = window.ExplorerSync.getState();
-        expect(state.token).toBeNull();
-        expect(state.username).toBeNull();
+        // The failed switch rolls back to the account this device was already
+        // bound to — the one the surviving local data belongs to. No foreign
+        // account is bound, and the stored consent record is untouched. (It used
+        // to only null the token, leaving the session 'anonymous' while
+        // localStorage still said accepted — the audit #5426 defect reached
+        // through the failure path instead of the cancel path.)
+        expect(window.ExplorerSync.getState()).toMatchObject({
+            state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
+        });
+        expect(JSON.parse(localStorage.getItem('walk_cloud_backup')).username).toBe('rugged-pine-42');
     }
 
     test('non-ok response (500) after confirm: local sections survive, token rolled back', async () => {
@@ -302,10 +308,11 @@ describe('quota-full sync-down', () => {
         // device would be left erased holding only part of the new account.
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
         expect(JSON.parse(localStorage.getItem('walk_history'))).toEqual([{ id: 'local-h' }]);
-        // The switch did not happen, so no foreign account is bound.
-        const state = window.ExplorerSync.getState();
-        expect(state.token).toBeNull();
-        expect(state.username).toBeNull();
+        // The switch did not happen: no foreign account is bound, and the device
+        // is rolled back onto the account its restored data belongs to.
+        expect(window.ExplorerSync.getState()).toMatchObject({
+            state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
+        });
         expect(globalThis.showError).toHaveBeenCalledWith(
             expect.stringContaining('your previous data was restored'),
         );
