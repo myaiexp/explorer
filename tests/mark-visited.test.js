@@ -4,8 +4,8 @@
  * syncMarkVisitedBtn plus the displayRoute call that keeps it honest.
  *
  * result-panel.js, session-state.js and route-view.js are non-module browser
- * scripts; we run them via new Function() (static local files, not user input)
- * so their free identifiers resolve to the stubs installed on globalThis.
+ * scripts; helpers/load.js evaluates them so their free identifiers resolve to
+ * the stubs installed on globalThis.
  *
  * These pin the audit fix: the button used to be set imperatively at each call
  * site, so opening a history entry after marking a route visited left the
@@ -15,9 +15,7 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import SESSION_STATE_SRC from '../session-state.js?raw';
-import RESULT_PANEL_SRC from '../result-panel.js?raw';
-import ROUTE_VIEW_SRC from '../route-view.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 const PANEL_HTML = `
   <button id="markVisitedBtn">Mark as visited</button>
@@ -38,15 +36,11 @@ const RESULT_HTML = `
   <select id="locationTypeSelect"><option value="park">park</option></select>
   <input id="spreadSlider" type="range" value="50">`;
 
-function loadScripts(...sources) {
-  // new Function with static local file content — not user-supplied input.
-  for (const src of sources) new Function(src).call(window); // eslint-disable-line no-new-func
-}
-
 beforeEach(() => {
   document.body.innerHTML = PANEL_HTML + RESULT_HTML;
   globalThis.updateFavoriteBtn = () => {};
-  loadScripts(SESSION_STATE_SRC, RESULT_PANEL_SRC);
+  // result-panel depends on session-state (SCRIPT_DEPS), same order as before.
+  loadScripts('result-panel');
 });
 
 describe('syncMarkVisitedBtn', () => {
@@ -107,7 +101,7 @@ describe('displayRoute derives the button from the session it displays', () => {
     globalThis.routeSessionFields = () => ({});
     globalThis.fetchElevations = () => Promise.resolve([]);
     globalThis.renderElevationChart = () => {};
-    loadScripts(ROUTE_VIEW_SRC);
+    loadScripts('route-view');
   });
 
   const displayed = (over = {}) => displayRoute({

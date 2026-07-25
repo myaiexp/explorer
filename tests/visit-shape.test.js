@@ -2,9 +2,8 @@
  * Tests for visit-shape.js — the untrusted-visit-row rules shared by the import
  * gate (visits-io.js) and the render guard (map-view.js).
  *
- * visit-shape.js is a non-module browser script that assigns onto globalThis; we
- * execute it via new Function() (a static local asset, not user input) exactly as
- * tests/history.test.js does.
+ * visit-shape.js is a non-module browser script that assigns onto globalThis;
+ * helpers/load.js evaluates it in the current realm.
  *
  * These pin the audit fix: importVisits used to accept any JSON array, persist it,
  * queue it for upload, and only then hand it to renderVisitedLayer — which
@@ -15,11 +14,10 @@
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import VISIT_SHAPE_SRC from '../visit-shape.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-  // new Function with static local file content — not user-supplied input.
-  new Function(VISIT_SHAPE_SRC).call(window); // eslint-disable-line no-new-func
+  loadScripts('visit-shape');
 });
 
 const NOW = '2026-07-25T10:00:00.000Z';

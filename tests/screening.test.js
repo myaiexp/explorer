@@ -4,24 +4,15 @@
  *
  * Loading: screening.js depends on the canonical globalThis.haversineM from
  * geo-utils.js (audit #1262 — it no longer relies on loop-quality.js's old
- * implicit global). Both are non-module browser scripts loaded into the
- * current realm via Node's vm module; explicit globalThis assignments expose
- * the helpers.
+ * implicit global) and on novelty.js's partialShuffle. Those edges live in
+ * helpers/load.js's SCRIPT_DEPS, so loading 'screening' pulls them in order.
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const GEO_SRC       = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
-const NOVELTY_SRC   = readFileSync(resolve(__dirname, '../novelty.js'), 'utf8');
-const SCREENING_SRC = readFileSync(resolve(__dirname, '../screening.js'), 'utf8');
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    new vm.Script(GEO_SRC).runInThisContext();      // exposes globalThis.haversineM
-    new vm.Script(NOVELTY_SRC).runInThisContext();  // exposes globalThis.partialShuffle (capPool dep)
-    new vm.Script(SCREENING_SRC).runInThisContext();
+    loadScripts('screening');
 });
 
 // ── detourRatio ────────────────────────────────────────────────────────────

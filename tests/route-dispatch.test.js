@@ -2,23 +2,20 @@
 /**
  * Tests for route-dispatch.js — buildRouteForMode.
  *
- * Loading: route-dispatch.js is a non-module browser script. We load its
- * source and run it in the current realm via Node's vm module; its explicit
- * globalThis assignment exposes buildRouteForMode. The three route builders
+ * Loading: route-dispatch.js is a non-module browser script, loaded via
+ * helpers/load.js's loadScripts('route-dispatch'); its explicit globalThis
+ * assignment exposes buildRouteForMode. The three route builders
  * (buildOneWay / buildJunctionLoop / buildLoop) are resolved from globalThis
  * at call time — exactly as in the browser, where app.js declares them as
- * window globals — so each test installs fakes on globalThis.
+ * window globals — so each test installs fakes on globalThis instead of
+ * pulling in real sources (no SCRIPT_DEPS entry for this module).
  */
 
 import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const SRC = readFileSync(resolve(__dirname, '../route-dispatch.js'), 'utf8');
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    new vm.Script(SRC).runInThisContext();
+    loadScripts('route-dispatch');
 });
 
 let buildOneWay, buildJunctionLoop, buildLoop;

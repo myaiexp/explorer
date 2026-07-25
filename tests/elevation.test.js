@@ -8,13 +8,14 @@
  * until the browser's own multi-minute socket default fires.
  */
 
-// Side-effect imports: both are plain browser scripts that register their
-// helpers on globalThis (net.js's fetchWithTimeout is what elevation.js resolves
-// at call time), mirroring index.html's order — net.js first.
-import '../net.js';
-import '../elevation.js';
-
 import { describe, test, expect, afterEach, vi } from 'vitest';
+import { loadScripts } from './helpers/load.js';
+
+// Both are plain browser scripts that register their helpers on globalThis
+// (net.js's fetchWithTimeout is what elevation.js resolves at call time);
+// helpers/load.js evaluates them once here, mirroring index.html's order — net.js
+// first.
+loadScripts('net', 'elevation');
 
 afterEach(() => {
     vi.restoreAllMocks();

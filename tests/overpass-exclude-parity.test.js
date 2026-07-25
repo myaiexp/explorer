@@ -14,22 +14,23 @@
  *
  * The frontend copy is read as its real runtime value (overpass.js only declares
  * functions + these consts at load — no DOM/network/calculateDistance until a
- * fetcher is called), so we run it via vm and read the globals. The .ts copy
- * can't be evaluated as-is, so its two literals are extracted from source text;
- * a missing literal throws loudly, signalling the format changed.
+ * fetcher is called), so we load it via helpers/load.js's loadScripts('overpass')
+ * and read the globals. The .ts copy can't be evaluated as-is (it's outside the
+ * loader's repo-root *.js glob anyway), so its two literals are extracted from
+ * source text with readFileSync; a missing literal throws loudly, signalling
+ * the format changed.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import vm from 'node:vm';
+import { loadScripts } from './helpers/load.js';
 
 const TS_PATH = resolve(__dirname, '../junctions-cache/src/overpass.ts');
 
 let frontend;
 
 beforeAll(() => {
-    const src = readFileSync(resolve(__dirname, '../overpass.js'), 'utf8');
-    new vm.Script(src).runInThisContext();
+    loadScripts('overpass');
     frontend = {
         default: globalThis.HIGHWAY_EXCLUDE_DEFAULT,
         winter: globalThis.HIGHWAY_EXCLUDE_WINTER,

@@ -2,7 +2,7 @@
 /**
  * Tests for loading.js — the one-build-at-a-time mutex.
  *
- * loading.js is a non-module browser script; we run it via new Function() so its
+ * loading.js is a non-module browser script; helpers/load.js evaluates it so its
  * free identifier (showWarning) resolves to the stub installed on globalThis,
  * mirroring what index.html wires at runtime.
  *
@@ -13,14 +13,9 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import LOADING_SRC from '../loading.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 let warnings;
-
-function loadLoading() {
-  // new Function with static local file content — not user-supplied input.
-  new Function(LOADING_SRC).call(window); // eslint-disable-line no-new-func
-}
 
 // A promise we resolve by hand, so a build can be held "in flight".
 function deferred() {
@@ -35,7 +30,7 @@ beforeEach(() => {
     '<div id="loading"><p>Finding your random destination…</p></div>' +
     '<button id="generateBtn"></button>';
   globalThis.showWarning = (msg) => warnings.push(msg);
-  loadLoading();
+  loadScripts('loading');
 });
 
 describe('withLoading mutex', () => {

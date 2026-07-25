@@ -1,9 +1,8 @@
 /**
  * Tests for toast.js — showToast + showError/showSuccess/showWarning (audit #1266).
  *
- * Loading: toast.js is a non-module browser script. We load its source and run
- * it in the current realm via Node's vm module; its explicit globalThis
- * assignments expose the helpers.
+ * Loading: toast.js is a non-module browser script; helpers/load.js evaluates it
+ * in the current realm and its explicit globalThis assignments expose the helpers.
  *
  * The #notification element is replaced with a recording fake (via a document.getElementById
  * stub) so we capture the EXACT raw style writes / classList toggles / textContent
@@ -16,13 +15,10 @@
  * only that variant's tests RED.
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
-import SRC from '../toast.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    // Execute toast.js in the jsdom global scope. new Function() bootstraps a
-    // non-module browser script (static local file, not user input); toast.js's
-    // explicit globalThis assignments expose showToast + the wrappers.
-    new Function(SRC).call(window); // eslint-disable-line no-new-func
+    loadScripts('toast');
 });
 
 // A fake #notification element that records every mutation in order.

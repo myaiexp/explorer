@@ -91,9 +91,9 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
         map.fitBounds(L.latLngBounds(allCoords).pad(0.15));
     }
 
-    const straightDistance = calculateDistance(startLat, startLng, destLat, destLng);
+    const straightKm = calculateDistance(startLat, startLng, destLat, destLng);
     const { totalWalkKm, totalDuration } =
-        computeRouteTotals(outbound, ret, straightDistance, tripMode);
+        computeRouteTotals(outbound, ret, straightKm, tripMode);
     updateDurationBadges(totalWalkKm, totalDuration, tripMode);
 
     document.getElementById('directionsLink').href =

@@ -2,23 +2,18 @@
 /**
  * Tests for loop-quality.js — loopOverlapFraction.
  *
- * Loading: loop-quality.js is a non-module browser script. We load its
- * source and run it in the current realm via Node's vm module; the
- * script's explicit globalThis assignments expose the helpers. It reads the
- * shared globalThis.haversineM (audit #1262), so geo-utils.js loads first.
+ * Loading: loop-quality.js is a non-module browser script. It reads the
+ * shared globalThis.haversineM (audit #1262), so geo-utils.js must load
+ * first — helpers/load.js's SCRIPT_DEPS encodes that edge, so loading
+ * 'loop-quality' pulls it in automatically, both evaluated in the current
+ * realm with their explicit globalThis assignments exposing the helpers.
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const GEO_SRC = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
-const SRC = readFileSync(resolve(__dirname, '../loop-quality.js'), 'utf8');
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    new vm.Script(GEO_SRC).runInThisContext();   // exposes globalThis.haversineM
-    new vm.Script(SRC).runInThisContext();
+    loadScripts('loop-quality');   // pulls in geo-utils first (globalThis.haversineM)
 });
 
 describe('loopOverlapFraction', () => {

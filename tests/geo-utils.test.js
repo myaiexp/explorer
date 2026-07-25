@@ -2,20 +2,16 @@
 /**
  * Tests for geo-utils.js — haversineKm + haversineM.
  *
- * Loading: geo-utils.js is a non-module browser script. We load its source
- * and run it in the current realm via Node's vm module; the script's
- * explicit globalThis assignment exposes the helper.
+ * Loading: geo-utils.js is a non-module browser script, loaded via
+ * helpers/load.js's loadScripts('geo-utils'); the script's explicit
+ * globalThis assignment exposes the helper.
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const SRC = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    new vm.Script(SRC).runInThisContext();
+    loadScripts('geo-utils');
 });
 
 describe('haversineKm', () => {

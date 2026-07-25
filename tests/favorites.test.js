@@ -2,28 +2,21 @@
  * Tests for favorites.js — the star-button add/remove/list CRUD paths, which
  * had zero coverage before this file (audit finding #5400, favorites half).
  *
- * Loading strategy mirrors history.test.js: favorites.js is a non-module
- * script that assigns globalThis.{toggleFavorite,updateFavoriteBtn,
- * deleteFavorite,renderFavoritesSection,sameFavoriteDest}. It resolves its
- * collaborators (getFavorites, syncedPut/syncedDelete, snapshotSession,
- * getCurrentSession, buildListItem, restoreResult, maybeRequestConsent) as
- * globals at call time, so we install stubs on globalThis before running the
- * source through new Function(). The source file is a static local asset,
- * not user input.
+ * favorites.js is a non-module script that assigns globalThis.{toggleFavorite,
+ * updateFavoriteBtn,deleteFavorite,renderFavoritesSection,sameFavoriteDest}. It
+ * resolves its collaborators (getFavorites, syncedPut/syncedDelete,
+ * snapshotSession, getCurrentSession, buildListItem, restoreResult,
+ * maybeRequestConsent) as globals at call time, so we install stubs on
+ * globalThis before loading it via helpers/load.js.
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import FAVORITES_SRC from '../favorites.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 const FAVORITES_KEY = 'walk_favorites';
 let putCalls;
 let deleteCalls;
 let currentSession;
-
-function loadFavorites() {
-  // new Function with static local file content — not user-supplied input.
-  new Function(FAVORITES_SRC).call(window); // eslint-disable-line no-new-func
-}
 
 function storedFavs() {
   return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
@@ -80,7 +73,7 @@ beforeEach(() => {
     deleteCalls.push({ section, id });
   };
 
-  loadFavorites();
+  loadScripts('favorites');
 });
 
 describe('toggleFavorite: add/remove round trip', () => {

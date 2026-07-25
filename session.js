@@ -4,17 +4,24 @@
 // from app.js so the field lists and one-way distance rules live in one place
 // (and are testable in isolation). Loaded before app.js; used there as globals.
 
+// UNITS — this file is the metres→kilometres boundary. An OSRM route object's
+// `distance` is METRES (osrm.js maps it straight off the OSRM response); every
+// session/persisted field below is KILOMETRES. Identifiers carry a Km/M suffix
+// wherever the name is ours to choose; the un-suffixed `distance` /
+// `routeDistance` / `returnRouteDistance` are fixed by the DB columns
+// (server/src/schema.ts) and stay as-is. route-restore.js converts back.
+
 // Per-leg + total walking distance/duration from an outbound/return route pair.
 // A missing leg falls back to the straight-line distance — EXCEPT a one-way
 // trip's (absent) return leg, which contributes 0 (there is no return). This is
 // the correct rule; displayRoute previously inlined a copy that omitted the
 // one-way guard and so double-counted one-way distances.
-function computeRouteTotals(outbound, ret, straightDist, tripMode) {
-    const outDist = outbound ? outbound.distance / 1000 : straightDist;
-    const retDist = ret ? ret.distance / 1000 : (tripMode === 'one-way' ? 0 : straightDist);
-    const totalWalkKm = outDist + retDist;
+function computeRouteTotals(outbound, ret, straightKm, tripMode) {
+    const outKm = outbound ? outbound.distance / 1000 : straightKm;
+    const retKm = ret ? ret.distance / 1000 : (tripMode === 'one-way' ? 0 : straightKm);
+    const totalWalkKm = outKm + retKm;
     const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
-    return { outDist, retDist, totalWalkKm, totalDuration };
+    return { outKm, retKm, totalWalkKm, totalDuration };
 }
 
 // The eight route fields on currentSession, mapped from an outbound/return

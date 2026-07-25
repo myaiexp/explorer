@@ -1,12 +1,12 @@
 /**
  * Tests for visited.js — markAsVisited's create/undo state machine and
  * updateVisitedCounter. visited.js is a non-module script that assigns
- * globalThis.markAsVisited/toggleVisitedLayer/updateVisitedCounter; we execute
- * it via new Function() so its free identifiers (getVisits, syncedPut,
- * syncedDelete, snapshotSession, getCurrentSession, syncMarkVisitedBtn,
- * renderVisitedLayer, maybeRequestConsent, …) resolve to the stubs installed on
- * globalThis below — the same collaborators index.html wires up at runtime. The
- * source file is a static local asset, not user input.
+ * globalThis.markAsVisited/toggleVisitedLayer/updateVisitedCounter; its free
+ * identifiers (getVisits, syncedPut, syncedDelete, snapshotSession,
+ * getCurrentSession, syncMarkVisitedBtn, renderVisitedLayer,
+ * maybeRequestConsent, …) resolve to the stubs installed on globalThis below —
+ * the same collaborators index.html wires up at runtime — once helpers/load.js
+ * has evaluated it.
  *
  * tests/mark-visited.test.js already pins the DERIVED half of this contract —
  * that the button label is read from session.visitId, never written directly.
@@ -15,7 +15,7 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import VISITED_SRC from '../visited.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 const VISITS_KEY = 'walk_visits';
 let putCalls;
@@ -23,11 +23,6 @@ let deleteCalls;
 let syncBtnCalls;
 let renderLayerCalls;
 let consentCalls;
-
-function loadVisited() {
-  // new Function with static local file content — not user-supplied input.
-  new Function(VISITED_SRC).call(window); // eslint-disable-line no-new-func
-}
 
 function storedVisits() {
   return JSON.parse(localStorage.getItem(VISITS_KEY) || '[]');
@@ -94,7 +89,7 @@ beforeEach(() => {
   globalThis.map = { removeLayer: () => {}, addLayer: () => {} };
   globalThis.visitedLayerGroup = { addTo: () => {} };
 
-  loadVisited();
+  loadScripts('visited');
 });
 
 function baseSession(over = {}) {

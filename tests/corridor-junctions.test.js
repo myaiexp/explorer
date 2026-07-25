@@ -5,8 +5,9 @@
  * fetchCorridorJunctions lives inside osrm.js, which can't be imported wholesale
  * (its other functions reference cross-module globals like calculateDistance).
  * The function is self-contained — it only uses Math / URLSearchParams / Number
- * / String / fetch and an optional onProgress callback — so we extract just its
- * source and instantiate it in the current realm via vm, with a faked global
+ * / String / fetch and an optional onProgress callback — so we pull osrm.js's
+ * source via helpers/load.js's readScript('osrm'), extract just this one
+ * function's text, and instantiate it in the current realm with a faked global
  * `fetch`.
  *
  * Guards the audit #1268 invariant: maxKm is an explicit parameter, NOT read
@@ -15,10 +16,9 @@
  */
 
 import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-import OSRM_SRC from '../osrm.js?raw';
+import { loadScripts, readScript } from './helpers/load.js';
+
+const OSRM_SRC = readScript('osrm');
 
 // Pull out the `async function fetchCorridorJunctions(...) { ... }` block by
 // brace-matching from the signature. Template literals here are brace-balanced
@@ -44,13 +44,14 @@ beforeAll(() => {
     // sources so they resolve through the new Function scope. fetchWithTimeout
     // internally calls the faked global `fetch`, so the per-test fakeFetch still
     // observes the request (and its timer is cleared once the fake resolves).
-    new vm.Script(readFileSync(resolve(__dirname, '../net.js'), 'utf8')).runInThisContext();
-    new vm.Script(readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8')).runInThisContext();
+    loadScripts('net', 'geo-utils');
     const src = extractFn('fetchCorridorJunctions');
     // Evaluate the declaration and hand back a reference. new Function() bootstraps
     // the extracted source in the global scope (static local file content, not
     // user input); `fetch` resolves to globalThis.fetch (faked per test) through
-    // the scope chain.
+    // the scope chain. evalScript() doesn't fit here — it discards its return
+    // value, and we need the extracted function's reference back — so this one
+    // stays an explicit new Function.
     fetchCorridorJunctions = new Function( // eslint-disable-line no-new-func
         `${src}\n return fetchCorridorJunctions;`
     )();

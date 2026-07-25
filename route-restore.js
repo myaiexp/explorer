@@ -48,6 +48,11 @@ function restoreResult(entry) {
     // only the total is stored) fall back to assigning the whole total to the
     // outbound leg — numerically correct for the displayed total, which is all
     // displayRoute renders.
+    //
+    // UNITS: this is the km→metres boundary back into OSRM shape. Persisted
+    // entry fields (distance / routeDistance / returnRouteDistance) are
+    // KILOMETRES; the fake route objects below must carry METRES, because
+    // displayRoute feeds them to computeRouteTotals, which divides by 1000.
     const hasLegDist = typeof entry.routeDistance === 'number';
     const outbound = entry.routeCoords
         ? { coords: entry.routeCoords,

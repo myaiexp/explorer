@@ -8,27 +8,17 @@
  * the jsdom global context, seed location + localStorage, stub fetch. That setup
  * lives here so each suite's bootstrap is `installSyncLifecycle()` plus whatever
  * it actually asserts.
- *
- * Note: security-hook warning acknowledged — new Function() is intentional here.
- * The sources are static local assets, not user input.
  */
 
 import { beforeEach, afterEach, vi } from 'vitest';
-// sync.js's IIFE reads globalThis.createSyncFlushWorker (sync-flush.js) and
-// globalThis.SyncSections (sync-sections.js) at load time, so both sibling
-// modules must run first — mirrors index.html's script order.
-import FLUSH_SRC from '../../sync-flush.js?raw';
-import SECTIONS_SRC from '../../sync-sections.js?raw';
-import SYNC_SRC from '../../sync.js?raw';
-// Side-effect import: storage.js owns the walk_* key strings and readStoredArray
-// that sync-sections.js resolves off globalThis at call time. Importing it runs
-// its top-level globalThis assignments once, so those globals exist before any
-// ExplorerSync method runs (mirrors prod, where both scripts have executed by the
-// time init() is called). Values are constant, so a single load suffices.
-import '../../storage.js';
-// Side-effect import: net.js registers globalThis.fetchWithTimeout, which
-// sync.js's apiFetch calls. Load it before loadSync() runs the IIFE.
-import '../../net.js';
+import { loadScripts } from './load.js';
+
+// storage.js owns the walk_* key strings and readStoredArray that
+// sync-sections.js resolves off globalThis at call time; net.js registers
+// globalThis.fetchWithTimeout, which sync.js's apiFetch calls. Both are
+// load-once collaborators (constant values / registrations), evaluated here
+// exactly once before any loadSync() call runs the sync trio's IIFEs.
+loadScripts('storage', 'net');
 
 // ── Loading the sync scripts ─────────────────────────────────────────────────
 
@@ -50,15 +40,13 @@ export function destroySync() {
 /**
  * Execute the three IIFEs in the jsdom global scope, replacing any previous
  * instance. Order matches index.html: the flush worker + section helpers
- * register their globals before sync.js's IIFE consumes them.
+ * register their globals before sync.js's IIFE consumes them (SCRIPT_DEPS'
+ * 'sync' → ['sync-flush', 'sync-sections'] edge encodes that order).
  */
 export function loadSync() {
     destroySync();
     delete window.ExplorerSync;
-    // new Function with static local file content — not user-supplied input
-    new Function(FLUSH_SRC).call(window);    // eslint-disable-line no-new-func
-    new Function(SECTIONS_SRC).call(window); // eslint-disable-line no-new-func
-    new Function(SYNC_SRC).call(window);     // eslint-disable-line no-new-func
+    loadScripts('sync');
 }
 
 /** Register the per-test lifecycle every sync suite shares. */

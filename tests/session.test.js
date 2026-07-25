@@ -2,18 +2,16 @@
 /**
  * Tests for session.js — computeRouteTotals, routeSessionFields, snapshotSession.
  *
- * session.js is a non-module browser script; we run it via vm and read the pure
- * helpers off globalThis (same harness as geometry/route-dispatch tests).
- * snapshotSession uses crypto.randomUUID() + new Date(), both Node globals.
+ * session.js is a non-module browser script, loaded via helpers/load.js's
+ * loadScripts('session') and read the pure helpers off globalThis (same
+ * harness as geometry/route-dispatch tests). snapshotSession uses
+ * crypto.randomUUID() + new Date(), both Node globals.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    const src = readFileSync(resolve(__dirname, '../session.js'), 'utf8');
-    new vm.Script(src).runInThisContext();
+    loadScripts('session');
 });
 
 describe('computeRouteTotals', () => {
@@ -22,29 +20,29 @@ describe('computeRouteTotals', () => {
 
     test('round-trip with both legs: per-leg km + summed duration', () => {
         const t = globalThis.computeRouteTotals(OUT, RET, 5, 'round');
-        expect(t).toEqual({ outDist: 6, retDist: 5, totalWalkKm: 11, totalDuration: 6600 });
+        expect(t).toEqual({ outKm: 6, retKm: 5, totalWalkKm: 11, totalDuration: 6600 });
     });
 
-    // The bug fix: a one-way trip has no return leg, so retDist is 0 — NOT the
+    // The bug fix: a one-way trip has no return leg, so retKm is 0 — NOT the
     // straight-line fallback. displayRoute's old inlined copy omitted this guard
     // and double-counted one-way distance (out + straight). This test is RED
     // against that old behavior.
     test('one-way: absent return leg contributes 0, never the straight-line', () => {
         const t = globalThis.computeRouteTotals(OUT, null, 5, 'one-way');
-        expect(t.retDist).toBe(0);
+        expect(t.retKm).toBe(0);
         expect(t.totalWalkKm).toBe(6);
         expect(t.totalDuration).toBe(3600);
     });
 
     test('round-trip with a failed return leg falls back to straight-line', () => {
         const t = globalThis.computeRouteTotals(OUT, null, 5, 'round');
-        expect(t.retDist).toBe(5);
+        expect(t.retKm).toBe(5);
         expect(t.totalWalkKm).toBe(11);
     });
 
     test('both legs missing (round-trip): both fall back to straight-line', () => {
         const t = globalThis.computeRouteTotals(null, null, 5, 'round');
-        expect(t).toEqual({ outDist: 5, retDist: 5, totalWalkKm: 10, totalDuration: 0 });
+        expect(t).toEqual({ outKm: 5, retKm: 5, totalWalkKm: 10, totalDuration: 0 });
     });
 });
 

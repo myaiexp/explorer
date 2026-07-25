@@ -2,9 +2,8 @@
 /**
  * Tests for share-link.js — hash encode/restore.
  *
- * share-link.js is a non-module browser script; we run it via new Function()
- * (static local file, not user input) so its free identifiers resolve to the
- * stubs installed on globalThis.
+ * share-link.js is a non-module browser script; helpers/load.js evaluates it so
+ * its free identifiers resolve to the stubs installed on globalThis.
  *
  * These pin the audit cleanup: restoreFromHash's parse used to sit inside a
  * try/catch whose catch was unreachable (URLSearchParams/split/Number/isNaN have
@@ -14,15 +13,10 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import SHARE_LINK_SRC from '../share-link.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 let built;
 let errors;
-
-function loadShareLink() {
-  // new Function with static local file content — not user-supplied input.
-  new Function(SHARE_LINK_SRC).call(window); // eslint-disable-line no-new-func
-}
 
 beforeEach(() => {
   built = [];
@@ -38,7 +32,7 @@ beforeEach(() => {
   globalThis.getCurrentSession = () => null;
   globalThis.withLoading = async (fn) => { await fn(() => {}); return true; };
   globalThis.buildAndDisplay = async (...args) => { built.push(args); };
-  loadShareLink();
+  loadScripts('share-link');
 });
 
 describe('restoreFromHash', () => {

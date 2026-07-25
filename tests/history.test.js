@@ -1,11 +1,10 @@
 /**
  * Tests for history.js — saveToHistory cap + cloud-mirror behavior.
  *
- * Loading strategy mirrors sync.test.js: history.js is a non-module script that
- * assigns globalThis.saveToHistory. We execute it via new Function() so its free
- * identifiers (getHistory, syncedPut, syncedDelete, snapshotSession, …) resolve
- * to the stubs installed on globalThis below — the same collaborators index.html
- * wires up at runtime. The source file is a static local asset, not user input.
+ * history.js is a non-module script that assigns globalThis.saveToHistory. Its
+ * free identifiers (getHistory, syncedPut, syncedDelete, snapshotSession, …)
+ * resolve to the stubs installed on globalThis below — the same collaborators
+ * index.html wires up at runtime — once helpers/load.js has evaluated it.
  *
  * These pin the audit fix: the HISTORY_MAX cap must mirror to the cloud (delete
  * the aged-off ids) instead of being local-only, or the server table grows without
@@ -13,16 +12,11 @@
  */
 
 import { describe, test, expect, beforeEach } from 'vitest';
-import HISTORY_SRC from '../history.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 const HISTORY_KEY = 'walk_history';
 let putCalls;
 let deleteCalls;
-
-function loadHistory() {
-  // new Function with static local file content — not user-supplied input.
-  new Function(HISTORY_SRC).call(window); // eslint-disable-line no-new-func
-}
 
 beforeEach(() => {
   localStorage.clear();
@@ -49,7 +43,7 @@ beforeEach(() => {
     deleteCalls.push({ section, id });
   };
 
-  loadHistory();
+  loadScripts('history');
 });
 
 // A session whose entry sorts by date: larger i ⇒ newer. destName/destLat keep

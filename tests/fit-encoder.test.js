@@ -7,14 +7,19 @@
  * { encodeCourse, osrmStepsToCoursePoints, CP } on globalThis. The closure
  * also holds ByteWriter, crc16, toSemicircles, toFitTime, haversine,
  * osrmStepToType and nearestCoordIndex — all of which the audit requires us
- * to test. We read its text and string-inject an `_internals` export at load
- * time only (the export line is untouched on disk). If the export line ever
+ * to test. We read its text via helpers/load.js's readScript() and
+ * string-inject an `_internals` export at load time only (the export line is
+ * untouched on disk), then evaluate the patched source with evalScript() — the
+ * escape hatch loadScripts() itself doesn't cover. If the export line ever
  * changes, the injection throws loudly.
  *
  * `haversine` is now an alias of the canonical globalThis.haversineM (audit
  * #1262), so geo-utils.js must run in the realm first — exactly as it does in
- * the browser load order. The distance assertions stay self-consistent: the
- * encoder and these tests call the same `internals.haversine` reference.
+ * the browser load order; helpers/load.js's SCRIPT_DEPS lists geo-utils as
+ * fit-encoder's dependency, but since we bypass loadScripts() for the
+ * injection, we load geo-utils explicitly ourselves before it. The distance
+ * assertions stay self-consistent: the encoder and these tests call the same
+ * `internals.haversine` reference.
  *
  * The FIT CRC-16 is exactly CRC-16/ARC (reflected, poly 0xA001, init 0,
  * catalog check value 0xBB3D for "123456789"). We validate the SUT's
@@ -23,9 +28,7 @@
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
+import { loadScripts, readScript, evalScript } from './helpers/load.js';
 
 const EXPORT_LINE =
     'global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP };';
@@ -37,14 +40,12 @@ const INJECTED =
 
 let enc, internals, CP;
 
-const GEO_SRC = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
-
 beforeAll(() => {
-    new vm.Script(GEO_SRC).runInThisContext();   // exposes globalThis.haversineM (aliased by the encoder)
-    const RAW = readFileSync(resolve(__dirname, '../fit-encoder.js'), 'utf8');
+    loadScripts('geo-utils');   // exposes globalThis.haversineM (aliased by the encoder)
+    const RAW = readScript('fit-encoder');
     const SRC = RAW.replace(EXPORT_LINE, INJECTED);
     if (SRC === RAW) throw new Error('injection failed — export line changed in fit-encoder.js');
-    new vm.Script(SRC).runInThisContext();
+    evalScript(SRC);
     enc = globalThis.FitEncoder;
     internals = enc._internals;
     CP = enc.CP;

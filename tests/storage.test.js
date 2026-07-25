@@ -1,18 +1,16 @@
 // @vitest-environment jsdom
 /**
  * Tests for storage.js — the array-backed read/write accessors. jsdom supplies
- * localStorage; storage.js is a non-module browser script run via vm, exposing
- * its helpers on globalThis. Focus: the read/write round-trip symmetry that lets
- * sync-helpers.js's syncedPut/syncedDelete keep the persist-and-mirror invariant in one place.
+ * localStorage; storage.js is a non-module browser script, loaded via
+ * helpers/load.js's loadScripts('storage'), exposing its helpers on globalThis.
+ * Focus: the read/write round-trip symmetry that lets sync-helpers.js's
+ * syncedPut/syncedDelete keep the persist-and-mirror invariant in one place.
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    const src = readFileSync(resolve(__dirname, '../storage.js'), 'utf8');
-    new vm.Script(src).runInThisContext();
+    loadScripts('storage');
 });
 
 beforeEach(() => localStorage.clear());

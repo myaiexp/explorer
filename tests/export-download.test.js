@@ -2,18 +2,17 @@
 /**
  * Tests for the file-download wiring — export.js triggerDownload and the
  * visits-io.js exportVisits that now reuses it (audit: DRY, blob-download
- * single-sourced). Both are non-module browser scripts run via new Function() in
- * the jsdom realm. jsdom lacks URL.createObjectURL and <a>.click, so we stub the
- * former and capture the latter to read back the resolved download filename.
+ * single-sourced). Both are non-module browser scripts; helpers/load.js
+ * evaluates them (plus visits-io's visit-shape dependency) in the jsdom realm.
+ * jsdom lacks URL.createObjectURL and <a>.click, so we stub the former and
+ * capture the latter to read back the resolved download filename.
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import EXPORT_SRC from '../export.js?raw';
-import VISITS_IO_SRC from '../visits-io.js?raw';
+import { loadScripts } from './helpers/load.js';
 
-// Load export.js (defines triggerDownload) then visits-io.js (uses it) into the
-// jsdom global, mirroring index.html's order.
-new Function(EXPORT_SRC).call(window); // eslint-disable-line no-new-func
-new Function(VISITS_IO_SRC).call(window); // eslint-disable-line no-new-func
+// Load export.js (defines triggerDownload) then visits-io.js (uses it), mirroring
+// index.html's order.
+loadScripts('export', 'visits-io');
 
 let lastDownload;
 

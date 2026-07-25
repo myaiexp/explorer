@@ -6,23 +6,18 @@
  * rankByNovelty.
  *
  * Loading: novelty.js is a non-module browser script that depends on the shared
- * haversineKm from geo-utils.js, so geo-utils.js runs in the realm first; both
- * expose their helpers via explicit globalThis assignment. The vm/fs loader needs
- * Node built-ins, so this file runs under the node environment (the repo-root
- * vitest config defaults to jsdom, which stubs Node built-ins).
+ * haversineKm from geo-utils.js, so geo-utils.js runs in the realm first —
+ * helpers/load.js's SCRIPT_DEPS encodes that edge, so loading 'novelty' pulls
+ * it in automatically; both expose their helpers via explicit globalThis
+ * assignment. The `@vitest-environment node` pragma above just skips jsdom
+ * setup, which this suite doesn't need.
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import vm from 'node:vm';
-
-const GEO_SRC = readFileSync(resolve(__dirname, '../geo-utils.js'), 'utf8');
-const SRC = readFileSync(resolve(__dirname, '../novelty.js'), 'utf8');
+import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    new vm.Script(GEO_SRC).runInThisContext();
-    new vm.Script(SRC).runInThisContext();
+    loadScripts('novelty');
 });
 
 describe('minDistanceToExisting', () => {

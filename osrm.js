@@ -19,6 +19,10 @@ async function tryOsrm(url) {
         if (!data.routes || data.routes.length === 0) return null;
         const r = data.routes[0];
         const steps = r.legs ? r.legs.flatMap(leg => leg.steps || []) : null;
+        // UNITS: `distance` is METRES and `duration` seconds, straight off OSRM.
+        // Every route object this module returns keeps those units; session.js is
+        // the boundary that converts distance to km for the session/persisted
+        // fields, and route-restore.js converts back.
         return {
             coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
             duration: r.duration,
@@ -93,14 +97,14 @@ async function screeningTableFn(start, candidates) {
 // A/B endpoints, the via t-positions, and the snap radius (half the offset,
 // floored at 0.3 km) from start/dest + the spread params. Pure — no DOM.
 function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
-    const straightDist = calculateDistance(startLat, startLng, destLat, destLng);
+    const straightKm = calculateDistance(startLat, startLng, destLat, destLng);
     // spread is required. Production always passes getSpreadParams(), which itself
     // defaults NaN/undefined slider values to the 50% params — so the graceful
     // fallback already lives at the source. A missing spread here is a caller bug:
     // destructure it directly so it throws loudly instead of silently substituting
     // a spread the user never picked.
     const { offsetMult, viaTs } = spread;
-    const offsetKm = Math.max(0.1, straightDist * offsetMult);
+    const offsetKm = Math.max(0.1, straightKm * offsetMult);
     return {
         offsetKm,
         viaTs,

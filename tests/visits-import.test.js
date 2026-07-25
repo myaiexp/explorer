@@ -2,9 +2,8 @@
  * Tests for visits-io.js's import path — applyImportedVisits' merge contract plus
  * importVisits' FileReader/error plumbing.
  *
- * visit-shape.js and visits-io.js are non-module browser scripts; we execute them
- * via new Function() (static local assets, not user input) in index.html's order,
- * exactly as tests/history.test.js does, so their free identifiers resolve to the
+ * visit-shape.js and visits-io.js are non-module browser scripts; helpers/load.js
+ * evaluates them in index.html's order so their free identifiers resolve to the
  * stubs installed on globalThis.
  *
  * These pin two audit fixes:
@@ -18,8 +17,7 @@
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import VISIT_SHAPE_SRC from '../visit-shape.js?raw';
-import VISITS_IO_SRC from '../visits-io.js?raw';
+import { loadScripts } from './helpers/load.js';
 
 const VISITS_KEY = 'walk_visits';
 let mutations;
@@ -49,9 +47,8 @@ beforeEach(() => {
   globalThis.updateVisitedCounter = vi.fn();
   globalThis.renderVisitedLayer = () => { renders++; };
 
-  // new Function with static local file content — not user-supplied input.
-  new Function(VISIT_SHAPE_SRC).call(window); // eslint-disable-line no-new-func
-  new Function(VISITS_IO_SRC).call(window); // eslint-disable-line no-new-func
+  // visits-io depends on visit-shape (SCRIPT_DEPS), same order as before.
+  loadScripts('visits-io');
 });
 
 function validRow(over = {}) {
