@@ -1,13 +1,13 @@
 // Route file export — GPX + Garmin FIT course files and the FIT modal open/close.
-// Reads the active route from the module-global currentSession (app.js) and turns
-// it into a downloadable file; uses FitEncoder (fit-encoder.js) and fetchElevations
-// (elevation.js). Loaded before app.js; the functions are called from index.html
-// onclick handlers as globals. (The Escape-to-close keydown wiring stays in app.js
-// with the other top-level listeners.)
+// Reads the active route via getCurrentSession() (session-state.js) and turns it
+// into a downloadable file; uses FitEncoder (fit-encoder.js) and fetchElevations
+// (elevation.js). The functions are called from index.html onclick handlers as
+// globals; the FIT modal owns its own Escape wiring at the bottom of this file.
 
 function exportGPX() {
-    if (!currentSession) return;
-    const { destName, routeCoords, returnRouteCoords } = currentSession;
+    const session = getCurrentSession();
+    if (!session) return;
+    const { destName, routeCoords, returnRouteCoords } = session;
     const name = destName || 'Wander route';
     const allCoords = mergeRouteCoords(routeCoords, returnRouteCoords);
     if (allCoords.length === 0) { showError('No route data to export.'); return; }
@@ -31,7 +31,7 @@ ${trkpts}
 }
 
 function openFITModal() {
-    if (!currentSession) { showError('Generate a route first.'); return; }
+    if (!getCurrentSession()) { showError('Generate a route first.'); return; }
     if (typeof FitEncoder === 'undefined') { showError('FIT encoder not loaded.'); return; }
     document.getElementById('fitModal').classList.add('active');
 }
@@ -41,10 +41,11 @@ function closeFITModal() {
 }
 
 async function confirmFITExport() {
-    if (!currentSession) { showError('Generate a route first.'); return; }
+    const session = getCurrentSession();
+    if (!session) { showError('Generate a route first.'); return; }
     closeFITModal();
 
-    const { destName, routeCoords, returnRouteCoords, routeSteps, returnRouteSteps } = currentSession;
+    const { destName, routeCoords, returnRouteCoords, routeSteps, returnRouteSteps } = session;
     const coords = mergeRouteCoords(routeCoords, returnRouteCoords);
     if (coords.length < 2) { showError('No route data to export.'); return; }
 
@@ -86,6 +87,14 @@ function triggerDownload(data, name, ext, mime, filename) {
     a.click();
     URL.revokeObjectURL(url);
 }
+
+// The FIT modal owns its own Escape wiring (prefs-modal.js does the same for the
+// preferences modal) instead of one shared handler in the entry point.
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('fitModal')?.classList.contains('active')) {
+        closeFITModal();
+    }
+});
 
 globalThis.exportGPX = exportGPX;
 globalThis.openFITModal = openFITModal;

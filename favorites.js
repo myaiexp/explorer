@@ -2,8 +2,8 @@
 
 // FAVORITES_KEY + getFavorites live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
-// buildListItem in list-item.js; restoreResult in history.js; currentSession in
-// app.js — all resolved as globals at call time.
+// buildListItem in list-item.js; restoreResult in route-view.js;
+// getCurrentSession in session-state.js — all resolved as globals at call time.
 
 // Favorite-identity predicate: does this favorite point at the same destination
 // as `dest` (a session or another favorite)? Matched by dest coords at 6-decimal
@@ -15,11 +15,12 @@ function sameFavoriteDest(fav, dest) {
 }
 
 function toggleFavorite() {
-    if (!currentSession) return;
+    const session = getCurrentSession();
+    if (!session) return;
     const btn = document.getElementById('favoriteBtn');
     const favs = getFavorites();
 
-    const idx = favs.findIndex(f => sameFavoriteDest(f, currentSession));
+    const idx = favs.findIndex(f => sameFavoriteDest(f, session));
 
     if (idx >= 0) {
         const removed = favs[idx];
@@ -27,7 +28,7 @@ function toggleFavorite() {
         btn.classList.remove('active');
         syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
     } else {
-        const newFav = snapshotSession(currentSession);
+        const newFav = snapshotSession(session);
         favs.unshift(newFav);
         btn.classList.add('active');
         syncedPut(FAVORITES_KEY, favs, 'favorites', newFav.id, newFav);
@@ -38,8 +39,9 @@ function toggleFavorite() {
 
 function updateFavoriteBtn() {
     const btn = document.getElementById('favoriteBtn');
-    if (!currentSession) { btn.classList.remove('active'); return; }
-    const isFav = getFavorites().some(f => sameFavoriteDest(f, currentSession));
+    const session = getCurrentSession();
+    if (!session) { btn.classList.remove('active'); return; }
+    const isFav = getFavorites().some(f => sameFavoriteDest(f, session));
     btn.classList.toggle('active', isFav);
 }
 

@@ -2,7 +2,7 @@
 
 // HISTORY_KEY + getHistory live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
-// buildListItem in list-item.js; clearMap/displayRoute in app.js — all resolved
+// buildListItem in list-item.js; restoreResult in route-view.js — all resolved
 // as globals at call time.
 
 const HISTORY_MAX = 20;
@@ -41,33 +41,9 @@ function deleteHistoryEntry(index) {
     renderHistorySection();
 }
 
-function restoreResult(entry) {
-    clearMap();
-    // Prefer the real per-leg distances when the entry has them. Legacy entries
-    // (saved before per-leg distances existed, or pulled from the cloud where
-    // only the total is stored) fall back to assigning the whole total to the
-    // outbound leg — numerically correct for the displayed total, which is all
-    // displayRoute renders.
-    const hasLegDist = typeof entry.routeDistance === 'number';
-    const outbound = entry.routeCoords
-        ? { coords: entry.routeCoords,
-            distance: (hasLegDist ? entry.routeDistance : entry.distance) * 1000,
-            duration: entry.routeDuration || 0 }
-        : null;
-    const ret = entry.returnRouteCoords
-        ? { coords: entry.returnRouteCoords,
-            distance: (hasLegDist ? (entry.returnRouteDistance || 0) : 0) * 1000,
-            duration: entry.returnRouteDuration || 0 }
-        : null;
-    // No saveToHistory here: re-displaying an existing history/favorite entry
-    // must not create a new one (the old side effect in displayRoute did).
-    displayRoute({
-        startLat: entry.startLat, startLng: entry.startLng,
-        destLat: entry.destLat, destLng: entry.destLng,
-        outbound, ret,
-        locationInput: entry.startLabel, destName: entry.destName, tripMode: entry.tripMode,
-    });
-}
+// restoreResult — re-displaying a stored entry — lives in route-view.js: it is a
+// render, not history CRUD, and favorites.js used to depend on this module solely
+// to reach it.
 
 function renderHistorySection() {
     const history = getHistory();
@@ -112,6 +88,5 @@ function toggleHistoryExpanded() {
 
 globalThis.saveToHistory = saveToHistory;
 globalThis.deleteHistoryEntry = deleteHistoryEntry;
-globalThis.restoreResult = restoreResult;
 globalThis.renderHistorySection = renderHistorySection;
 globalThis.toggleHistoryExpanded = toggleHistoryExpanded;

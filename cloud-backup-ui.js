@@ -102,10 +102,8 @@ function confirmDeleteCloudData() {
     });
 }
 
-function closeOverflowMenuIfOpen() {
-    const menu = document.getElementById('overflowMenu');
-    if (menu) menu.classList.remove('open');
-}
+// closeOverflowMenuIfOpen lives in overflow-menu.js (sole owner of the menu's
+// open state); called here as a global after acting on a menu item.
 
 function updateSyncMenu() {
     const s = ExplorerSync.getState();
@@ -135,5 +133,4 @@ globalThis.showConsentToast = showConsentToast;
 globalThis.enableCloudBackup = enableCloudBackup;
 globalThis.copyBackupLink = copyBackupLink;
 globalThis.confirmDeleteCloudData = confirmDeleteCloudData;
-globalThis.closeOverflowMenuIfOpen = closeOverflowMenuIfOpen;
 globalThis.updateSyncMenu = updateSyncMenu;
