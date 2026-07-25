@@ -20,7 +20,7 @@ installSyncLifecycle();
 // A mutation persisted to the durable outbox but not drained before the tab
 // closed (queued offline, app closed; or a request mid-backoff) is otherwise only
 // pumped by a fresh enqueue() or the window 'online' event — neither fires on a
-// normal reload while already online. So init() must kick the pump once it
+// normal reload while already online. So init() must start the pump once it
 // settles on an accepted account, draining a queue that survived the restart
 // without waiting for the user to mutate again. Before the fix nothing did this,
 // so the last session's queued walks silently never reached the cloud backup.
@@ -51,7 +51,7 @@ describe('outbox resume on startup (audit)', () => {
 
     test('init does NOT flush a stray outbox when not accepted (anonymous)', async () => {
         // getUsername() gates the pump on accepted state, so a leftover queue on an
-        // anonymous device must never upload — the kick no-ops via doFlush's guard.
+        // anonymous device must never upload — the nudge no-ops via flushHead's guard.
         setLocation('/explorer/');
         setLocalStorage({
             walk_sync_outbox: JSON.stringify([
@@ -275,7 +275,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
     });
 
-    test('_outbox.flush() resolves once the queue drains (event-based, not polled)', async () => {
+    test('_outbox.whenDrained() resolves once the queue drains (event-based, not polled)', async () => {
         await setupAccepted('rugged-pine-42');
         mockFetch({
             'PUT /explorer/api/rugged-pine-42/visits/uuid-1': { status: 204 },
@@ -286,13 +286,13 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(2);
         // Awaiting the returned promise must resolve when settleFlushWaiters fires
         // on the fully-drained outbox — no 10 ms polling tick involved.
-        await window.ExplorerSync._outbox.flush();
+        await window.ExplorerSync._outbox.whenDrained();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
     });
 
-    test('_outbox.flush() resolves immediately when the outbox is already empty', async () => {
+    test('_outbox.whenDrained() resolves immediately when the outbox is already empty', async () => {
         await setupAccepted('rugged-pine-42');
-        await expect(window.ExplorerSync._outbox.flush()).resolves.toBeUndefined();
+        await expect(window.ExplorerSync._outbox.whenDrained()).resolves.toBeUndefined();
     });
 });
 
@@ -334,7 +334,7 @@ describe('flush pump recovery and single-flight guard', () => {
 
         stale._destroy();
         window.dispatchEvent(new Event('online'));
-        await stale._outbox.flush();          // resolves rather than hanging
+        await stale._outbox.whenDrained();          // resolves rather than hanging
         await flushPromises();
 
         expect(fetchSpy).not.toHaveBeenCalled();
@@ -342,7 +342,7 @@ describe('flush pump recovery and single-flight guard', () => {
     });
 
     // Two back-to-back mutations must not double-flush the first entry. A
-    // never-resolving fetch keeps the first flush in-flight; the doFlush
+    // never-resolving fetch keeps the first flush in-flight; the flushHead
     // _flushing guard collapses the duplicate schedule to a single request.
     test('back-to-back mutations issue only one in-flight request for the first entry', async () => {
         await setupAccepted('rugged-pine-42');
@@ -352,5 +352,56 @@ describe('flush pump recovery and single-flight guard', () => {
         await flushPromises();
         expect(global.fetch).toHaveBeenCalledTimes(1);
         expect(global.fetch.mock.calls[0][0]).toBe('/explorer/api/rugged-pine-42/visits/uuid-1');
+    });
+});
+
+// ── request-path encoding (audit) ─────────────────────────────────────────────
+// An outbox entry's id is not always one we minted: importVisits takes ids
+// verbatim from an uploaded backup file, so an id can carry a '/' or a dot
+// segment. Concatenated into the path (the old code), the browser normalizes it
+// away BEFORE the request goes out and the authenticated PUT lands on a
+// different endpoint entirely. apiFetch now takes segments and encodes each.
+
+describe('request path encoding', () => {
+    test('a traversal-shaped outbox id cannot redirect the authenticated write', async () => {
+        await setupAccepted('rugged-pine-42');
+        // Pre-fix path: /explorer/api/rugged-pine-42/visits/../../accounts
+        // → normalized by fetch to /explorer/api/accounts, with the Bearer token.
+        localStorage.setItem('walk_sync_outbox', JSON.stringify([
+            { section: 'visits', op: 'put', id: '../../accounts', data: { id: 'x' } },
+        ]));
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true, status: 204, headers: new Headers(), json: () => Promise.resolve({}),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await flushPromises();
+
+        const url = global.fetch.mock.calls[0][0];
+        expect(url).toBe('/explorer/api/rugged-pine-42/visits/..%2F..%2Faccounts');
+        // The decisive property: whatever it targets, it stays under the section.
+        expect(new URL(url, 'https://mase.fi').pathname)
+            .toBe('/explorer/api/rugged-pine-42/visits/..%2F..%2Faccounts');
+    });
+
+    test('section and username segments are encoded too', async () => {
+        await setupAccepted('rugged-pine-42');
+        localStorage.setItem('walk_sync_outbox', JSON.stringify([
+            { section: 'visits/../favorites', op: 'delete', id: 'uuid-1' },
+        ]));
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true, status: 204, headers: new Headers(), json: () => Promise.resolve({}),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await flushPromises();
+        expect(global.fetch.mock.calls[0][0])
+            .toBe('/explorer/api/rugged-pine-42/visits%2F..%2Ffavorites/uuid-1');
+    });
+
+    test('ordinary uuids and usernames are untouched by the encoding', async () => {
+        await setupAccepted('rugged-pine-42');
+        mockFetch({ 'PUT /explorer/api/rugged-pine-42/visits/uuid-plain': { status: 204 } });
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-plain', { id: 'uuid-plain' });
+        await flushPromises();
+        expect(global.fetch.mock.calls[0][0]).toBe('/explorer/api/rugged-pine-42/visits/uuid-plain');
     });
 });

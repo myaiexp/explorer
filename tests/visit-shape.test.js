@@ -136,6 +136,32 @@ describe('normalizeVisit — rows it accepts', () => {
     expect(normalizeVisit(validRow({ id: { nested: true } }), NOW).id).toBeNull();
   });
 
+  // An id is not just a local key: it becomes a path segment in an authenticated
+  // cloud-backup write (sync-flush.js) and a PK column server-side. An imported
+  // file's id is user-supplied, so anything that isn't uuid/legacy-numeric shaped
+  // is dropped and back-filled with a fresh UUID rather than passed through.
+  test.each([
+    ['a path separator', 'a/b'],
+    ['a traversal segment', '..'],
+    ['a bare dot', '.'],
+    ['a leading traversal', '../../accounts'],
+    ['a percent escape', '%2e%2e'],
+    ['a query fragment', 'id?x=1'],
+    ['whitespace', 'id with space'],
+    ['over the 128-char cap', 'a'.repeat(129)],
+  ])('rejects an id with %s, leaving it for the caller to back-fill', (_label, id) => {
+    expect(normalizeVisit(validRow({ id }), NOW).id).toBeNull();
+  });
+
+  test.each([
+    ['a uuid', '0f9c1e7a-3b2d-4c8e-9a11-7d6f5b4c3a21'],
+    ['a legacy numeric string', '1714500000000'],
+    ['dots inside a name', 'walk.2026.04.27'],
+    ['exactly 128 chars', 'a'.repeat(128)],
+  ])('keeps an id that is %s', (_label, id) => {
+    expect(normalizeVisit(validRow({ id }), NOW).id).toBe(id);
+  });
+
   test('zero distance is a legitimate walk', () => {
     expect(normalizeVisit(validRow({ distance: 0 }), NOW).distance).toBe(0);
   });

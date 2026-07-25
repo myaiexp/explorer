@@ -67,6 +67,33 @@ function stringOrNull(v, max) {
     return v.length > max ? v.slice(0, max) : v;
 }
 
+// A usable row id, else null for the caller to back-fill with a fresh UUID.
+//
+// Ids we mint are crypto.randomUUID(); legacy exports carry numeric ids, which
+// stringify. Anything else is rejected rather than repaired, because an id is not
+// just a local key — it becomes a path segment in an authenticated cloud-backup
+// write (sync-flush.js), and it is a primary-key column server-side. sync.js's
+// apiPath percent-encodes it, so a stray '/' can no longer redirect the request,
+// but dot-segments survive encoding intact ('..' encodes to '..') and would still
+// be normalized away by the browser — so the charset check is what closes that,
+// with the encoding as defence in depth.
+//
+// Dropping the id costs the file's own dedupe for that row (re-importing it mints
+// a second UUID and so duplicates the walk); keeping the walk is worth that, and
+// only a hand-edited file ever gets here.
+const MAX_ID_LEN = 128;
+const SAFE_ID = /^[A-Za-z0-9._~-]+$/;
+
+function idOrNull(v) {
+    let s = null;
+    if (typeof v === 'string' && v !== '') s = v;
+    else if (typeof v === 'number' && Number.isFinite(v)) s = String(v);
+    if (s === null || s.length > MAX_ID_LEN) return null;
+    if (!SAFE_ID.test(s)) return null;
+    if (/^\.+$/.test(s)) return null;   // '.', '..' — path segments, not ids
+    return s;
+}
+
 // An ISO-8601 timestamp the backup server's isIsoDate accepts, else null.
 function isoDateOrNull(v) {
     if (typeof v !== 'string' || v.length > MAX_DATE_LEN) return null;
@@ -86,8 +113,9 @@ function isoDateOrNull(v) {
 // a fixed key set, so junk fields in the file never reach localStorage (quota is
 // finite; see storage.js) or the cloud row.
 //
-// `id` is passed through (a numeric legacy id is stringified) or left null for
-// the caller to back-fill, keeping this free of crypto/uuid concerns.
+// `id` is passed through when it has a usable shape (a numeric legacy id is
+// stringified; see idOrNull) or left null for the caller to back-fill, keeping
+// this free of crypto/uuid concerns.
 function normalizeVisit(row, nowIso = new Date().toISOString()) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
 
@@ -100,12 +128,8 @@ function normalizeVisit(row, nowIso = new Date().toISOString()) {
         destLat === null || destLng === null ||
         distance === null || distance < 0) return null;
 
-    let id = null;
-    if (typeof row.id === 'string' && row.id !== '') id = row.id;
-    else if (typeof row.id === 'number' && Number.isFinite(row.id)) id = String(row.id);
-
     return {
-        id,
+        id: idOrNull(row.id),
         date: isoDateOrNull(row.date) || nowIso,
         startLat,
         startLng,

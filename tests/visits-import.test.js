@@ -110,6 +110,20 @@ describe('applyImportedVisits — merge contract', () => {
     expect(puts()[0].id).toBe(row.id);
   });
 
+  test('a traversal-shaped id is replaced, so it never reaches the outbox path', () => {
+    // An imported id flows verbatim into the path of an authenticated PUT
+    // (sync-flush.js). visit-shape rejects the shape and visits-io mints a fresh
+    // uuid, so the row imports but the crafted segment is gone by the time it is
+    // queued. sync.js's apiPath encoding is the second layer behind this.
+    applyImportedVisits([validRow({ id: '../../accounts' })]);
+
+    const row = stored()[0];
+    expect(row.id).not.toBe('../../accounts');
+    expect(row.id).toMatch(/^[A-Za-z0-9._~-]+$/);
+    expect(puts()).toHaveLength(1);
+    expect(puts()[0].id).toBe(row.id);
+  });
+
   test('id-less rows in one file are each kept — dedupe runs before back-fill', () => {
     // Minting the id first would make every fresh uuid "new", but comparing the
     // minted id against stored ids would also never match; the ordering that

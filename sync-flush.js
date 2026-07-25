@@ -40,8 +40,9 @@
     }
 
     // deps:
-    //   apiFetch(method, path, body) → Promise<Response>  (carries the Bearer token)
-    //   getUsername() → string | null                     (null when not accepted)
+    //   apiFetch(method, segments, body) → Promise<Response>  (Bearer token; encodes
+    //                                                          each path segment)
+    //   getUsername() → string | null                         (null when not accepted)
     function createSyncFlushWorker(deps) {
         var apiFetch = deps.apiFetch;
         var getUsername = deps.getUsername;
@@ -52,23 +53,27 @@
         var _flushWaiters = [];   // resolve callbacks awaiting a fully-drained outbox
         var _destroyed = false;   // retired instance — see destroy()
 
+        // The pump's only entry point: run flushHead after delayMs (0 ⇒ next
+        // microtask). Every caller — enqueue, the post-request reschedule, the
+        // online handler, the host's load-time nudge — goes through this, so
+        // there is one place where a flush can start.
         function scheduleFlush(delayMs) {
             if (_destroyed) { return; }
             if (_backoffTimer !== null) { return; }
             if (delayMs > 0) {
                 _backoffTimer = setTimeout(function () {
                     _backoffTimer = null;
-                    doFlush();
+                    flushHead();
                 }, delayMs);
             } else {
                 // Use a microtask so callers finish before we start
-                Promise.resolve().then(doFlush);
+                Promise.resolve().then(flushHead);
             }
         }
 
-        // Resolve any pending flush() promises once the queue is fully drained and
-        // no flush is in flight. The event-based completion signal that replaces
-        // the old 10 ms polling loop.
+        // Resolve any pending whenDrained() promises once the queue is fully
+        // drained and no request is in flight. The event-based completion signal
+        // that replaces the old 10 ms polling loop.
         function settleFlushWaiters() {
             if (_flushing) { return; }
             if (parseOutbox().length > 0) { return; }
@@ -90,7 +95,10 @@
             settleFlushWaiters();
         }
 
-        function doFlush() {
+        // Send exactly ONE entry — the head of the queue — and reschedule for the
+        // next one on completion. Named for that: it is not "flush the outbox",
+        // and calling it twice concurrently is a no-op by the _flushing guard.
+        function flushHead() {
             if (_destroyed || _flushing) { return; }
             var username = getUsername();
             if (!username) { settleFlushWaiters(); return; }
@@ -99,11 +107,15 @@
 
             _flushing = true;
             var entry = outbox[0];
-            var path = '/' + username + '/' + entry.section + '/' + entry.id;
+            // Segments, not a concatenated path: apiFetch encodes each one. An
+            // entry.id can carry user-supplied text (importVisits takes ids
+            // verbatim from an uploaded backup file), and a raw '/' or '..' in
+            // it would redirect this authenticated write to another endpoint.
+            var segments = [username, entry.section, entry.id];
             var method = entry.op === 'delete' ? 'DELETE' : 'PUT';
             var body = entry.op === 'delete' ? undefined : entry.data;
 
-            apiFetch(method, path, body).then(function (res) {
+            apiFetch(method, segments, body).then(function (res) {
                 _flushing = false;
 
                 // Reset the ladder only on outcomes that aren't a server fault:
@@ -144,7 +156,7 @@
             });
         }
 
-        // Append a mutation and kick the pump. Re-reads the persisted queue so a
+        // Append a mutation and start the pump. Re-reads the persisted queue so a
         // concurrent flush's shift() isn't clobbered.
         function enqueue(entry) {
             var outbox = parseOutbox();
@@ -153,16 +165,18 @@
             scheduleFlush(0);
         }
 
-        // Resolves when the outbox is fully drained. Completion is signalled
-        // through settleFlushWaiters rather than polled.
-        function flush() {
+        // Resolves when the outbox is fully drained. It does NOT itself drain the
+        // queue — the pump does that; this only nudges it and then waits, which
+        // is why it is named for the condition rather than the action.
+        // Completion is signalled through settleFlushWaiters rather than polled.
+        function whenDrained() {
             return new Promise(function (resolve) {
                 if (_destroyed || (!_flushing && parseOutbox().length === 0)) {
                     resolve();
                     return;
                 }
                 _flushWaiters.push(resolve);
-                doFlush();
+                flushHead();
             });
         }
 
@@ -177,14 +191,6 @@
             scheduleFlush(0);
         }
 
-        // Nudge the pump once — used on page load to drain a queue that survived a
-        // restart (a mutation persisted to the outbox but not flushed before the
-        // tab closed). Fresh worker instance, so there's no backoff state to reset
-        // (unlike onOnline); doFlush's own guards no-op when not accepted or empty.
-        function kick() {
-            scheduleFlush(0);
-        }
-
         // Retire this worker: cancel a pending backoff retry and refuse any
         // further scheduling, so an in-flight request that resolves later can't
         // resurrect it. Production has exactly one worker for the page's lifetime
@@ -192,7 +198,7 @@
         // shared window, and without it every dead instance keeps a live backoff
         // timer aimed at the *shared* walk_sync_outbox key — consuming entries out
         // from under whichever test is running when the timer fires. Pending
-        // flush() waiters are resolved rather than dropped so nothing hangs.
+        // whenDrained() waiters are resolved rather than dropped so nothing hangs.
         function destroy() {
             if (_backoffTimer !== null) {
                 clearTimeout(_backoffTimer);
@@ -206,9 +212,9 @@
 
         return {
             enqueue: enqueue,
-            flush: flush,
+            whenDrained: whenDrained,
             onOnline: onOnline,
-            kick: kick,
+            scheduleFlush: scheduleFlush,
             destroy: destroy,
             peek: parseOutbox,
             length: function () { return parseOutbox().length; },

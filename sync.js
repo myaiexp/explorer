@@ -96,7 +96,23 @@
 
     // ── Fetch helpers ────────────────────────────────────────────────────────────
 
-    function apiFetch(method, path, body) {
+    // Every request path is built from SEGMENTS, never a string the caller
+    // concatenated: a segment can carry user-supplied text — an imported visit's
+    // id (importVisits takes ids verbatim from an uploaded backup file), or a
+    // username read straight out of the URL — and a raw '/' or '..' inside one is
+    // normalized by the browser before the request leaves, silently redirecting
+    // an authenticated (Bearer-token) write to a different endpoint. Encoding
+    // here rather than at each call site is what makes that impossible to forget
+    // when a new endpoint is added.
+    function apiPath(segments) {
+        var encoded = [];
+        for (var i = 0; i < segments.length; i++) {
+            encoded.push(encodeURIComponent(String(segments[i])));
+        }
+        return '/' + encoded.join('/');
+    }
+
+    function apiFetch(method, segments, body) {
         var headers = { 'Content-Type': 'application/json' };
         if (_token) { headers['Authorization'] = 'Bearer ' + _token; }
         var opts = {
@@ -110,7 +126,7 @@
         // (a hung apiFetch would keep _flushing = true and freeze the outbox).
         // The flush worker's .catch already treats a rejection as a retryable
         // failure, so the abort just triggers its normal backoff-and-retry.
-        return fetchWithTimeout(API_BASE + path, opts);
+        return fetchWithTimeout(API_BASE + apiPath(segments), opts);
     }
 
     // Guarded toast — sync.js owns no DOM of its own and toast.js may not be
@@ -142,7 +158,7 @@
         var onSuccess = hooks.onSuccess;
         var onFail = hooks.onFail;
 
-        return apiFetch('GET', '/' + username).then(function (res) {
+        return apiFetch('GET', [username]).then(function (res) {
             if (!res.ok) { if (onFail) { onFail(); } return; }
             return res.json().then(function (data) {
                 // beforeApply is destructive (it wipes local data), so capture what
@@ -326,15 +342,16 @@
         },
 
         init: function () {
-            // Kick the flush pump once the state machine settles: a mutation
+            // Start the flush pump once the state machine settles: a mutation
             // persisted to the durable outbox but not drained before the tab
             // closed is otherwise only pumped by a fresh enqueue() or the 'online'
             // event — neither fires on a normal reload while already online. So a
             // queue that survived the restart would strand until the next mutation.
-            // doFlush's own guards no-op the kick unless accepted with a pending
-            // queue (see sync-flush.js).
+            // scheduleFlush(0) rather than onOnline(): this is a fresh worker with
+            // no backoff state to reset, and flushHead's own guards no-op when the
+            // queue is empty (see sync-flush.js).
             return ExplorerSync._runInit().then(function (result) {
-                if (_state === 'accepted') { flushWorker.kick(); }
+                if (_state === 'accepted') { flushWorker.scheduleFlush(0); }
                 return result;
             });
         },
@@ -372,7 +389,7 @@
         },
 
         accept: function () {
-            return apiFetch('POST', '/accounts').then(function (res) {
+            return apiFetch('POST', ['accounts']).then(function (res) {
                 if (!res.ok) { throw new Error('POST /accounts failed: ' + res.status); }
                 return res.json();
             }).then(function (body) {
@@ -402,7 +419,7 @@
                     history: Sections.readSection('history')
                 };
 
-                return apiFetch('POST', '/' + username + '/import', payload).then(function (res2) {
+                return apiFetch('POST', [username, 'import'], payload).then(function (res2) {
                     if (!res2.ok) { throw new Error('POST /import failed: ' + res2.status); }
                     writeConsentRecord({ state: 'accepted', username: username, token: token });
                     _state = 'accepted';
@@ -426,7 +443,7 @@
         deleteAccount: function () {
             if (!_username) { return Promise.resolve(); }
             var usernameToDelete = _username;
-            return apiFetch('DELETE', '/' + usernameToDelete).then(function (res) {
+            return apiFetch('DELETE', [usernameToDelete]).then(function (res) {
                 if (!res.ok) { throw new Error('DELETE account failed: ' + res.status); }
                 clearConsentRecord();
                 flushWorker.clear();
@@ -443,10 +460,11 @@
             flushWorker.enqueue({ section: section, op: op, id: id, data: data });
         },
 
-        // Test/inspection hook onto the flush worker's outbox.
+        // Test/inspection hook onto the flush worker's outbox. whenDrained()
+        // waits for the queue to empty; it does not itself do the draining.
         _outbox: {
             peek: flushWorker.peek,
-            flush: flushWorker.flush
+            whenDrained: flushWorker.whenDrained
         },
 
         // Retire this instance: detach the window listener and make the flush
