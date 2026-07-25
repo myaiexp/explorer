@@ -126,7 +126,11 @@
 
     // ── Online listener ──────────────────────────────────────────────────────────
 
-    window.addEventListener('online', function () { flushWorker.onOnline(); });
+    // Named rather than inline so _destroy() below can detach it. The page keeps
+    // this listener for its whole lifetime; only a test realm — which re-runs this
+    // IIFE on one shared window — ever needs to take it back off.
+    function handleOnline() { flushWorker.onOnline(); }
+    window.addEventListener('online', handleOnline);
 
     // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -361,6 +365,16 @@
         _outbox: {
             peek: flushWorker.peek,
             flush: flushWorker.flush
+        },
+
+        // Retire this instance: detach the window listener and make the flush
+        // worker inert. Only the test harness calls it — reloading this script in
+        // a shared realm otherwise strands every prior instance's 'online' handler
+        // and backoff timer on the window, all still pumping the one shared outbox
+        // key with their own stale username/token.
+        _destroy: function () {
+            window.removeEventListener('online', handleOnline);
+            flushWorker.destroy();
         }
     };
 

@@ -50,8 +50,10 @@
         var _backoffMs = 0;
         var _backoffTimer = null;
         var _flushWaiters = [];   // resolve callbacks awaiting a fully-drained outbox
+        var _destroyed = false;   // retired instance — see destroy()
 
         function scheduleFlush(delayMs) {
+            if (_destroyed) { return; }
             if (_backoffTimer !== null) { return; }
             if (delayMs > 0) {
                 _backoffTimer = setTimeout(function () {
@@ -89,7 +91,7 @@
         }
 
         function doFlush() {
-            if (_flushing) { return; }
+            if (_destroyed || _flushing) { return; }
             var username = getUsername();
             if (!username) { settleFlushWaiters(); return; }
             var outbox = parseOutbox();
@@ -155,7 +157,7 @@
         // through settleFlushWaiters rather than polled.
         function flush() {
             return new Promise(function (resolve) {
-                if (!_flushing && parseOutbox().length === 0) {
+                if (_destroyed || (!_flushing && parseOutbox().length === 0)) {
                     resolve();
                     return;
                 }
@@ -183,11 +185,31 @@
             scheduleFlush(0);
         }
 
+        // Retire this worker: cancel a pending backoff retry and refuse any
+        // further scheduling, so an in-flight request that resolves later can't
+        // resurrect it. Production has exactly one worker for the page's lifetime
+        // and never calls this; the test harness re-runs sync.js's IIFE on one
+        // shared window, and without it every dead instance keeps a live backoff
+        // timer aimed at the *shared* walk_sync_outbox key — consuming entries out
+        // from under whichever test is running when the timer fires. Pending
+        // flush() waiters are resolved rather than dropped so nothing hangs.
+        function destroy() {
+            if (_backoffTimer !== null) {
+                clearTimeout(_backoffTimer);
+                _backoffTimer = null;
+            }
+            _destroyed = true;
+            var waiters = _flushWaiters;
+            _flushWaiters = [];
+            for (var i = 0; i < waiters.length; i++) { waiters[i](); }
+        }
+
         return {
             enqueue: enqueue,
             flush: flush,
             onOnline: onOnline,
             kick: kick,
+            destroy: destroy,
             peek: parseOutbox,
             length: function () { return parseOutbox().length; },
             clear: clearOutbox
