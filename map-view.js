@@ -2,8 +2,8 @@
 // circle drawing, the visited-routes overlay, and route-color persistence. Owns
 // all mutable map state (markers, destMarker, circle, innerCircle, routeLines)
 // so no other module reassigns it; app.js drives the map through the exported
-// helpers. Reads getVisits (storage.js) at call time. Loaded after Leaflet +
-// storage.js, before app.js.
+// helpers. Reads getVisits (storage.js) and visitRenderParts (visit-shape.js) at
+// call time. Loaded after Leaflet + storage.js + visit-shape.js, before app.js.
 
 // ─── Map init ────────────────────────────────────────────────────────────────
 
@@ -184,33 +184,47 @@ function clearRouteLines() {
 
 // ─── Visited layer ────────────────────────────────────────────────────────────
 
+// Draw one visit's overlay pieces from the drawable parts visit-shape.js vetted.
+function drawVisitParts(parts, color) {
+    for (const coords of [parts.routeCoords, parts.returnRouteCoords]) {
+        if (coords) {
+            L.polyline(coords, { color, weight: 2, opacity: 0.4 }).addTo(visitedLayerGroup);
+        }
+    }
+
+    // Start: hollow ring (matches "you are here" semantic but compact for overlay)
+    L.circleMarker(parts.start, {
+        radius: 4, color: '#3b82f6', fillColor: '#fff', fillOpacity: 1, weight: 2
+    })
+    .bindPopup(`<b>${escapeHtml(parts.startLabel)}</b><br>${parts.dateText}`)
+    .addTo(visitedLayerGroup);
+
+    // Destination: filled in route color (matches the active route's pin)
+    L.circleMarker(parts.dest, {
+        radius: 5, color, fillColor: color, fillOpacity: 0.85, weight: 1
+    })
+    .bindPopup(`${parts.distanceText}<br>${parts.dateText}`)
+    .addTo(visitedLayerGroup);
+}
+
 function renderVisitedLayer() {
     visitedLayerGroup.clearLayers();
     const color = getRouteColor();
+    let skipped = 0;
     for (const visit of getVisits()) {
-        if (visit.routeCoords?.length > 0) {
-            L.polyline(visit.routeCoords, {
-                color, weight: 2, opacity: 0.4
-            }).addTo(visitedLayerGroup);
-        }
-        if (visit.returnRouteCoords?.length > 0) {
-            L.polyline(visit.returnRouteCoords, {
-                color, weight: 2, opacity: 0.4
-            }).addTo(visitedLayerGroup);
-        }
-        // Start: hollow ring (matches "you are here" semantic but compact for overlay)
-        L.circleMarker([visit.startLat, visit.startLng], {
-            radius: 4, color: '#3b82f6', fillColor: '#fff', fillOpacity: 1, weight: 2
-        })
-        .bindPopup(`<b>${escapeHtml(visit.startLabel)}</b><br>${new Date(visit.date).toLocaleDateString()}`)
-        .addTo(visitedLayerGroup);
-
-        // Destination: filled in route color (matches the active route's pin)
-        L.circleMarker([visit.destLat, visit.destLng], {
-            radius: 5, color, fillColor: color, fillOpacity: 0.85, weight: 1
-        })
-        .bindPopup(`${visit.distance.toFixed(1)} km<br>${new Date(visit.date).toLocaleDateString()}`)
-        .addTo(visitedLayerGroup);
+        // Ask what is drawable rather than dereferencing fields: a stored row can
+        // predate import validation, or have been merged down from an older cloud
+        // backup. This loop is reached from app.js's top level, so an unguarded
+        // throw on one bad row aborted the rest of init — on every page load, with
+        // no in-app way to recover short of clearing localStorage by hand.
+        const parts = visitRenderParts(visit);
+        if (!parts) { skipped++; continue; }
+        drawVisitParts(parts, color);
+    }
+    // Leave a trace: the overlay is silently short a walk, and the row is still in
+    // storage, so the symptom would otherwise surface far from its cause.
+    if (skipped > 0) {
+        console.warn(`renderVisitedLayer: skipped ${skipped} unusable visit row(s)`);
     }
 }
 
