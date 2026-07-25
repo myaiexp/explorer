@@ -214,6 +214,114 @@ describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
     });
 });
 
+// ── section writes are quota-aware (audit #5397 / #5408) ─────────────────────
+// mergeSection/populateSection used to call localStorage.setItem raw, skipping
+// storage.js's safeSetItem. That made a sync-down — the largest write the app
+// ever makes, since the cloud copy retains the full route geometry storage.js
+// trims locally — throw straight out of loadAccount's DATA_SECTIONS.forEach,
+// where the trailing .catch swallowed it. Both appliers now delegate to
+// writeStoredArray, so quota is recovered-or-reported instead of thrown.
+
+describe('quota-full sync-down', () => {
+    const SECTION_KEYS = ['walk_visits', 'walk_favorites', 'walk_saved_locations', 'walk_history'];
+
+    function quotaError() {
+        const e = new Error('quota exceeded');
+        e.name = 'QuotaExceededError';
+        return e;
+    }
+
+    // A store with room for the small rows already on the device but not for the
+    // fatter server payload: a section write over `limit` bytes throws. This is the
+    // shape that matters — a blanket "every write throws" would also block the
+    // rollback, which in reality re-writes bytes that demonstrably just fit.
+    function quotaCeiling(limit) {
+        const real = Storage.prototype.setItem;
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (k, v) {
+            if (SECTION_KEYS.includes(k) && String(v).length > limit) { throw quotaError(); }
+            return real.call(this, k, v);
+        });
+    }
+
+    // Server rows padded well past the ceiling; local rows stay far under it.
+    const fatVisit = { id: 'server-v', note: 'x'.repeat(400) };
+
+    test('Case 2 merge: a section that overflows quota is reported, not thrown', async () => {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [fatVisit], favorites: [], savedLocations: [], history: [],
+            },
+        });
+        globalThis.showError = vi.fn();
+        loadSync();
+        quotaCeiling(200);
+
+        const rendered = vi.fn();
+        window.addEventListener('explorer-sync-state-change', rendered);
+        // A raw setItem would reject this await with QuotaExceededError.
+        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        window.removeEventListener('explorer-sync-state-change', rendered);
+
+        // storage.js surfaced the full-storage toast rather than failing silently.
+        expect(globalThis.showError).toHaveBeenCalled();
+        // Nothing was wiped on this path, so the failed write left the prior value
+        // in place — degraded, not lost.
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
+        // Still 'accepted', and the UI is still told to re-render: the sections that
+        // did land must not be stranded behind a missing state-change event.
+        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expect(rendered).toHaveBeenCalled();
+        delete globalThis.showError;
+    });
+
+    test('account switch: an apply that overflows quota rolls the wipe back', async () => {
+        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+            walk_history: JSON.stringify([{ id: 'local-h' }]),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        mockFetch({
+            '/explorer/api/mossy-fern-7': {
+                visits: [fatVisit], favorites: [], savedLocations: [], history: [],
+            },
+        });
+        globalThis.showError = vi.fn();
+        loadSync();
+        quotaCeiling(200);
+
+        await window.ExplorerSync.init();
+
+        // wipeSections() ran before the failed populate; without the rollback the
+        // device would be left erased holding only part of the new account.
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
+        expect(JSON.parse(localStorage.getItem('walk_history'))).toEqual([{ id: 'local-h' }]);
+        // The switch did not happen, so no foreign account is bound.
+        const state = window.ExplorerSync.getState();
+        expect(state.token).toBeNull();
+        expect(state.username).toBeNull();
+        expect(globalThis.showError).toHaveBeenCalledWith(
+            expect.stringContaining('your previous data was restored'),
+        );
+        delete globalThis.showError;
+    });
+
+    test('restoreSections puts an absent section back as absent, not as []', () => {
+        setLocalStorage({ walk_visits: JSON.stringify([{ id: 'local-v' }]) });
+        const snap = globalThis.SyncSections.snapshotSections();
+        globalThis.SyncSections.populateSection('history', [{ id: 'server-h' }]);
+        expect(globalThis.SyncSections.restoreSections(snap)).toBe(true);
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
+        expect(localStorage.getItem('walk_history')).toBeNull();
+    });
+});
+
 // ── isLocalStorageEmpty ───────────────────────────────────────────────────────
 
 describe('isLocalStorageEmpty', () => {

@@ -1,11 +1,20 @@
 // Route elevation profile — Open-Meteo sampling + hand-built SVG chart. Holds no
 // map or route-color state of its own: the chart color is passed in by the
-// caller, keeping this module DOM-only and dependency-free. Loaded before app.js
-// (and before export.js, which uses fetchElevations for FIT export); used there
-// as globals.
+// caller, keeping this module DOM-only and dependency-free. Loaded after net.js
+// (for fetchWithTimeout) and before app.js (and before export.js, which uses
+// fetchElevations for FIT export); used there as globals.
+
+// Tighter than net.js's 20 s default: elevation is optional decoration on the map
+// path, but confirmFITExport AWAITS it after the modal has already closed — so a
+// stalled Open-Meteo leaves the user clicking "Download .fit" with no file, no
+// error, and no spinner until this fires. Better to drop the profile quickly than
+// to hold the export hostage.
+const ELEVATION_TIMEOUT_MS = 10000;
 
 // Sample up to 100 points evenly along the route and fetch their elevations from
-// Open-Meteo. Returns the elevation array, or null on a non-OK response.
+// Open-Meteo. Returns the elevation array, or null on a non-OK response; rejects
+// if the request times out (every caller already treats a rejection as "no
+// elevation" and carries on).
 async function fetchElevations(coords) {
     // Sample up to 100 points evenly along the route
     const maxPts = 100;
@@ -18,7 +27,11 @@ async function fetchElevations(coords) {
 
     const lats = sampled.map(c => c[0].toFixed(4)).join(',');
     const lngs = sampled.map(c => c[1].toFixed(4)).join(',');
-    const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`);
+    const res = await fetchWithTimeout(
+        `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`,
+        {},
+        ELEVATION_TIMEOUT_MS,
+    );
     if (!res.ok) return null;
     const data = await res.json();
     return data.elevation || null;

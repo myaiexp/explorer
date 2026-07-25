@@ -92,6 +92,13 @@
         return fetchWithTimeout(API_BASE + path, opts);
     }
 
+    // Guarded toast — sync.js owns no DOM of its own and toast.js may not be
+    // loaded (unit tests, or before the deferred script runs), so resolve the
+    // helper off globalThis at call time and no-op if it isn't there.
+    function notifyError(message) {
+        if (typeof globalThis.showError === 'function') { globalThis.showError(message); }
+    }
+
     // Download an account's four sections and apply each via applySection
     // (mergeSection on the user's own device, populateSection on a fresh load).
     // beforeApply, if given, runs once the download has succeeded and BEFORE any
@@ -99,19 +106,61 @@
     // deferred to here so a failed fetch can't destroy the user's walks before
     // the replacement has actually arrived.
     // onSuccess runs after a successful download (bind + persist consent); onFail
-    // runs on a non-ok response or a network error (roll back partial auth state).
+    // runs on a non-ok response, a network error, or an apply that could not be
+    // completed after a destructive beforeApply (roll back partial auth state).
     // Shared by init's three load paths — they differ only in the appliers/hooks.
     function loadAccount(username, applySection, onSuccess, onFail, beforeApply) {
         return apiFetch('GET', '/' + username).then(function (res) {
             if (!res.ok) { if (onFail) { onFail(); } return; }
             return res.json().then(function (data) {
+                // beforeApply is destructive (it wipes local data), so capture what
+                // it is about to erase. A write that fails partway through the apply
+                // below would otherwise leave the device wiped holding only part of
+                // the new account — the same data-loss class the deferred wipe was
+                // written to close, reached through the write side instead.
+                var snapshot = beforeApply ? Sections.snapshotSections() : null;
                 if (beforeApply) { beforeApply(); }
+
+                // Apply every section even when one fails. A section that overflows
+                // quota returns false (storage.js has already trimmed what it can and
+                // toasted); aborting the loop there would strand the remaining
+                // sections for no benefit.
+                var applied = true;
                 Sections.DATA_SECTIONS.forEach(function (s) {
-                    if (Array.isArray(data[s])) { applySection(s, data[s]); }
+                    if (!Array.isArray(data[s])) { return; }
+                    try {
+                        if (applySection(s, data[s]) === false) { applied = false; }
+                    } catch (e) {
+                        applied = false;
+                        console.warn('[sync] could not apply section ' + s, e);
+                    }
                 });
+
+                if (!applied && snapshot) {
+                    // The wipe already ran, so a partial apply here IS data loss.
+                    // Roll the whole switch back: restore what we erased, drop the
+                    // tentatively-set token, and do not bind the account.
+                    var restored = Sections.restoreSections(snapshot);
+                    notifyError(restored
+                        ? 'Could not load that account — your previous data was restored.'
+                        : 'Could not load that account, and some local data could not be restored.');
+                    if (onFail) { onFail(); }
+                    return;
+                }
+                if (!applied) {
+                    // Nothing was wiped, so a failed write leaves that section's
+                    // previous value in place — degraded, not lost. storage.js has
+                    // already toasted; carry on so the sections that did land render.
+                    console.warn('[sync] account ' + username + ' applied only partially (storage full)');
+                }
                 if (onSuccess) { onSuccess(); }
             });
-        }).catch(function () { if (onFail) { onFail(); } });
+        }).catch(function (e) {
+            // Fetch/JSON failures only — apply errors are handled above, so this no
+            // longer silently swallows a data-loss bug as if it were a network blip.
+            console.warn('[sync] could not load account ' + username, e);
+            if (onFail) { onFail(); }
+        });
     }
 
     // ── Flush worker ─────────────────────────────────────────────────────────────
@@ -309,7 +358,7 @@
                     }
                 });
                 if (changed) {
-                    localStorage.setItem(Sections.sectionKey('savedLocations'), JSON.stringify(locs));
+                    Sections.writeSection('savedLocations', locs);
                 }
 
                 // Build full payload

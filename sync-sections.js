@@ -6,7 +6,9 @@
 // Load order: <script src="sync-sections.js"> BEFORE sync.js. The walk_* keys are
 // owned by storage.js and resolved off globalThis at call time (storage.js loads
 // after us, but is defined before any method here runs), so the key strings keep
-// exactly one home and a rename there can't silently fork.
+// exactly one home and a rename there can't silently fork. Reads and writes
+// delegate to storage.js's readStoredArray/writeStoredArray for the same reason —
+// the write side also buys quota recovery, which a raw setItem here would skip.
 
 (function () {
     'use strict';
@@ -32,6 +34,17 @@
     // it lives in exactly one place (corrupt/missing → []).
     function readSection(section) {
         return globalThis.readStoredArray(sectionKey(section));
+    }
+
+    // Write-side counterpart to readSection: every section write goes through
+    // storage.js's writeStoredArray, NOT a raw setItem. That matters most here —
+    // a sync-down carries the full route geometry storage.js trims locally, so
+    // these are the largest writes the app ever makes and the likeliest to hit a
+    // full quota. writeStoredArray recovers by trimming old visit geometry and
+    // toasts on hard failure; a raw setItem would instead throw mid-restore.
+    // Returns false when the write could not be made durable.
+    function writeSection(section, rows) {
+        return globalThis.writeStoredArray(sectionKey(section), rows);
     }
 
     function isLocalStorageEmpty() {
@@ -75,11 +88,11 @@
             }
         });
         var merged = Object.keys(byId).map(function (id) { return byId[id]; });
-        localStorage.setItem(sectionKey(section), JSON.stringify(merged));
+        return writeSection(section, merged);
     }
 
     function populateSection(section, serverRows) {
-        localStorage.setItem(sectionKey(section), JSON.stringify(normalizeServerRows(section, serverRows)));
+        return writeSection(section, normalizeServerRows(section, serverRows));
     }
 
     function wipeSections() {
@@ -88,15 +101,51 @@
         });
     }
 
+    // Capture the four sections' raw stored values so a destructive apply can be
+    // rolled back. Raw strings rather than parsed arrays so the restore is
+    // byte-for-byte — an absent key stays absent, and a section this module never
+    // successfully rewrites isn't quietly normalized on the way back.
+    function snapshotSections() {
+        var snap = {};
+        DATA_SECTIONS.forEach(function (s) {
+            snap[s] = localStorage.getItem(sectionKey(s));
+        });
+        return snap;
+    }
+
+    // Put a snapshotSections() capture back, undoing a wipe plus whatever a failed
+    // apply managed to write. Wipes first so the restore writes into the space the
+    // snapshot came from: a partial apply may have left a much larger payload in one
+    // key, and without the clear the rollback could hit quota re-writing data that
+    // demonstrably fit moments earlier. Returns false if any section could not be
+    // put back — that is data loss the caller must surface, not swallow.
+    function restoreSections(snap) {
+        wipeSections();
+        var ok = true;
+        DATA_SECTIONS.forEach(function (s) {
+            var raw = snap ? snap[s] : null;
+            if (raw === null || raw === undefined) { return; }
+            try {
+                localStorage.setItem(sectionKey(s), raw);
+            } catch (e) {
+                ok = false;
+            }
+        });
+        return ok;
+    }
+
     globalThis.SyncSections = {
         DATA_SECTIONS: DATA_SECTIONS,
         sectionKey: sectionKey,
         readSection: readSection,
+        writeSection: writeSection,
         isLocalStorageEmpty: isLocalStorageEmpty,
         normalizeServerRows: normalizeServerRows,
         mergeSection: mergeSection,
         populateSection: populateSection,
-        wipeSections: wipeSections
+        wipeSections: wipeSections,
+        snapshotSections: snapshotSections,
+        restoreSections: restoreSections
     };
 
 }());
