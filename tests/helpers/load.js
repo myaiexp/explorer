@@ -56,7 +56,8 @@ export const SCRIPT_DEPS = {
     'novelty':      ['geo-utils'],
     'screening':    ['geo-utils', 'novelty'],  // novelty supplies partialShuffle (capPool dep)
     'fit-encoder':  ['geo-utils'],             // aliases haversineM
-    'osrm':         ['net', 'geo-utils', 'geometry'],
+    // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
+    'osrm':         ['net', 'geometry', 'loop-quality'],
     'result-panel': ['session-state'],
     'route-view':   ['session-state'],
     'visits-io':    ['visit-shape'],

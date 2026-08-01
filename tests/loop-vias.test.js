@@ -7,8 +7,8 @@
  * read at call time (haversineKm, calculateDistance, envelopeOffsetPoint,
  * computeSpreadParams); osrm.js only assigns globals at load (no top-level calls),
  * so the whole file runs cleanly in the realm. loopOverlapFraction is unused here.
- * helpers/load.js's SCRIPT_DEPS already lists osrm's edges (net, geo-utils,
- * geometry), so loading 'osrm' pulls all three in order.
+ * helpers/load.js's SCRIPT_DEPS already lists osrm's edges (net, geometry,
+ * loop-quality; geo-utils arrives transitively), so loading 'osrm' pulls them.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
 import { loadScripts } from './helpers/load.js';

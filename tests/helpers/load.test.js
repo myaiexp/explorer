@@ -48,6 +48,14 @@ describe('SCRIPT_DEPS', () => {
     test.each(EDGES)('%s loads before %s in index.html', (dep, mod) => {
         expect(INDEX_ORDER.indexOf(dep)).toBeLessThan(INDEX_ORDER.indexOf(mod));
     });
+
+    // Completeness (not just order): each listed edge must be named in the
+    // dependent module's source — usually its "Loaded after …" header. Without
+    // this, SCRIPT_DEPS can omit a real free-identifier collaborator (the
+    // osrm → loop-quality gap, audit #5733) and the order tripwire stays green.
+    test.each(EDGES)('%s is named in %s source', (dep, mod) => {
+        expect(readScript(mod)).toMatch(new RegExp(`${dep}(\\.js)?`));
+    });
 });
 
 describe('loadScripts', () => {

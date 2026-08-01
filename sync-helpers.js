@@ -18,14 +18,21 @@ function maybeRequestConsent() {
 // the four synced collections (savedLocations, favorites, history, visits) goes
 // through one of these — except importVisits' batch put (visits-io.js), which
 // writes once and mirrors each row in a loop.
+//
+// Gate the outbox mirror on a durable local write: when writeStoredArray returns
+// false (quota exhausted, already toasted), mutate must not run — otherwise the
+// cloud outbox would claim a put/delete that localStorage never accepted.
+// Returns whether the local write (and therefore the mirror) happened.
 function syncedPut(key, arr, section, id, data) {
-    writeStoredArray(key, arr);
+    if (!writeStoredArray(key, arr)) return false;
     ExplorerSync.mutate(section, 'put', id, data);
+    return true;
 }
 
 function syncedDelete(key, arr, section, id) {
-    writeStoredArray(key, arr);
+    if (!writeStoredArray(key, arr)) return false;
     ExplorerSync.mutate(section, 'delete', id);
+    return true;
 }
 
 globalThis.maybeRequestConsent = maybeRequestConsent;

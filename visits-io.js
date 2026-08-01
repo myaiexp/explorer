@@ -76,7 +76,12 @@ function applyImportedVisits(parsed) {
         if (!v.id) v.id = crypto.randomUUID();
     }
 
-    writeStoredArray(VISITS_KEY, [...existing, ...newEntries]);
+    // Gate mirror + success toast on a durable local write. writeStoredArray
+    // already toasts QUOTA_FULL on hard failure; mutating the outbox or claiming
+    // "Added N visits" when nothing landed would desync cloud from local.
+    if (!writeStoredArray(VISITS_KEY, [...existing, ...newEntries])) {
+        return { added: 0, skipped };
+    }
     // Mirror each row to the cloud outbox exactly as markAsVisited does. Without
     // this, imported visits live only in localStorage and silently never
     // replicate to the cloud backup when sync is active.

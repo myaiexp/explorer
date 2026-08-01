@@ -36,7 +36,9 @@ function readStoredArray(key) {
 // The cloud-mirror half (ExplorerSync.mutate) stays in app.js's syncedPut/
 // syncedDelete, which wrap this — storage.js itself does no network. Returns
 // true on a durable write, false when quota was exhausted and couldn't be
-// reclaimed (callers may ignore it; the failure is also surfaced via a toast).
+// reclaimed (hard failure is also toasted). Callers that also mirror to the
+// cloud outbox (syncedPut/syncedDelete, applyImportedVisits) MUST gate the
+// mirror on this return — a false must not become a mutate.
 function writeStoredArray(key, arr) {
     return safeSetItem(key, JSON.stringify(arr));
 }

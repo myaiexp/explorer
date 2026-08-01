@@ -1,16 +1,15 @@
+// @vitest-environment node
 // Iconography contract for inline SVGs in index.html — fleet stroke weight + grid.
 // Spec: mase.fi docs/design-cards/iconography (viewBox 20|24, stroke 1.5, round caps).
 // idea #2472: explorer icons drifted to mixed 16-grid / stroke-2 weights.
+// Node env required: fs/path under the suite default (jsdom) can leave Node
+// builtins externalized, aborting collection before any test runs (audit #5712).
 
 import { describe, test, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
-const html = readFileSync(
-    resolve(dirname(fileURLToPath(import.meta.url)), '..', 'index.html'),
-    'utf8'
-);
+const html = readFileSync(resolve(__dirname, '..', 'index.html'), 'utf8');
 
 // Every <svg …> opening tag in the document (self-contained icons, not map markers).
 const svgOpens = html.match(/<svg\b[^>]*>/g) ?? [];

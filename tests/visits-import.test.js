@@ -244,6 +244,25 @@ describe('applyImportedVisits — failures are not relabeled', () => {
   });
 });
 
+describe('applyImportedVisits — writeStoredArray failure (audit #5713)', () => {
+  // storage.js already toasts QUOTA_FULL when the write cannot be reclaimed.
+  // Import must not then mutate the outbox or claim success for rows that
+  // never landed — the desync path no prior consumer test forced red.
+  test('does not mutate or toast success when the local write returns false', () => {
+    globalThis.writeStoredArray = () => false;
+
+    const result = applyImportedVisits([validRow(), validRow({ id: 'v2' })]);
+
+    expect(result).toEqual({ added: 0, skipped: 0 });
+    expect(mutations).toHaveLength(0);
+    expect(toasts).toEqual([]);
+    expect(globalThis.maybeRequestConsent).not.toHaveBeenCalled();
+    expect(globalThis.updateVisitedCounter).not.toHaveBeenCalled();
+    expect(renders).toBe(0);
+    expect(stored()).toEqual([]);
+  });
+});
+
 describe('importVisits — file plumbing', () => {
   // importVisits only reads event.target.files[0] and writes event.target.value,
   // so a plain object is a faithful stand-in for the <input type=file> event.
