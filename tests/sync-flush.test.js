@@ -89,6 +89,33 @@ describe('outbox enqueue and per-status handling', () => {
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
     });
 
+    test('does not schedule flush when the outbox write returns false (audit #5721)', async () => {
+        // Hard-quota: writeStoredArray already toasted; enqueue must not arm the
+        // pump against a queue that never accepted the entry — otherwise flush
+        // races a durable write that never happened (and can drop the mutation).
+        await setupAccepted('rugged-pine-42');
+        const realWrite = globalThis.writeStoredArray;
+        globalThis.writeStoredArray = (key, arr) => {
+            if (key === 'walk_sync_outbox') return false;
+            return realWrite(key, arr);
+        };
+        try {
+            const fetchSpy = vi.fn();
+            global.fetch = fetchSpy;
+
+            window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+            await flushPromises();
+
+            expect(fetchSpy).not.toHaveBeenCalled();
+            // Prior durable state is unchanged — the failed write left nothing new.
+            expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
+        } finally {
+            // Direct assignment (not a vi.spy) — restore so later tests don't
+            // inherit a permanently-failing outbox writer.
+            globalThis.writeStoredArray = realWrite;
+        }
+    });
+
     test('respects Retry-After on 429', async () => {
         vi.useFakeTimers();
         await setupAccepted('rugged-pine-42');

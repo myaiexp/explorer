@@ -16,7 +16,10 @@ function markAsVisited() {
     if (session.visitId) {
         const undoneId = session.visitId;
         const visits = getVisits().filter(v => v.id !== undoneId);
-        syncedDelete(VISITS_KEY, visits, 'visits', String(undoneId));
+        // Gate session/UI updates on a durable local write. syncedDelete already
+        // toasts on hard quota failure; stamping visitId=null while the row is
+        // still in localStorage makes the button lie and the counter/layer disagree.
+        if (!syncedDelete(VISITS_KEY, visits, 'visits', String(undoneId))) return;
         session.visitId = null;
         syncMarkVisitedBtn();
         updateVisitedCounter();
@@ -30,7 +33,9 @@ function markAsVisited() {
 
     const visits = getVisits();
     visits.push(visit);
-    syncedPut(VISITS_KEY, visits, 'visits', visit.id, visit);
+    // Same gate on create: never stamp session.visitId or re-render as visited
+    // when the local write (and therefore the cloud mirror) did not land.
+    if (!syncedPut(VISITS_KEY, visits, 'visits', visit.id, visit)) return;
     maybeRequestConsent();
     session.visitId = visit.id;
 

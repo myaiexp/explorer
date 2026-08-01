@@ -16,10 +16,12 @@
 
 import { describe, test, expect, beforeEach } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { installSyncedMirrorStubs } from './helpers/synced-mirror.js';
 
 const VISITS_KEY = 'walk_visits';
 let putCalls;
 let deleteCalls;
+let setWriteOk;
 let syncBtnCalls;
 let renderLayerCalls;
 let consentCalls;
@@ -30,8 +32,6 @@ function storedVisits() {
 
 beforeEach(() => {
   localStorage.clear();
-  putCalls = [];
-  deleteCalls = [];
   syncBtnCalls = 0;
   renderLayerCalls = 0;
   consentCalls = 0;
@@ -71,17 +71,7 @@ beforeEach(() => {
     return currentSession;
   };
 
-  // Real persist + record the cloud-mirror half, matching sync-helpers.js's
-  // writeStoredArray-then-mutate contract — the persist-and-mirror invariant
-  // must be independently observable in both halves.
-  globalThis.syncedPut = (key, arr, section, id, data) => {
-    localStorage.setItem(key, JSON.stringify(arr));
-    putCalls.push({ section, id, data });
-  };
-  globalThis.syncedDelete = (key, arr, section, id) => {
-    localStorage.setItem(key, JSON.stringify(arr));
-    deleteCalls.push({ section, id });
-  };
+  ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs({ recordPutData: true }));
 
   globalThis.maybeRequestConsent = () => { consentCalls++; };
   globalThis.syncMarkVisitedBtn = () => { syncBtnCalls++; };
@@ -210,6 +200,43 @@ describe('markAsVisited — no session', () => {
     expect(syncBtnCalls).toBe(0);
     expect(renderLayerCalls).toBe(0);
     expect(consentCalls).toBe(0);
+  });
+});
+
+describe('markAsVisited — hard-quota write failure (audit #5721 #5711)', () => {
+  // syncedPut/syncedDelete return false when writeStoredArray cannot reclaim
+  // quota. Session/UI must not advance past a write that never landed — otherwise
+  // the visited button lies, the counter/layer disagree, and cloud may receive a
+  // row the device never kept.
+  test('a failed put does not stamp visitId, re-render, or request consent', () => {
+    setWriteOk(false);
+    const session = setCurrentSession(baseSession());
+    markAsVisited();
+
+    expect(session.visitId).toBeUndefined();
+    expect(storedVisits()).toHaveLength(0);
+    expect(putCalls).toHaveLength(0);
+    expect(syncBtnCalls).toBe(0);
+    expect(renderLayerCalls).toBe(0);
+    expect(consentCalls).toBe(0);
+  });
+
+  test('a failed undo delete leaves visitId set and the row in storage', () => {
+    const session = setCurrentSession(baseSession());
+    markAsVisited(); // create succeeds
+    const visitId = session.visitId;
+    expect(storedVisits()).toHaveLength(1);
+    putCalls.length = 0;
+    setWriteOk(false);
+
+    markAsVisited(); // undo fails
+
+    expect(session.visitId).toBe(visitId);
+    expect(storedVisits()).toHaveLength(1);
+    expect(deleteCalls).toHaveLength(0);
+    // No extra re-render beyond the successful create.
+    expect(syncBtnCalls).toBe(1);
+    expect(renderLayerCalls).toBe(1);
   });
 });
 

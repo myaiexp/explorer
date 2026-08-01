@@ -12,10 +12,12 @@
 
 import { describe, test, expect, beforeEach } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { installSyncedMirrorStubs } from './helpers/synced-mirror.js';
 
 const FAVORITES_KEY = 'walk_favorites';
 let putCalls;
 let deleteCalls;
+let setWriteOk;
 let currentSession;
 
 function storedFavs() {
@@ -38,8 +40,6 @@ function session(overrides) {
 
 beforeEach(() => {
   localStorage.clear();
-  putCalls = [];
-  deleteCalls = [];
   currentSession = null;
 
   document.body.innerHTML =
@@ -62,16 +62,7 @@ beforeEach(() => {
   };
   globalThis.restoreResult = () => {};
   globalThis.maybeRequestConsent = () => {};
-  // Real persist + record the cloud-mirror half, matching sync-helpers.js's
-  // writeStoredArray-then-mutate contract (mutate is a no-op for anonymous users).
-  globalThis.syncedPut = (key, arr, section, id) => {
-    localStorage.setItem(key, JSON.stringify(arr));
-    putCalls.push({ section, id });
-  };
-  globalThis.syncedDelete = (key, arr, section, id) => {
-    localStorage.setItem(key, JSON.stringify(arr));
-    deleteCalls.push({ section, id });
-  };
+  ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs());
 
   loadScripts('favorites');
 });
@@ -154,6 +145,31 @@ describe('toggleFavorite: new favorites go to the head', () => {
     window.toggleFavorite();
 
     expect(storedFavs().map((f) => f.id)).toEqual(['second', 'first']);
+  });
+});
+
+describe('toggleFavorite: hard-quota write failure (audit #5721)', () => {
+  test('a failed put leaves the star inactive and stores nothing', () => {
+    setWriteOk(false);
+    currentSession = session({ id: 42, destLat: 60.1, destLng: 25.1 });
+    window.toggleFavorite();
+
+    expect(storedFavs()).toHaveLength(0);
+    expect(document.getElementById('favoriteBtn').classList.contains('active')).toBe(false);
+    expect(putCalls).toHaveLength(0);
+  });
+
+  test('a failed delete leaves the row and keeps the star active', () => {
+    currentSession = session({ id: 42, destLat: 60.1, destLng: 25.1 });
+    window.toggleFavorite(); // add succeeds
+    expect(storedFavs()).toHaveLength(1);
+    setWriteOk(false);
+
+    window.toggleFavorite(); // remove fails
+
+    expect(storedFavs()).toHaveLength(1);
+    expect(document.getElementById('favoriteBtn').classList.contains('active')).toBe(true);
+    expect(deleteCalls).toHaveLength(0);
   });
 });
 

@@ -25,13 +25,15 @@ function toggleFavorite() {
     if (idx >= 0) {
         const removed = favs[idx];
         favs.splice(idx, 1);
+        // Gate the optimistic button flip on a durable write — otherwise the
+        // star shows inactive while localStorage still holds the row.
+        if (!syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id))) return;
         btn.classList.remove('active');
-        syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
     } else {
         const newFav = snapshotSession(session);
         favs.unshift(newFav);
+        if (!syncedPut(FAVORITES_KEY, favs, 'favorites', newFav.id, newFav)) return;
         btn.classList.add('active');
-        syncedPut(FAVORITES_KEY, favs, 'favorites', newFav.id, newFav);
         maybeRequestConsent();
     }
     renderFavoritesSection();
@@ -50,7 +52,7 @@ function deleteFavorite(index, event) {
     const favs = getFavorites();
     const removed = favs[index];
     favs.splice(index, 1);
-    syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id));
+    if (!syncedDelete(FAVORITES_KEY, favs, 'favorites', String(removed.id))) return;
     renderFavoritesSection();
     updateFavoriteBtn();
 }

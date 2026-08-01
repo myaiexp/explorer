@@ -13,15 +13,15 @@
 
 import { describe, test, expect, beforeEach } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { installSyncedMirrorStubs } from './helpers/synced-mirror.js';
 
 const HISTORY_KEY = 'walk_history';
 let putCalls;
 let deleteCalls;
+let setWriteOk;
 
 beforeEach(() => {
   localStorage.clear();
-  putCalls = [];
-  deleteCalls = [];
   document.body.innerHTML =
     '<div id="historySection"><ul id="historyList"></ul><button id="historyMoreBtn"></button></div>';
 
@@ -32,16 +32,7 @@ beforeEach(() => {
   globalThis.snapshotSession = (s) => ({ ...s });
   globalThis.buildListItem = () => document.createElement('li');
   globalThis.maybeRequestConsent = () => {};
-  // Real persist + record the cloud-mirror half, matching sync-helpers.js's
-  // writeStoredArray-then-mutate contract (mutate is a no-op for anonymous users).
-  globalThis.syncedPut = (key, arr, section, id) => {
-    localStorage.setItem(key, JSON.stringify(arr));
-    putCalls.push({ section, id });
-  };
-  globalThis.syncedDelete = (key, arr, section, id) => {
-    localStorage.setItem(key, JSON.stringify(arr));
-    deleteCalls.push({ section, id });
-  };
+  ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs());
 
   loadScripts('history');
 });
@@ -128,5 +119,19 @@ describe('saveToHistory cap mirrors to the cloud', () => {
   test('deletes carry the history section so the cloud mirror targets the right table', () => {
     for (let i = 0; i < 22; i++) window.saveToHistory(sessionN(i));
     expect(deleteCalls.every((c) => c.section === 'history')).toBe(true);
+  });
+
+  test('a hard-quota put failure does not mirror age-off deletes or rewrite storage', () => {
+    for (let i = 0; i < 20; i++) window.saveToHistory(sessionN(i));
+    putCalls.length = 0;
+    deleteCalls.length = 0;
+    setWriteOk(false);
+
+    window.saveToHistory(sessionN(20));
+
+    expect(storedHistory()).toHaveLength(20);
+    expect(storedHistory().some((e) => e.id === 'h0')).toBe(true); // oldest still present
+    expect(putCalls).toHaveLength(0);
+    expect(deleteCalls).toHaveLength(0);
   });
 });

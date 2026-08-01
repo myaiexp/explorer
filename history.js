@@ -24,7 +24,10 @@ function saveToHistory(session) {
     // truncates `history` in place and returns the aged-off tail.
     history.sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0));
     const dropped = history.splice(HISTORY_MAX);
-    syncedPut(HISTORY_KEY, history, 'history', entry.id, entry);
+    // Gate the cloud-cap deletes + consent prompt on a durable put. If the local
+    // write failed, the aged-off rows are still in storage — deleting them from
+    // the cloud (or claiming a save happened) would desync the two sides.
+    if (!syncedPut(HISTORY_KEY, history, 'history', entry.id, entry)) return;
     // syncedDelete re-persists the already-capped array (idempotent) and enqueues
     // the cloud delete; ExplorerSync.mutate no-ops for anonymous users, so an
     // un-synced browser just gets the local cap, exactly as before.
@@ -37,7 +40,7 @@ function deleteHistoryEntry(index) {
     const history = getHistory();
     const removed = history[index];
     history.splice(index, 1);
-    syncedDelete(HISTORY_KEY, history, 'history', String(removed.id));
+    if (!syncedDelete(HISTORY_KEY, history, 'history', String(removed.id))) return;
     renderHistorySection();
 }
 

@@ -13,14 +13,16 @@ function toggleSaveLocation() {
     if (existing >= 0) {
         const removed = saved[existing];
         saved.splice(existing, 1);
-        syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value));
+        // Gate success toast + re-render on a durable write. writeStoredArray
+        // already toasts the quota error; claiming "removed" over it would lie.
+        if (!syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value))) return;
         showSuccess('Location removed from saved.');
     } else {
         const label = prompt('Name for this location:', input);
         if (label === null) return;
         const newLoc = { id: crypto.randomUUID(), label: label || input, value: input };
         saved.push(newLoc);
-        syncedPut(SAVED_LOCATIONS_KEY, saved, 'savedLocations', newLoc.id, newLoc);
+        if (!syncedPut(SAVED_LOCATIONS_KEY, saved, 'savedLocations', newLoc.id, newLoc)) return;
         maybeRequestConsent();
         showSuccess('Location saved.');
     }
@@ -39,7 +41,7 @@ function deleteSavedLocation(index, event) {
     const saved = getSavedLocations();
     const removed = saved[index];
     saved.splice(index, 1);
-    syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value));
+    if (!syncedDelete(SAVED_LOCATIONS_KEY, saved, 'savedLocations', removed.id || String(removed.value))) return;
     renderSavedLocations();
     updateSaveLocationBtn();
 }

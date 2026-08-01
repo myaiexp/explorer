@@ -19,13 +19,15 @@
     // off globalThis at call time because storage.js loads AFTER this script —
     // both are defined well before any outbox op runs. writeStoredArray's quota
     // handler frees space by trimming old visit geometry, so a full localStorage
-    // no longer silently drops queued mutations here either.
+    // no longer silently drops queued mutations here either. Returns the boolean
+    // so callers can skip scheduleFlush when the durable queue write failed —
+    // otherwise flush would run against a queue that never accepted the entry.
     function parseOutbox() {
         return globalThis.readStoredArray(OUTBOX_KEY);
     }
 
     function saveOutbox(entries) {
-        globalThis.writeStoredArray(OUTBOX_KEY, entries);
+        return globalThis.writeStoredArray(OUTBOX_KEY, entries);
     }
 
     function clearOutbox() {
@@ -88,7 +90,16 @@
         function consumeOutboxHead() {
             var remaining = parseOutbox();
             remaining.shift();
-            saveOutbox(remaining);
+            // If the head drop can't be persisted, localStorage still holds the
+            // processed entry. Back off rather than scheduleFlush(0): a tight
+            // retry would re-send the same entry forever (HTTP succeeds, shift
+            // fails, re-arm) and OOM the page. PUT/DELETE are idempotent so a
+            // later attempt is safe; waiters stay pending until the drop lands.
+            if (!saveOutbox(remaining)) {
+                _backoffMs = nextBackoff(_backoffMs);
+                scheduleFlush(_backoffMs);
+                return;
+            }
             if (remaining.length > 0) {
                 scheduleFlush(0);
             }
@@ -157,11 +168,13 @@
         }
 
         // Append a mutation and start the pump. Re-reads the persisted queue so a
-        // concurrent flush's shift() isn't clobbered.
+        // concurrent flush's shift() isn't clobbered. Skip the pump when the
+        // durable write fails — flushing a mutation that never landed would only
+        // waste requests, and the next successful enqueue re-drives the pump.
         function enqueue(entry) {
             var outbox = parseOutbox();
             outbox.push(entry);
-            saveOutbox(outbox);
+            if (!saveOutbox(outbox)) return;
             scheduleFlush(0);
         }
 
