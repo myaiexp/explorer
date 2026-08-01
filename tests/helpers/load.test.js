@@ -49,12 +49,70 @@ describe('SCRIPT_DEPS', () => {
         expect(INDEX_ORDER.indexOf(dep)).toBeLessThan(INDEX_ORDER.indexOf(mod));
     });
 
-    // Completeness (not just order): each listed edge must be named in the
-    // dependent module's source — usually its "Loaded after …" header. Without
-    // this, SCRIPT_DEPS can omit a real free-identifier collaborator (the
-    // osrm → loop-quality gap, audit #5733) and the order tripwire stays green.
+    // Forward completeness: each listed edge must be named in the dependent
+    // module's source (usually its "Loaded after …" header). Catches fictional
+    // edges — a dep that SCRIPT_DEPS claims but the source never mentions.
     test.each(EDGES)('%s is named in %s source', (dep, mod) => {
         expect(readScript(mod)).toMatch(new RegExp(`${dep}(\\.js)?`));
+    });
+
+    // Reverse completeness (audit #6234 / #5733 class): dropping a real
+    // collaborator from SCRIPT_DEPS left the forward check green. For every
+    // SCRIPT_DEPS key, every other SCRIPT_DEPS-keyed module named in its
+    // leading "Loaded after …" header must be listed as a direct dep. Keys are
+    // modules the suite loads for real with real collaborators — naming one
+    // in the header without listing it is the omission the #5733 osrm →
+    // loop-quality gap was. (Modules that only resolve collaborators as
+    // faked globals use freeform "lives in X.js" comments without "Loaded
+    // after", so they stay out of this check by design.)
+    const SCRIPT_DEPS_KEYS = Object.keys(SCRIPT_DEPS);
+
+    function loadedAfterKeyDeps(mod) {
+        // Only the "Loaded after …" sentence(s), not later header notes that
+        // casually name other modules (geometry's "shared with novelty.js").
+        // Slice from "Loaded after" to the next blank comment line.
+        const lines = readScript(mod).split('\n');
+        let i = 0;
+        while (i < lines.length && (lines[i].startsWith('//') || lines[i].trim() === '')) {
+            if (/Loaded after/i.test(lines[i])) break;
+            i++;
+        }
+        if (i >= lines.length || !/Loaded after/i.test(lines[i])) return [];
+        const sentence = [];
+        for (; i < lines.length; i++) {
+            if (!lines[i].startsWith('//') || lines[i].trim() === '//' || lines[i].trim() === '') break;
+            sentence.push(lines[i]);
+        }
+        const mentioned = [...sentence.join('\n').matchAll(/([a-z0-9-]+)\.js/g)]
+            .map((m) => m[1]);
+        return [...new Set(mentioned)].filter(
+            (name) => name !== mod && SCRIPT_DEPS_KEYS.includes(name),
+        );
+    }
+
+    test.each(SCRIPT_DEPS_KEYS)(
+        '%s lists every SCRIPT_DEPS-keyed module from its Loaded-after header',
+        (mod) => {
+            const required = loadedAfterKeyDeps(mod);
+            for (const dep of required) {
+                expect(SCRIPT_DEPS[mod]).toContain(dep);
+            }
+        },
+    );
+
+    // Pin the pure-helper edges that the header phrasing does not cover
+    // (screening says "Dependencies" not "Loaded after") or that are the
+    // historical gap sites — so a silent drop fails even if wording drifts.
+    test('critical real-load edges cannot be silently dropped', () => {
+        expect(SCRIPT_DEPS.osrm).toEqual(
+            expect.arrayContaining(['net', 'geometry', 'loop-quality']),
+        );
+        expect(SCRIPT_DEPS.screening).toEqual(
+            expect.arrayContaining(['geo-utils', 'novelty']),
+        );
+        expect(SCRIPT_DEPS.sync).toEqual(
+            expect.arrayContaining(['sync-flush', 'sync-sections']),
+        );
     });
 });
 

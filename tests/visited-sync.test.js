@@ -2,11 +2,12 @@
  * Tests for visited.js — markAsVisited's create/undo state machine and
  * updateVisitedCounter. visited.js is a non-module script that assigns
  * globalThis.markAsVisited/toggleVisitedLayer/updateVisitedCounter; its free
- * identifiers (getVisits, syncedPut, syncedDelete, snapshotSession,
- * getCurrentSession, syncMarkVisitedBtn, renderVisitedLayer,
- * maybeRequestConsent, …) resolve to the stubs installed on globalThis below —
- * the same collaborators index.html wires up at runtime — once helpers/load.js
- * has evaluated it.
+ * identifiers (getVisits, syncedPut, syncedDelete, getCurrentSession,
+ * syncMarkVisitedBtn, renderVisitedLayer, maybeRequestConsent, …) resolve to
+ * the stubs installed on globalThis below — the same collaborators index.html
+ * wires up at runtime — once helpers/load.js has evaluated it. snapshotSession
+ * is the real pure helper from session.js (loaded with visited), not a
+ * hand-copied field list (audit #6233).
  *
  * tests/mark-visited.test.js already pins the DERIVED half of this contract —
  * that the button label is read from session.visitId, never written directly.
@@ -42,28 +43,6 @@ beforeEach(() => {
   globalThis.VISITS_KEY = VISITS_KEY;
   globalThis.getVisits = () => JSON.parse(localStorage.getItem(VISITS_KEY) || '[]');
 
-  // snapshotSession's real shape (session.js): a fresh id/date plus the
-  // session's trip fields, with extras (poiCategory) spread on top.
-  globalThis.snapshotSession = (session, extra = {}) => ({
-    id: crypto.randomUUID(),
-    date: new Date().toISOString(),
-    startLat: session.startLat,
-    startLng: session.startLng,
-    startLabel: session.startLabel,
-    destLat: session.destLat,
-    destLng: session.destLng,
-    destName: session.destName || null,
-    tripMode: session.tripMode,
-    distance: session.distance,
-    routeCoords: session.routeCoords || null,
-    routeDistance: session.routeDistance ?? null,
-    routeDuration: session.routeDuration || null,
-    returnRouteCoords: session.returnRouteCoords || null,
-    returnRouteDistance: session.returnRouteDistance ?? null,
-    returnRouteDuration: session.returnRouteDuration || null,
-    ...extra,
-  });
-
   let currentSession = null;
   globalThis.getCurrentSession = () => currentSession;
   globalThis.setCurrentSession = (s) => {
@@ -79,7 +58,9 @@ beforeEach(() => {
   globalThis.map = { removeLayer: () => {}, addLayer: () => {} };
   globalThis.visitedLayerGroup = { addTo: () => {} };
 
-  loadScripts('visited');
+  // Real snapshotSession (session.js) — visited needs minting, not a shallow
+  // fixture copy. Other collaborators stay faked above.
+  loadScripts('session', 'visited');
 });
 
 function baseSession(over = {}) {

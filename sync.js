@@ -354,11 +354,12 @@
             // closed is otherwise only pumped by a fresh enqueue() or the 'online'
             // event — neither fires on a normal reload while already online. So a
             // queue that survived the restart would strand until the next mutation.
-            // scheduleFlush(0) rather than onOnline(): this is a fresh worker with
-            // no backoff state to reset, and flushHead's own guards no-op when the
-            // queue is empty (see sync-flush.js).
+            // resume() rather than bare scheduleFlush(0): clears any prior auth
+            // hard-stop (401/403 paused the pump without dropping the queue) and
+            // re-arms once consent/token is known good. Fresh workers have no
+            // backoff to reset; flushHead no-ops when the queue is empty.
             return ExplorerSync._runInit().then(function (result) {
-                if (_state === 'accepted') { flushWorker.scheduleFlush(0); }
+                if (_state === 'accepted') { flushWorker.resume(); }
                 return result;
             });
         },

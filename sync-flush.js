@@ -54,13 +54,18 @@
         var _backoffTimer = null;
         var _flushWaiters = [];   // resolve callbacks awaiting a fully-drained outbox
         var _destroyed = false;   // retired instance — see destroy()
+        // Auth hard-stop (401/403): leave the queue intact, stop scheduling, and
+        // toast once until the host rebinds consent and calls resume().
+        var _authBlocked = false;
+        var _authNotified = false;
 
         // The pump's only entry point: run flushHead after delayMs (0 ⇒ next
         // microtask). Every caller — enqueue, the post-request reschedule, the
         // online handler, the host's load-time nudge — goes through this, so
-        // there is one place where a flush can start.
+        // there is one place where a flush can start. An auth block freezes the
+        // pump without dropping entries (audit #6223).
         function scheduleFlush(delayMs) {
-            if (_destroyed) { return; }
+            if (_destroyed || _authBlocked) { return; }
             if (_backoffTimer !== null) { return; }
             if (delayMs > 0) {
                 _backoffTimer = setTimeout(function () {
@@ -71,6 +76,16 @@
                 // Use a microtask so callers finish before we start
                 Promise.resolve().then(flushHead);
             }
+        }
+
+        // Clear an auth hard-stop and re-arm the pump. Called by the host after
+        // consent is re-bound (fresh token / re-init to accepted); also the
+        // right entry for a load-time drain once auth is known good.
+        function resume() {
+            if (_destroyed) { return; }
+            _authBlocked = false;
+            _authNotified = false;
+            scheduleFlush(0);
         }
 
         // Resolve any pending whenDrained() promises once the queue is fully
@@ -110,7 +125,7 @@
         // next one on completion. Named for that: it is not "flush the outbox",
         // and calling it twice concurrently is a no-op by the _flushing guard.
         function flushHead() {
-            if (_destroyed || _flushing) { return; }
+            if (_destroyed || _flushing || _authBlocked) { return; }
             var username = getUsername();
             if (!username) { settleFlushWaiters(); return; }
             var outbox = parseOutbox();
@@ -148,6 +163,28 @@
                     return;
                 }
 
+                // 401/403: wrong/missing token or deleted account — not an
+                // entry-level reject. Dropping the whole durable queue would
+                // silently diverge cloud from local with only a console.warn
+                // (audit #6223). Hard-stop: keep the head, toast once, freeze
+                // the pump until resume() after consent is re-bound.
+                if (res.status === 401 || res.status === 403) {
+                    _backoffMs = 0;
+                    _authBlocked = true;
+                    console.warn('[ExplorerSync] Auth failure (' + res.status + '); pausing outbox flush', entry);
+                    if (!_authNotified) {
+                        _authNotified = true;
+                        if (typeof globalThis.showError === 'function') {
+                            globalThis.showError(
+                                'Cloud backup authorization failed. Your walks are safe locally — reopen your backup link to reconnect.'
+                            );
+                        }
+                    }
+                    return;
+                }
+
+                // Other 4xx (400 validation, 404 unknown section/id, …): the
+                // entry itself is unrecoverable — drop it and continue.
                 if (res.status >= 400 && res.status < 500) {
                     _backoffMs = 0;
                     console.warn('[ExplorerSync] Dropping outbox entry due to ' + res.status, entry);
@@ -194,8 +231,10 @@
         }
 
         // Back online — cancel any pending backoff timer, reset the backoff, and
-        // retry immediately.
+        // retry immediately. Auth blocks stay in force: connectivity does not
+        // repair a bad token; only resume() after rebind does.
         function onOnline() {
+            if (_authBlocked) { return; }
             if (_backoffTimer !== null) {
                 clearTimeout(_backoffTimer);
                 _backoffTimer = null;
@@ -228,6 +267,7 @@
             whenDrained: whenDrained,
             onOnline: onOnline,
             scheduleFlush: scheduleFlush,
+            resume: resume,
             destroy: destroy,
             peek: parseOutbox,
             length: function () { return parseOutbox().length; },

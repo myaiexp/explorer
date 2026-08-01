@@ -59,7 +59,9 @@ export const SCRIPT_DEPS = {
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
     'osrm':         ['net', 'geometry', 'loop-quality'],
     'result-panel': ['session-state'],
-    'route-view':   ['session-state'],
+    // geometry + result-panel are pure/real collaborators named in the header;
+    // map-view / session / elevation / favorites are faked by route-view tests.
+    'route-view':   ['session-state', 'geometry', 'result-panel'],
     'visits-io':    ['visit-shape'],
     'sync':         ['sync-flush', 'sync-sections'],
 };

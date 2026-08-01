@@ -150,7 +150,7 @@ describe('outbox enqueue and per-status handling', () => {
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
     });
 
-    test('drops entry on 4xx (not 429) and warns', async () => {
+    test('drops entry on entry-level 4xx (400, not 429) and warns', async () => {
         await setupAccepted('rugged-pine-42');
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         mockFetch({
