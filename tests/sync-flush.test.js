@@ -11,7 +11,7 @@
 import { describe, test, expect, vi } from 'vitest';
 import {
     installSyncLifecycle, loadSync, setLocation, setLocalStorage,
-    mockFetch, mockFetchOffline, flushPromises, setupAccepted,
+    mockFetch, mockFetchOffline, drainFlushPump, flushMicrotasks, setupAccepted,
 } from './helpers/sync-harness.js';
 
 installSyncLifecycle();
@@ -41,7 +41,7 @@ describe('outbox resume on startup (audit)', () => {
         });
         loadSync();
         await window.ExplorerSync.init();
-        await flushPromises();
+        await drainFlushPump();
         const putCall = global.fetch.mock.calls.find(
             c => (c[1] && c[1].method) === 'PUT' && c[0] === '/explorer/api/rugged-pine-42/visits/uuid-stranded'
         );
@@ -62,7 +62,7 @@ describe('outbox resume on startup (audit)', () => {
         global.fetch = fetchSpy;
         loadSync();
         await window.ExplorerSync.init();
-        await flushPromises();
+        await drainFlushPump();
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
     });
@@ -77,7 +77,7 @@ describe('outbox enqueue and per-status handling', () => {
             'PUT /explorer/api/rugged-pine-42/visits/uuid-1': { status: 204 },
         });
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-        await flushPromises();
+        await drainFlushPump();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
     });
 
@@ -104,7 +104,7 @@ describe('outbox enqueue and per-status handling', () => {
             global.fetch = fetchSpy;
 
             window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-            await flushPromises();
+            await drainFlushPump();
 
             expect(fetchSpy).not.toHaveBeenCalled();
             // Prior durable state is unchanged — the failed write left nothing new.
@@ -138,19 +138,13 @@ describe('outbox enqueue and per-status handling', () => {
         });
 
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-        // Flush microtask queue to let the first fetch fire and resolve
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
 
         expect(callCount).toBe(1);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
 
         await vi.advanceTimersByTimeAsync(11000);
-        // Flush microtasks after timer fires
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
 
         expect(callCount).toBe(2);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
@@ -163,7 +157,7 @@ describe('outbox enqueue and per-status handling', () => {
             'PUT /explorer/api/rugged-pine-42/visits/uuid-bad': { status: 400 },
         });
         window.ExplorerSync.mutate('visits', 'put', 'uuid-bad', { id: 'uuid-bad' });
-        await flushPromises();
+        await drainFlushPump();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
         expect(warnSpy).toHaveBeenCalled();
     });
@@ -178,7 +172,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
             'DELETE /explorer/api/rugged-pine-42/visits/uuid-del': { status: 204 },
         });
         window.ExplorerSync.mutate('visits', 'delete', 'uuid-del', undefined);
-        await flushPromises();
+        await drainFlushPump();
 
         const deleteCall = global.fetch.mock.calls.find(c => (c[1] && c[1].method) === 'DELETE');
         expect(deleteCall).toBeTruthy();
@@ -209,10 +203,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         });
 
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-        // Let the first fetch fire and resolve (microtasks only — no timer yet)
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
 
         expect(callCount).toBe(1);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
@@ -223,9 +214,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         expect(callCount).toBe(1);
 
         await vi.advanceTimersByTimeAsync(1);
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
 
         expect(callCount).toBe(2);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
@@ -247,19 +236,14 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         });
 
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-        // First attempt fires on the microtask-scheduled flush.
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
         expect(callCount).toBe(1);
 
         // BACKOFF_STEPS[0] = 1000ms — the second attempt waits exactly that long.
         await vi.advanceTimersByTimeAsync(999);
         expect(callCount).toBe(1);
         await vi.advanceTimersByTimeAsync(1);
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
         expect(callCount).toBe(2);
 
         // The second 5xx must ESCALATE to BACKOFF_STEPS[1] = 2000ms. Under the
@@ -271,9 +255,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         await vi.advanceTimersByTimeAsync(999);
         expect(callCount).toBe(2);
         await vi.advanceTimersByTimeAsync(1);
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushMicrotasks();
         expect(callCount).toBe(3);
     });
 
@@ -289,7 +271,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         // Both enqueued synchronously before the async flush drains either
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(2);
 
-        await flushPromises();
+        await drainFlushPump();
 
         const putUrls = global.fetch.mock.calls
             .filter(c => (c[1] && c[1].method) === 'PUT')
@@ -338,7 +320,7 @@ describe('flush pump recovery and single-flight guard', () => {
         ]));
         mockFetch({ 'PUT /explorer/api/rugged-pine-42/visits/uuid-on': { status: 204 } });
         window.dispatchEvent(new Event('online'));
-        await flushPromises();
+        await drainFlushPump();
         // Exactly one PUT — a leaked listener from an earlier loadSync() would add
         // its own request for the same entry against a stale username.
         const putCalls = global.fetch.mock.calls.filter(c => (c[1] && c[1].method) === 'PUT');
@@ -362,7 +344,7 @@ describe('flush pump recovery and single-flight guard', () => {
         stale._destroy();
         window.dispatchEvent(new Event('online'));
         await stale._outbox.whenDrained();          // resolves rather than hanging
-        await flushPromises();
+        await drainFlushPump();
 
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
@@ -376,7 +358,7 @@ describe('flush pump recovery and single-flight guard', () => {
         global.fetch = vi.fn(() => new Promise(() => {})); // hangs → flush stays in-flight
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
         window.ExplorerSync.mutate('visits', 'put', 'uuid-2', { id: 'uuid-2' });
-        await flushPromises();
+        await drainFlushPump();
         expect(global.fetch).toHaveBeenCalledTimes(1);
         expect(global.fetch.mock.calls[0][0]).toBe('/explorer/api/rugged-pine-42/visits/uuid-1');
     });
@@ -401,7 +383,7 @@ describe('request path encoding', () => {
             ok: true, status: 204, headers: new Headers(), json: () => Promise.resolve({}),
         }));
         window.dispatchEvent(new Event('online'));
-        await flushPromises();
+        await drainFlushPump();
 
         const url = global.fetch.mock.calls[0][0];
         expect(url).toBe('/explorer/api/rugged-pine-42/visits/..%2F..%2Faccounts');
@@ -419,7 +401,7 @@ describe('request path encoding', () => {
             ok: true, status: 204, headers: new Headers(), json: () => Promise.resolve({}),
         }));
         window.dispatchEvent(new Event('online'));
-        await flushPromises();
+        await drainFlushPump();
         expect(global.fetch.mock.calls[0][0])
             .toBe('/explorer/api/rugged-pine-42/visits%2F..%2Ffavorites/uuid-1');
     });
@@ -428,7 +410,7 @@ describe('request path encoding', () => {
         await setupAccepted('rugged-pine-42');
         mockFetch({ 'PUT /explorer/api/rugged-pine-42/visits/uuid-plain': { status: 204 } });
         window.ExplorerSync.mutate('visits', 'put', 'uuid-plain', { id: 'uuid-plain' });
-        await flushPromises();
+        await drainFlushPump();
         expect(global.fetch.mock.calls[0][0]).toBe('/explorer/api/rugged-pine-42/visits/uuid-plain');
     });
 });

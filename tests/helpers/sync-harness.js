@@ -139,12 +139,25 @@ export function mockFetchOffline() {
 // chain depth (current max ~2 hops), so the helper stays correct as the pipeline
 // grows.
 // Safe only under real timers — every caller runs without fake timers (the
-// fake-timer tests drive the clock explicitly via advanceTimersByTimeAsync).
+// fake-timer tests drive the clock explicitly via advanceTimersByTimeAsync +
+// flushMicrotasks). Named for the job (macrotask pump drain), not "promises" —
+// classic flushPromises means microtask drainage (audit #5722).
 const FLUSH_TURNS = 20;
-export async function flushPromises() {
+export async function drainFlushPump() {
     for (let i = 0; i < FLUSH_TURNS; i++) {
         await new Promise(r => setTimeout(r, 0));
     }
+}
+
+// Settle one fake-timer flush hop: enqueue → scheduleFlush(0) → setTimeout →
+// flushHead → fetch().then. Depth 3 covers the microtask chain from the
+// scheduled callback through the fetch resolution into the .then that either
+// dequeues or arms the next backoff (audit #5723). One fewer and the first
+// fetch may not have fired yet. Not a substitute for drainFlushPump — that
+// advances real-timer macrotask reschedules; this only drains microtasks after
+// advanceTimersByTimeAsync (or the initial microtask-scheduled flush).
+export async function flushMicrotasks(n = 3) {
+    for (let i = 0; i < n; i++) await Promise.resolve();
 }
 
 // ── Common starting states ───────────────────────────────────────────────────

@@ -8,16 +8,21 @@
  * Loading: novelty.js is a non-module browser script that depends on the shared
  * haversineKm from geo-utils.js, so geo-utils.js runs in the realm first —
  * helpers/load.js's SCRIPT_DEPS encodes that edge, so loading 'novelty' pulls
- * it in automatically; both expose their helpers via explicit globalThis
- * assignment. The `@vitest-environment node` pragma above just skips jsdom
- * setup, which this suite doesn't need.
+ * it in automatically. destination-resolve.js is loaded next so the suite can
+ * pin pickMostNovelDestination on the real globalThis export (it reads
+ * rankByNovelty off globalThis at call time). The `@vitest-environment node`
+ * pragma above just skips jsdom setup, which this suite doesn't need.
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
+    // novelty first so rankByNovelty is on globalThis when the real pick runs;
+    // destination-resolve has no SCRIPT_DEPS (other suites fake its deps), so
+    // load it explicitly after novelty for the consolidation pin only.
     loadScripts('novelty');
+    loadScripts('destination-resolve');
 });
 
 describe('minDistanceToExisting', () => {
@@ -141,61 +146,56 @@ describe('shuffleInPlace', () => {
 });
 
 // ── audit #1796 — pickMostNovelDestination delegates to rankByNovelty ──────────
-// pickMostNovelDestination lives inside the frontend's generate pipeline
-// (DOM-heavy, not loadable in a bare vm realm) and is not globalThis-exposed, so
-// we exercise the consolidated BODY directly: `rankByNovelty(candidates,
-// existingDests)[0]`. That expression is byte-identical to the function's
-// implementation.
+// Real export lives on globalThis from destination-resolve.js (one-liner:
+// rankByNovelty(candidates, existingDests)[0]). Pin against that export so a
+// drift in the live path fails here — not a local reimplementation that can
+// stay green when the real function diverges (audit #5724).
 //
-// Why no frozen-Math.random "same exact pick" baseline: the old single-pick (one
-// `Math.floor(Math.random()*n)` index) and the new path (Fisher-Yates shuffle of
-// the top half, then [0]) consume different amounts of entropy, so under a mocked
-// RNG they select different specific elements. The DISTRIBUTION is identical, so
-// we prove equivalence by support-set comparison over many trials against a
-// faithful copy of the pre-refactor logic.
+// destination-resolve.test.js fakes rankByNovelty as identity so its pipeline
+// tests stay deterministic; the support-set / distribution pin lives here with
+// the real novelty module loaded.
 
-// The consolidated body of pickMostNovelDestination (post audit #1796).
-const pickNew = (candidates, existingDests) =>
-    globalThis.rankByNovelty(candidates, existingDests)[0];
+const pick = (...args) => globalThis.pickMostNovelDestination(...args);
 
-// Faithful copy of the PRE-refactor pickMostNovelDestination body. Must stay
-// behaviorally identical to the code that lived in app.js before #1796 — this
-// is the equivalence baseline. calculateDistance was `globalThis.haversineKm`.
-function pickOld(candidates, existingDests) {
-    if (!existingDests || existingDests.length === 0) {
-        return candidates[Math.floor(Math.random() * candidates.length)];
-    }
-    const scored = candidates.map(c => {
-        const minDist = existingDests.reduce((min, [eLat, eLng]) =>
-            Math.min(min, globalThis.haversineKm(c.lat, c.lng, eLat, eLng)), Infinity);
-        return { ...c, minDist };
-    });
-    scored.sort((a, b) => b.minDist - a.minDist);
-    const pool = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
-    return pool[Math.floor(Math.random() * pool.length)];
-}
-
-// Stable identity key — old returns a {...c} copy, new returns the original
-// object, so compare by coordinates (and tag) rather than reference.
+// Stable identity key — compare by tag rather than reference (pick returns the
+// original candidate object from rankByNovelty's ranked list).
 const tagOf = c => (c == null ? undefined : c.tag);
-const supportOf = (pick, candidates, existing, trials = 400) => {
+const supportOf = (candidates, existing, trials = 400) => {
     const seen = new Set();
     for (let i = 0; i < trials; i++) seen.add(tagOf(pick(candidates, existing)));
     return seen;
 };
 
-describe('pickMostNovelDestination ≡ rankByNovelty(...)[0]', () => {
-    test('empty candidates → undefined (matches pre-refactor)', () => {
-        expect(pickNew([], [])).toBeUndefined();
-        expect(pickNew([], [[60, 24]])).toBeUndefined();
-        expect(pickOld([], [])).toBeUndefined();
-        expect(pickOld([], [[60, 24]])).toBeUndefined();
+describe('pickMostNovelDestination (real export)', () => {
+    test('is the globalThis export from destination-resolve', () => {
+        expect(typeof globalThis.pickMostNovelDestination).toBe('function');
+    });
+
+    test('empty candidates → undefined', () => {
+        expect(pick([], [])).toBeUndefined();
+        expect(pick([], [[60, 24]])).toBeUndefined();
     });
 
     test('single candidate with history → returns that candidate', () => {
         const only = { lat: 61, lng: 24, tag: 'only' };
-        expect(tagOf(pickNew([only], [[60, 24]]))).toBe('only');
-        expect(tagOf(pickOld([only], [[60, 24]]))).toBe('only');
+        expect(tagOf(pick([only], [[60, 24]]))).toBe('only');
+    });
+
+    test('delegates to rankByNovelty — pick is always rankByNovelty(...)[0]', () => {
+        // Structural pin: whatever rankByNovelty returns, the export takes [0].
+        // Uses a deterministic stub so the one-liner contract is independent of
+        // shuffle noise; restore the real ranker after.
+        const realRank = globalThis.rankByNovelty;
+        const cands = [
+            { lat: 60, lng: 24, tag: 'first' },
+            { lat: 61, lng: 25, tag: 'second' },
+        ];
+        globalThis.rankByNovelty = () => [cands[1], cands[0]];
+        try {
+            expect(pick(cands, [[60, 24]])).toBe(cands[1]);
+        } finally {
+            globalThis.rankByNovelty = realRank;
+        }
     });
 
     test('with history → never picks a low-novelty candidate (mutation-proof)', () => {
@@ -206,11 +206,10 @@ describe('pickMostNovelDestination ≡ rankByNovelty(...)[0]', () => {
         const far1 = { lat: 65.0, lng: 28.0, tag: 'far1' };
         const far2 = { lat: 67.0, lng: 30.0, tag: 'far2' };
         const cands = [close1, close2, far1, far2];
-        const support = supportOf(pickNew, cands, existing);
-        expect(support).toEqual(new Set(['far1', 'far2']));
+        expect(supportOf(cands, existing)).toEqual(new Set(['far1', 'far2']));
     });
 
-    test('support set is identical between old and new — with history', () => {
+    test('with history → support set is the novel top half', () => {
         const existing = [[60.0, 24.0]];
         // Distinct, well-separated distances → top half ceil(6/2)=3 is the
         // three farthest: c3, c4, c5. No ties, so support is deterministic.
@@ -222,26 +221,15 @@ describe('pickMostNovelDestination ≡ rankByNovelty(...)[0]', () => {
             { lat: 62.0, lng: 24.0, tag: 'c4' },
             { lat: 62.5, lng: 24.0, tag: 'c5' },
         ];
-        const expectedTop = new Set(['c3', 'c4', 'c5']);
-        const newSupport = supportOf(pickNew, cands, existing);
-        const oldSupport = supportOf(pickOld, cands, existing);
-        expect(newSupport).toEqual(expectedTop);
-        expect(oldSupport).toEqual(expectedTop);
-        expect(newSupport).toEqual(oldSupport);
+        expect(supportOf(cands, existing)).toEqual(new Set(['c3', 'c4', 'c5']));
     });
 
-    test('support set is identical between old and new — no history', () => {
-        // No existing destinations → both pick uniformly across ALL candidates.
+    test('no history → support set is all candidates (uniform pick)', () => {
         const cands = [
             { lat: 60, lng: 24, tag: 'a' },
             { lat: 61, lng: 25, tag: 'b' },
             { lat: 62, lng: 26, tag: 'c' },
         ];
-        const all = new Set(['a', 'b', 'c']);
-        const newSupport = supportOf(pickNew, cands, []);
-        const oldSupport = supportOf(pickOld, cands, []);
-        expect(newSupport).toEqual(all);
-        expect(oldSupport).toEqual(all);
-        expect(newSupport).toEqual(oldSupport);
+        expect(supportOf(cands, [])).toEqual(new Set(['a', 'b', 'c']));
     });
 });

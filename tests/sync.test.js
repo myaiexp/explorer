@@ -11,9 +11,8 @@
 import { describe, test, expect, vi } from 'vitest';
 import {
     installSyncLifecycle, loadSync, setLocation, setLocalStorage,
-    mockFetch, flushPromises, setupAnonymous, setupAccepted,
+    mockFetch, drainFlushPump, setupAnonymous, setupAccepted,
 } from './helpers/sync-harness.js';
-
 installSyncLifecycle();
 
 // ── ExplorerSync.init ─────────────────────────────────────────────────────────
@@ -298,7 +297,7 @@ describe('ExplorerSync.mutate gating', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-        await flushPromises();
+        await drainFlushPump();
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(localStorage.getItem('walk_sync_outbox')).toBeNull();
     });
@@ -311,7 +310,7 @@ describe('ExplorerSync.mutate gating', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
-        await flushPromises();
+        await drainFlushPump();
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 });
