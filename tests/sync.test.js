@@ -95,6 +95,20 @@ describe('ExplorerSync.init', () => {
         expect(localStorage.getItem('walk_visits')).toBeNull();
     });
 
+    test('malformed percent-encoded token fragment does not throw; falls through to no-token path', async () => {
+        // #t=% / #t=%ZZ throw URIError from decodeURIComponent unless caught —
+        // that used to abort ExplorerSync.init and skip first paint (finding #6222).
+        setLocation('/explorer/rugged-pine-42', '#t=%');
+        setLocalStorage({});
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(window.ExplorerSync.getState().token).toBeNull();
+    });
+
     test('URL segment with non-empty localStorage prompts confirm; cancel strips URL', async () => {
         setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({ walk_visits: '[{"id":"old"}]' });

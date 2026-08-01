@@ -82,8 +82,15 @@
         // Secret token carried in the URL fragment as #t=<token>. Fragments are
         // never sent to the server, so the token stays out of access logs and
         // Referer headers — the full link is the private capability.
+        // Bad percent-encoding (#t=%, #t=%ZZ) must not throw URIError into init —
+        // that would skip first paint (lists, visited layer, hash restore).
         var m = (location.hash || '').match(/[#&]t=([^&]+)/);
-        return m ? decodeURIComponent(m[1]) : null;
+        if (!m) return null;
+        try {
+            return decodeURIComponent(m[1]);
+        } catch (e) {
+            return null;
+        }
     }
 
     function fireStateChange() {

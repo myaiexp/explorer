@@ -192,22 +192,35 @@ describe('screenCandidatePool', () => {
 
 // ── isBetterLoop ──────────────────────────────────────────────────────────────
 
+// Usable loop shape — both legs required before ranking (finding #6220).
+function usable(overlap) {
+    return { outbound: { coords: ['o'] }, return: { coords: ['r'] }, overlap };
+}
+function unusable(overlap = null) {
+    return { outbound: null, return: null, overlap };
+}
+
 describe('isBetterLoop null-overlap ordering', () => {
-    test('no incumbent → always better', () => {
-        expect(globalThis.isBetterLoop({ overlap: null }, null)).toBe(true);
-        expect(globalThis.isBetterLoop({ overlap: 0.9 }, null)).toBe(true);
+    test('missing legs never rank, even with no incumbent', () => {
+        expect(globalThis.isBetterLoop(unusable(null), null)).toBe(false);
+        expect(globalThis.isBetterLoop({ outbound: { c: 1 }, return: null, overlap: 0.1 }, null)).toBe(false);
+        expect(globalThis.isBetterLoop({ outbound: null, return: { c: 1 }, overlap: 0.1 }, null)).toBe(false);
     });
-    test('candidate with null overlap never displaces an incumbent', () => {
-        expect(globalThis.isBetterLoop({ overlap: null }, { overlap: 0.9 })).toBe(false);
-        expect(globalThis.isBetterLoop({ overlap: null }, { overlap: null })).toBe(false);
+    test('no incumbent → usable candidate is better', () => {
+        expect(globalThis.isBetterLoop(usable(null), null)).toBe(true);
+        expect(globalThis.isBetterLoop(usable(0.9), null)).toBe(true);
     });
-    test('a measured overlap beats a null (unknown) incumbent', () => {
-        expect(globalThis.isBetterLoop({ overlap: 0.9 }, { overlap: null })).toBe(true);
+    test('candidate with null overlap never displaces a usable incumbent', () => {
+        expect(globalThis.isBetterLoop(usable(null), usable(0.9))).toBe(false);
+        expect(globalThis.isBetterLoop(usable(null), usable(null))).toBe(false);
+    });
+    test('a measured overlap beats a null (unknown) incumbent (both usable)', () => {
+        expect(globalThis.isBetterLoop(usable(0.9), usable(null))).toBe(true);
     });
     test('two measured overlaps → strictly lower wins, ties keep incumbent', () => {
-        expect(globalThis.isBetterLoop({ overlap: 0.2 }, { overlap: 0.5 })).toBe(true);
-        expect(globalThis.isBetterLoop({ overlap: 0.5 }, { overlap: 0.2 })).toBe(false);
-        expect(globalThis.isBetterLoop({ overlap: 0.3 }, { overlap: 0.3 })).toBe(false);
+        expect(globalThis.isBetterLoop(usable(0.2), usable(0.5))).toBe(true);
+        expect(globalThis.isBetterLoop(usable(0.5), usable(0.2))).toBe(false);
+        expect(globalThis.isBetterLoop(usable(0.3), usable(0.3))).toBe(false);
     });
 });
 
@@ -267,6 +280,32 @@ describe('findBestLoop', () => {
         expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(2);
         expect(best.overlap).toBe(0.5);
         expect(best.dest).toBe(pool[1]);
+    });
+
+    test('all attempts return null legs → null (nothing usable built)', async () => {
+        const pool = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }];
+        globalThis.buildJunctionLoop.mockResolvedValue({
+            outbound: null, return: null, overlap: null, junctions: [],
+        });
+        const best = await globalThis.findBestLoop(60, 24, opts(pool));
+        expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(2);
+        expect(best).toBeNull();
+    });
+
+    test('fail then buildLoop success (null overlap) → second dest wins', async () => {
+        // Total OSRM failure must not stick as bestSeen and block a later usable
+        // null-overlap loop (buildJunctionLoop's buildLoop fallback).
+        const pool = [{ lat: 1, lng: 1, name: 'fail' }, { lat: 2, lng: 2, name: 'ok' }];
+        globalThis.buildJunctionLoop
+            .mockResolvedValueOnce({ outbound: null, return: null, overlap: null, junctions: [] })
+            .mockResolvedValueOnce(loop(null));
+        const best = await globalThis.findBestLoop(60, 24, opts(pool));
+        expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(2);
+        expect(best.dest).toBe(pool[1]);
+        expect(best.destName).toBe('ok');
+        expect(best.outbound).toEqual({ coords: ['o'] });
+        expect(best.return).toEqual({ coords: ['r'] });
+        expect(best.overlap).toBeNull();
     });
 
     test('empty pool builds nothing and returns null', async () => {

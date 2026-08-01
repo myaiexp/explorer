@@ -22,7 +22,8 @@ beforeAll(() => {
 });
 
 // A fake #notification element that records every mutation in order.
-function makeFakeError() {
+// Shared by every toast variant (error / success / warning / showToast default).
+function makeFakeNotification() {
     const writes = [];      // ordered [prop, value] style writes
     const classOps = [];    // ordered ['add'|'remove', name] classList ops
     const classSet = new Set();
@@ -50,7 +51,7 @@ let origGetById;
 
 beforeEach(() => {
     vi.useFakeTimers();
-    fakeEl = makeFakeError();
+    fakeEl = makeFakeNotification();
     origGetById = document.getElementById;
     document.getElementById = (id) => (id === 'notification' ? fakeEl : null);
 });

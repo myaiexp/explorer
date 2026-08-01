@@ -131,10 +131,13 @@ async function screenCandidatePool(startLat, startLng, { candidatePool, dest, de
     return { candidatePool, dest, destName, waterLocked: false };
 }
 
-// True when `candidate` should replace the current best loop: no incumbent yet,
-// or the candidate has a real (non-null) overlap that's lower. A measured
+// True when `candidate` should replace the current best loop. Both legs must be
+// present — a total OSRM failure ({outbound:null,return:null,overlap:null}) is
+// never ranked, so findBestLoop returns null when nothing usable was built
+// (and a later buildLoop fallback with null overlap can still win). A measured
 // overlap always beats a null (unknown) overlap; two nulls never displace.
 function isBetterLoop(candidate, best) {
+    if (!candidate.outbound || !candidate.return) return false;
     if (!best) return true;
     if (candidate.overlap === null) return false;
     return best.overlap === null || candidate.overlap < best.overlap;
