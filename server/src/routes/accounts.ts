@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { createAccount } from '../username.js';
+import { clientIpForStorage } from '../lib/client-ip.js';
 import { accountCreationRateLimit } from '../middleware/rate-limit.js';
 import { accountAuth } from '../middleware/auth.js';
 
@@ -12,7 +13,9 @@ export function accountsRoutes(db: Db): Hono {
   // POST /accounts — create a new account. Returns the secret token (the only
   // time it is ever sent back); the client must persist it to retain access.
   app.post('/accounts', accountCreationRateLimit(), async (c) => {
-    const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
+    // Only records the client hop when the peer is a trusted proxy (nginx).
+    // Raw client XFF from untrusted peers is ignored — see lib/client-ip.ts.
+    const ip = clientIpForStorage(c);
     try {
       const { username, token } = await createAccount(db, ip);
       return c.json({ username, token }, 201);

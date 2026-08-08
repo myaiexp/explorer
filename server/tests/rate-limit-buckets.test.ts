@@ -10,8 +10,8 @@ import {
 
 // Thin harness: mount the real middleware on no-op handlers so the bucket logic
 // is exercised directly — no DB, no real account creation, and fake timers stay
-// clear of the pg pool. IP comes from x-forwarded-for (see getIp), the username
-// from the path param (read inside the middleware, as in sections.ts).
+// clear of the pg pool. IP comes from trusted-proxy XFF (lib/client-ip.ts), the
+// username from the path param (read inside the middleware, as in sections.ts).
 const app = new Hono();
 app.put('/:username/write', sectionWriteRateLimit(), (c) => c.body(null, 204));
 app.post('/accounts', accountCreationRateLimit(), (c) => c.body(null, 201));
@@ -19,11 +19,15 @@ app.post('/accounts', accountCreationRateLimit(), (c) => c.body(null, 201));
 const WINDOW_MS = 60_000;
 const HOUR_MS = 3_600_000;
 
+// Simulate nginx on loopback so X-Forwarded-For is trusted as the client IP.
+const PROXY_ENV = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
+
 function write(username: string, ip: string): Promise<Response> {
-  return app.request(`/${username}/write`, {
-    method: 'PUT',
-    headers: { 'x-forwarded-for': ip },
-  });
+  return app.request(
+    `/${username}/write`,
+    { method: 'PUT', headers: { 'x-forwarded-for': ip } },
+    PROXY_ENV
+  );
 }
 
 beforeEach(() => {
@@ -107,7 +111,11 @@ describe('accountCreationRateLimit — IP account bucket (10/hour)', () => {
     try {
       const ip = '198.51.100.99';
       const create = () =>
-        app.request('/accounts', { method: 'POST', headers: { 'x-forwarded-for': ip } });
+        app.request(
+          '/accounts',
+          { method: 'POST', headers: { 'x-forwarded-for': ip } },
+          PROXY_ENV
+        );
 
       // Drain the 10/hour budget.
       for (let i = 0; i < 10; i++) {

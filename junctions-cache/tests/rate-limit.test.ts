@@ -2,11 +2,14 @@
 // Tests for junctions-cache/src/rate-limit.ts — the per-IP token-bucket limiter
 // (audit: /junctions and /logs had no app-level rate limiting). Driven through a
 // throwaway Hono app so the middleware is exercised exactly as wired in server.ts;
-// the client IP is supplied via the X-Forwarded-For header the limiter reads.
+// the client IP is supplied via X-Forwarded-For behind a simulated trusted proxy.
 
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import { ipRateLimit } from '../src/rate-limit.js';
+
+// nginx on loopback — required for XFF to be trusted (audit #1342).
+const PROXY_ENV = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
 
 function appWith(limit: number, windowMs?: number) {
     const app = new Hono();
@@ -15,7 +18,7 @@ function appWith(limit: number, windowMs?: number) {
 }
 
 function reqFrom(app: Hono, ip: string) {
-    return app.request('/x', { headers: { 'x-forwarded-for': ip } });
+    return app.request('/x', { headers: { 'x-forwarded-for': ip } }, PROXY_ENV);
 }
 
 afterEach(() => {
@@ -45,11 +48,23 @@ describe('ipRateLimit', () => {
         const app = appWith(1);
         // "client, proxy1, proxy2" — the client is the first entry.
         const h = { 'x-forwarded-for': '203.0.113.7, 10.0.0.1, 10.0.0.2' };
-        expect((await app.request('/x', { headers: h })).status).toBe(200);
-        expect((await app.request('/x', { headers: h })).status).toBe(429);
+        expect((await app.request('/x', { headers: h }, PROXY_ENV)).status).toBe(200);
+        expect((await app.request('/x', { headers: h }, PROXY_ENV)).status).toBe(429);
         // A different client hop behind the same proxies is independent.
         const h2 = { 'x-forwarded-for': '203.0.113.8, 10.0.0.1, 10.0.0.2' };
-        expect((await app.request('/x', { headers: h2 })).status).toBe(200);
+        expect((await app.request('/x', { headers: h2 }, PROXY_ENV)).status).toBe(200);
+    });
+
+    test('ignores X-Forwarded-For from an untrusted peer', async () => {
+        const app = appWith(1);
+        const untrusted = { incoming: { socket: { remoteAddress: '203.0.113.9' } } };
+        // Rotating XFF must not mint a fresh bucket — key is the peer.
+        expect(
+            (await app.request('/x', { headers: { 'x-forwarded-for': '1.1.1.1' } }, untrusted)).status
+        ).toBe(200);
+        expect(
+            (await app.request('/x', { headers: { 'x-forwarded-for': '2.2.2.2' } }, untrusted)).status
+        ).toBe(429);
     });
 
     test('tokens refill over the window — a blocked client recovers after one full window', async () => {

@@ -1,6 +1,16 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders } from './helpers.js';
+import {
+  app,
+  db,
+  truncateAll,
+  createTestAccount,
+  insertTestVisit,
+  insertTestFavorite,
+  resetRateLimiter,
+  authHeaders,
+  TRUSTED_PROXY_ENV,
+} from './helpers.js';
 import { schema } from '../src/db.js';
 
 beforeEach(async () => {
@@ -109,11 +119,14 @@ describe('POST /api/accounts', () => {
 });
 
 describe('ipFirstSeen storage', () => {
+  // XFF is only honoured when the TCP peer is a trusted proxy (nginx on
+  // loopback). Inject that peer via TRUSTED_PROXY_ENV — see lib/client-ip.ts.
   test('stores the x-forwarded-for IP on account creation', async () => {
-    const res = await app.request('/api/accounts', {
-      method: 'POST',
-      headers: { 'x-forwarded-for': '203.0.113.5' },
-    });
+    const res = await app.request(
+      '/api/accounts',
+      { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.5' } },
+      TRUSTED_PROXY_ENV
+    );
     expect(res.status).toBe(201);
     const { username } = await res.json() as { username: string };
     const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
@@ -122,10 +135,11 @@ describe('ipFirstSeen storage', () => {
   });
 
   test('records only the first hop of x-forwarded-for, trimmed', async () => {
-    const res = await app.request('/api/accounts', {
-      method: 'POST',
-      headers: { 'x-forwarded-for': '  198.51.100.7 , 10.0.0.1, 10.0.0.2' },
-    });
+    const res = await app.request(
+      '/api/accounts',
+      { method: 'POST', headers: { 'x-forwarded-for': '  198.51.100.7 , 10.0.0.1, 10.0.0.2' } },
+      TRUSTED_PROXY_ENV
+    );
     expect(res.status).toBe(201);
     const { username } = await res.json() as { username: string };
     const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
@@ -133,7 +147,19 @@ describe('ipFirstSeen storage', () => {
   });
 
   test('stores null when no x-forwarded-for header is present', async () => {
-    const res = await app.request('/api/accounts', { method: 'POST' });
+    const res = await app.request('/api/accounts', { method: 'POST' }, TRUSTED_PROXY_ENV);
+    expect(res.status).toBe(201);
+    const { username } = await res.json() as { username: string };
+    const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
+    expect(rows[0].ipFirstSeen).toBeNull();
+  });
+
+  test('ignores x-forwarded-for from an untrusted peer (no plant into ipFirstSeen)', async () => {
+    const res = await app.request(
+      '/api/accounts',
+      { method: 'POST', headers: { 'x-forwarded-for': '1.2.3.4' } },
+      { incoming: { socket: { remoteAddress: '203.0.113.9' } } }
+    );
     expect(res.status).toBe(201);
     const { username } = await res.json() as { username: string };
     const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));

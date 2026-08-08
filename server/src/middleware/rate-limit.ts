@@ -5,13 +5,14 @@
 // to shelly, this to the VPS), each with its own lockfile / `--frozen-lockfile`
 // deploy / per-package `tsc` rootDir, so there is no workspace to share through.
 // MIRROR any fix to the shared core in BOTH files: the Bucket shape, refill()'s
-// continuous accrual (incl. the no-double-rate-burst property), the
-// X-Forwarded-For-first client-IP extraction (getIp here / clientIp there), the
+// continuous accrual (incl. the no-double-rate-burst property), the trusted-proxy
+// client-IP extraction (lib/client-ip.ts here / clientIp there), the
 // Retry-After deficit math, and the idle-≥-2-windows staleness rule. Do NOT sync
 // the per-service policy: MAX_BUCKETS (50k here vs 10k there), the periodic
 // sweeper here vs inline eviction there, and module-level maps + REGISTRY here vs
 // factory-owned maps there.
 import type { Context, Next } from 'hono';
+import { clientIp } from '../lib/client-ip.js';
 
 interface Bucket {
   tokens: number;
@@ -46,15 +47,6 @@ export function resetRateLimiter(): void {
   ipWriteBuckets.clear();
   ipAccountBuckets.clear();
   ipReadBuckets.clear();
-}
-
-function getIp(c: Context): string {
-  return (
-    c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ??
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ((c.env as any)?.incoming?.socket?.remoteAddress as string | undefined) ??
-    'unknown'
-  );
 }
 
 // Continuously accrue tokens at limit/windowMs per ms, capped at limit. This is
@@ -153,7 +145,7 @@ export function stopBucketSweeper(): void {
 /** 60 writes/min per username param + 300 writes/min per IP */
 export function sectionWriteRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = getIp(c);
+    const ip = clientIp(c);
     const username = c.req.param('username') ?? 'unknown';
 
     if (!consume(usernameBuckets, username, 60, MINUTE)) {
@@ -171,7 +163,7 @@ export function sectionWriteRateLimit() {
 /** 60 reads/min per IP — throttles probing of the account-fetch endpoint */
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = getIp(c);
+    const ip = clientIp(c);
 
     if (!consume(ipReadBuckets, ip, 60, MINUTE)) {
       const secs = retryAfter(ipReadBuckets, ip, 60, MINUTE);
@@ -184,7 +176,7 @@ export function readRateLimit() {
 /** 10 account creations/hour per IP */
 export function accountCreationRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = getIp(c);
+    const ip = clientIp(c);
 
     if (!consume(ipAccountBuckets, ip, 10, HOUR)) {
       const secs = retryAfter(ipAccountBuckets, ip, 10, HOUR);

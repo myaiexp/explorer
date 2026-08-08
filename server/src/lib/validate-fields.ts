@@ -15,8 +15,17 @@ export const MAX_FAVORITE_PAYLOAD_LEN = 512_000;
 // Total request-body cap for the per-row write chain (1 MiB) — rejects oversized
 // bodies (including giant unknown keys) before JSON.parse holds them in memory.
 // Headroom above the favorites payload cap and a max-size routeCoords trip.
-// NOT applied to bulk import, whose bodies are legitimately large (full backups).
 export const MAX_WRITE_BODY_BYTES = 1_048_576;
+
+// Bulk-import body cap (5 MiB) — full-account backups are legitimately larger
+// than a single-row PUT, but still bounded so a flood of authenticated imports
+// cannot pin multi-hundred-MB JSON blobs in process memory (audit #1343).
+// Aligns roughly with typical browser localStorage ceilings the client backs up.
+export const MAX_IMPORT_BODY_BYTES = 5 * 1_048_576;
+
+// Per-section row cap on bulk import — independent of body bytes, so a million
+// tiny rows still get rejected before the validate/collect loop allocates them.
+export const MAX_IMPORT_ROWS_PER_SECTION = 10_000;
 
 // ISO-8601 date/datetime: requires the YYYY-MM-DD prefix AND a Date.parse-able
 // value, length-capped so Date.parse is never handed a huge blob. Rejects

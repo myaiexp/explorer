@@ -1,6 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { app, db, truncateAll, createTestAccount, VISIT_BODY, resetRateLimiter, authHeaders } from './helpers.js';
-import { schema } from '../src/db.js';
+import {
+  app,
+  truncateAll,
+  createTestAccount,
+  VISIT_BODY,
+  resetRateLimiter,
+  authHeaders,
+  TRUSTED_PROXY_ENV,
+} from './helpers.js';
 
 beforeEach(async () => {
   // Freeze Date so the token-bucket refill can't grant a token mid-test. These
@@ -93,23 +100,47 @@ describe('rate limiting', () => {
   test('X-Forwarded-For chain keys the bucket on the first (client) IP only', async () => {
     const { username: u, token } = await createTestAccount();
     // Proxy chain: real client is 1.2.3.4, 5.6.7.8 is a downstream proxy hop.
+    // TRUSTED_PROXY_ENV simulates nginx on loopback so XFF is honoured.
     const chained = { ...authHeaders(token), 'x-forwarded-for': '1.2.3.4, 5.6.7.8' };
 
     // Drain the 60 reads/min budget via the chain header.
     for (let i = 0; i < 60; i++) {
-      expect((await app.request(`/api/${u}`, { headers: chained })).status).toBe(200);
+      expect((await app.request(`/api/${u}`, { headers: chained }, TRUSTED_PROXY_ENV)).status).toBe(200);
     }
-    expect((await app.request(`/api/${u}`, { headers: chained })).status).toBe(429);
+    expect((await app.request(`/api/${u}`, { headers: chained }, TRUSTED_PROXY_ENV)).status).toBe(429);
 
     // The first IP alone hits the *same* bucket → still blocked, proving the
     // key is '1.2.3.4' (the leading element), not the whole header string.
     const firstAlone = { ...authHeaders(token), 'x-forwarded-for': '1.2.3.4' };
-    expect((await app.request(`/api/${u}`, { headers: firstAlone })).status).toBe(429);
+    expect((await app.request(`/api/${u}`, { headers: firstAlone }, TRUSTED_PROXY_ENV)).status).toBe(429);
 
     // The downstream proxy IP alone is a *different* bucket → allowed, proving
     // trailing chain hops are never used for keying.
     const secondAlone = { ...authHeaders(token), 'x-forwarded-for': '5.6.7.8' };
-    expect((await app.request(`/api/${u}`, { headers: secondAlone })).status).toBe(200);
+    expect((await app.request(`/api/${u}`, { headers: secondAlone }, TRUSTED_PROXY_ENV)).status).toBe(200);
+  });
+
+  test('X-Forwarded-For from an untrusted peer is ignored (spoof cannot bypass)', async () => {
+    const { username: u, token } = await createTestAccount();
+    const headers = authHeaders(token);
+    // Peer is a public IP — attacker-controlled XFF must not mint fresh buckets.
+    const untrustedEnv = { incoming: { socket: { remoteAddress: '203.0.113.9' } } };
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request(
+        `/api/${u}`,
+        { headers: { ...headers, 'x-forwarded-for': `10.0.0.${i}` } },
+        untrustedEnv
+      );
+      expect(res.status).toBe(200);
+    }
+    // 61st still keyed on 203.0.113.9, not the rotating XFF values.
+    const blocked = await app.request(
+      `/api/${u}`,
+      { headers: { ...headers, 'x-forwarded-for': '10.0.0.99' } },
+      untrustedEnv
+    );
+    expect(blocked.status).toBe(429);
   });
 
   test('10 account creations/hour per IP — 11th returns 429', async () => {

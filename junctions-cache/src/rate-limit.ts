@@ -12,8 +12,8 @@
 // `--frozen-lockfile` deploy and its own per-package `tsc` rootDir, so there is
 // no workspace to share a package through. MIRROR any fix to the shared core in
 // BOTH files: the Bucket shape, refill()'s continuous accrual (incl. the
-// no-double-rate-burst property), the X-Forwarded-For-first client-IP extraction
-// (clientIp here / getIp there), the Retry-After deficit math, and the
+// no-double-rate-burst property), the trusted-proxy client-IP extraction
+// (clientIp here / lib/client-ip.ts there), the Retry-After deficit math, and the
 // idle-≥-2-windows staleness rule. Do NOT sync the per-service policy, which is
 // intentionally different: MAX_BUCKETS (10k here vs 50k there), inline eviction
 // here vs a periodic sweeper there, and factory-owned vs module-level maps.
@@ -30,15 +30,42 @@ const MINUTE = 60_000;
 // bounds heap growth under a spoofed-X-Forwarded-For flood of distinct keys.
 const MAX_BUCKETS = 10_000;
 
-export function clientIp(c: Context): string {
-    const xff = c.req.header('x-forwarded-for');
-    if (xff) {
-        const first = xff.split(',')[0]?.trim();
-        if (first) return first;
+// nginx on loopback (and IPv4-mapped IPv6). Override with TRUSTED_PROXIES=ip,ip.
+const DEFAULT_TRUSTED = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const MAX_IP_LEN = 45;
+const IP_CHARS = /^[0-9a-fA-F:.]+$/;
+
+function trustedProxies(): ReadonlySet<string> {
+    const raw = process.env.TRUSTED_PROXIES;
+    if (raw && raw.trim()) {
+        return new Set(raw.split(',').map((s: string) => s.trim()).filter(Boolean));
     }
-    // @hono/node-server exposes the raw Node request on c.env.incoming.
+    return DEFAULT_TRUSTED;
+}
+
+function isPlausibleIp(value: string): boolean {
+    return value.length > 0 && value.length <= MAX_IP_LEN && IP_CHARS.test(value);
+}
+
+/**
+ * Client IP for the rate-limit key. Trust X-Forwarded-For only when the TCP
+ * peer is a known reverse proxy — otherwise a caller who reaches this service
+ * directly (tailnet, misconfigured firewall) can cycle XFF values to bypass
+ * the per-IP bucket (audit #1342; mirrored from explorer-api lib/client-ip.ts).
+ */
+export function clientIp(c: Context): string {
     const env = c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined;
-    return env?.incoming?.socket?.remoteAddress ?? 'unknown';
+    const peer = env?.incoming?.socket?.remoteAddress;
+    if (peer && trustedProxies().has(peer)) {
+        const xff = c.req.header('x-forwarded-for');
+        if (xff) {
+            const first = xff.split(',')[0]?.trim();
+            if (first && isPlausibleIp(first)) return first;
+        }
+        return peer;
+    }
+    if (peer) return peer;
+    return 'unknown';
 }
 
 // Continuously accrue tokens at limit/windowMs per ms, capped at limit. Unlike a

@@ -2,6 +2,10 @@ import { describe, test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, authHeaders, insertTestVisit, insertTestFavorite, resetRateLimiter, VISIT_BODY } from './helpers.js';
 import { schema } from '../src/db.js';
+import {
+  MAX_IMPORT_BODY_BYTES,
+  MAX_IMPORT_ROWS_PER_SECTION,
+} from '../src/lib/validate-fields.js';
 
 beforeEach(async () => {
   await truncateAll();
@@ -366,5 +370,55 @@ describe('POST /api/:username/import', () => {
       headers: { 'content-type': 'application/json', ...authHeaders(token) },
     });
     expect(res.status).toBe(400);
+  });
+
+  // audit #1343 — bodyLimit + per-section row cap. Coordinate-array length is
+  // already enforced inside validateTripRow → assertRouteCoords (MAX_ROUTE_COORDS).
+  describe('import size limits (audit #1343)', () => {
+    test('rejects an oversized body with 413 before the handler runs', async () => {
+      const { username: u, token } = await createTestAccount();
+      await insertTestVisit(u, 'survivor');
+
+      // Content-Length over the cap — bodyLimit's fast path rejects without
+      // buffering the whole body into JSON.parse.
+      const oversize = MAX_IMPORT_BODY_BYTES + 1;
+      const res = await app.request(`/api/${u}/import`, {
+        method: 'POST',
+        body: '{}',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(oversize),
+          ...authHeaders(token),
+        },
+      });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: 'Request body too large' });
+
+      // No write reached the DB.
+      const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+      expect(rows.map((r) => r.id)).toEqual(['survivor']);
+    });
+
+    test('rejects a section with more than MAX_IMPORT_ROWS_PER_SECTION rows', async () => {
+      const { username: u, token } = await createTestAccount();
+      await insertTestVisit(u, 'survivor');
+
+      const visits = Array.from({ length: MAX_IMPORT_ROWS_PER_SECTION + 1 }, (_, i) =>
+        makeVisit(`v-too-many-${i}`)
+      );
+      const res = await app.request(`/api/${u}/import`, {
+        method: 'POST',
+        body: JSON.stringify({ visits, favorites: [], savedLocations: [], history: [] }),
+        headers: { 'content-type': 'application/json', ...authHeaders(token) },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/exceeds maximum/);
+      expect(body.error).toMatch(String(MAX_IMPORT_ROWS_PER_SECTION));
+
+      // Pre-check failure — no replace transaction, seeded visit intact.
+      const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+      expect(rows.map((r) => r.id)).toEqual(['survivor']);
+    });
   });
 });

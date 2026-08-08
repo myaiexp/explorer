@@ -1,9 +1,14 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { eq } from 'drizzle-orm';
 import type { PgTable, PgColumn, PgInsertValue } from 'drizzle-orm/pg-core';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { isObject, isArray, type AnyRecord } from '../lib/type-guards.js';
+import {
+  MAX_IMPORT_BODY_BYTES,
+  MAX_IMPORT_ROWS_PER_SECTION,
+} from '../lib/validate-fields.js';
 import { accountAuth } from '../middleware/auth.js';
 import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
 import {
@@ -47,9 +52,22 @@ export const validateHistoryRow = validateRouteRow;
 export function importRoutes(db: Db): Hono {
   const app = new Hono();
 
+  // Reject oversized bodies before c.req.json() buffers them (audit #1343).
+  // Larger than the per-row PUT cap because a full-account backup is four
+  // sections; still hard-bounded so memory can't grow with attacker intent.
+  const importBodyLimit = bodyLimit({
+    maxSize: MAX_IMPORT_BODY_BYTES,
+    onError: (c) => c.json({ error: 'Request body too large' }, 413),
+  });
+
   // POST /:username/import — replace all four sections atomically. Auth (token)
   // confirms account ownership; the write rate limit caps replace-all churn.
-  app.post('/:username/import', sectionWriteRateLimit(), accountAuth(db), async (c) => {
+  app.post(
+    '/:username/import',
+    sectionWriteRateLimit(),
+    accountAuth(db),
+    importBodyLimit,
+    async (c) => {
     const username = c.req.param('username')!;
 
     let body: unknown;
@@ -99,8 +117,17 @@ export function importRoutes(db: Db): Hono {
     // Validate every row up front — a single bad row 400s before any write.
     // Also reject duplicate ids within a section: the composite PK (username, id)
     // would abort the insert with an opaque 500 otherwise (idea #2485).
+    // Per-section row cap (audit #1343) rejects huge arrays before we allocate
+    // the validated-row buffers; routeCoords length is already capped inside
+    // validateTripRow → assertRouteCoords.
     const collected: Array<{ table: UserTable; rows: object[] }> = [];
     for (const { key, table, raw, validate } of sections) {
+      if (raw.length > MAX_IMPORT_ROWS_PER_SECTION) {
+        return c.json(
+          { error: `${key} section exceeds maximum of ${MAX_IMPORT_ROWS_PER_SECTION} rows` },
+          400
+        );
+      }
       const rows: object[] = [];
       const seenIds = new Set<string>();
       for (const row of raw) {
