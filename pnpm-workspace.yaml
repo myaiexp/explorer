@@ -1,0 +1,20 @@
+# pnpm settings for the repo-root project (the static frontend's test devDeps).
+#
+# They live HERE and not under a `pnpm` key in package.json because pnpm 11 no longer
+# reads that field — it warns "The following keys were ignored: pnpm.overrides" and
+# carries on, so the security pin below would silently stop applying. pnpm 10 and 11
+# both read this file, so it is the location that works on every version.
+# Guarded by tests/pnpm-workspace-settings.test.js. Idea #3194.
+
+# Empty on purpose. server/, junctions-cache/ and tools/ are INDEPENDENT pnpm projects
+# with their own lockfiles, not workspace members — each carries its own
+# pnpm-workspace.yaml so that `pnpm install` run there resolves that project. Without
+# those files pnpm walks up, finds this one, and silently installs the root project
+# instead: no error, no sub-project lockfile, no sub-project node_modules.
+packages: []
+
+overrides:
+  # brace-expansion CVE-2026-45149 (moderate DoS) affects only >=5.0.0 <5.0.6, so the
+  # pin is scoped to 5.x: it lifts the vulnerable instance pulled in via minimatch@10
+  # and leaves the unaffected brace-expansion@2.x (via minimatch@9) where it is.
+  'brace-expansion@5': ^5.0.6

@@ -1,0 +1,7 @@
+# Keeps junctions-cache its own pnpm root. It carries no settings of its own — the file
+# exists so pnpm stops here instead of walking up to the repo-root pnpm-workspace.yaml,
+# which would make `pnpm install` here silently install the ROOT project's deps and skip
+# this one entirely (no error, no lockfile, no node_modules). That would break the shelly
+# post-receive hook's `pnpm install --frozen-lockfile && pnpm build`.
+# Guarded by tests/pnpm-workspace-settings.test.js. Idea #3194.
+packages: []

@@ -1,0 +1,17 @@
+# pnpm settings for the cloud-backup API. See the repo-root pnpm-workspace.yaml for why
+# these live here rather than under a `pnpm` key in package.json (pnpm 11 ignores that
+# field). This file also keeps server/ its own pnpm root: without it, pnpm walks up to
+# the repo root's workspace file and `cd server && pnpm install` silently installs the
+# ROOT project's deps instead of this one — which would break the forgejo-deploy step
+# `cd $PROJECTS/explorer/server && pnpm install --frozen-lockfile && pnpm build`.
+#
+# Unlike the root, this project has no `packageManager` pin, so a pnpm-11 host runs
+# pnpm 11 here rather than self-switching to 10 — the drift is live, not latent.
+# Guarded by tests/pnpm-workspace-settings.test.js. Idea #3194.
+packages: []
+
+overrides:
+  # esbuild CORS advisory GHSA-67mh-4wv8-2f99. drizzle-kit still depends on
+  # @esbuild-kit/esm-loader, which drags in esbuild 0.18.20 (< 0.25, vulnerable). This
+  # scoped pin lifts only that nested copy, leaving tsx/vite's own esbuild alone.
+  '@esbuild-kit/core-utils>esbuild': 0.25.12
