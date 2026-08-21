@@ -1,0 +1,5 @@
+# Keeps tools/ its own pnpm root — see junctions-cache/pnpm-workspace.yaml for the why.
+# Without it, pnpm walks up to the repo-root workspace file and `pnpm install` here
+# silently installs the root project instead of the FIT-validator devDeps.
+# Guarded by tests/pnpm-workspace-settings.test.js. Idea #3194.
+packages: []
