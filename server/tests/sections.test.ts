@@ -253,7 +253,7 @@ describe('favorites', () => {
 
   // buildRow uses `body.payload !== undefined ? body.payload : body` — a wrapper
   // key is optional, and its absence is a deliberate passthrough (the client PUTs
-  // the favorite object directly; see toggleFavorite in app.js). Pin both branches
+  // the favorite object directly; see toggleFavorite). Pin both branches
   // so a refactor can't silently change what gets persisted.
   test('PUT favorites with a { payload } wrapper stores the wrapped value', async () => {
     const { username: u, token } = await createTestAccount();

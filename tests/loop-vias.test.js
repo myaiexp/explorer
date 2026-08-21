@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Tests for loopVias (osrm.js) — the single source for the loop envelope vias,
- * now shared by buildLoop, buildJunctionLoop, and app.js's buildDirectionsUrl.
+ * now shared by buildLoop, buildJunctionLoop, and buildDirectionsUrl.
  *
  * Loading: geo-utils.js + geometry.js provide the globals loopVias/buildLoopSetup
  * read at call time (haversineKm, calculateDistance, envelopeOffsetPoint,

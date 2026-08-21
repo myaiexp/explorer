@@ -1,4 +1,4 @@
-// Overpass query + retry with timeout. Ported from explorer/app.js queryOverpass.
+// Overpass query + retry with timeout.
 
 import { log } from './log.js';
 

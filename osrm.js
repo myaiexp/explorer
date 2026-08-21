@@ -115,7 +115,7 @@ function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
 }
 
 // Pure loop envelope geometry — the single source for the sin-envelope via
-// points, shared by both loop builders here and buildDirectionsUrl in app.js
+// points, shared by both loop builders here and buildDirectionsUrl
 // (which draws the Google Maps link along the same oval). Built on
 // buildLoopSetup so the offset formula lives in exactly one place.
 // rightVias/leftVias are in forward (A→B) t-order; a leg that walks a side back

@@ -64,7 +64,6 @@ test('screenCandidates: all pass → all survivors, null bestRejected', async ()
 });
 
 test('screenCandidates: all stage-1 fail → empty survivors, bestRejected by min snapM', async () => {
-    // Three candidates with progressively larger snap distances, all > 500 m.
     const tableFn = async () => [
         {snapM: 1100, routeM: null},
         {snapM: 2200, routeM: null},
@@ -92,7 +91,6 @@ test('screenCandidates: stage 1 passes but stage 2 rejects → bestRejected by m
 });
 
 test('screenCandidates: mixed → only survivors annotated', async () => {
-    // c0 passes (1.2×), c1 rejected (5×), c2 passes (1.5×)
     const tableFn = async () => [
         {snapM: 11, routeM:  6000},
         {snapM: 11, routeM: 25000},

@@ -22,7 +22,7 @@ osmLayer.addTo(map);
 
 L.control.layers({ 'OpenStreetMap': osmLayer, 'Satellite': satelliteLayer }).addTo(map);
 
-// Visited layer group (added visible; toggle visibility lives in app.js).
+// Visited layer group (added visible).
 const visitedLayerGroup = L.layerGroup().addTo(map);
 
 // ─── Mutable map state ───────────────────────────────────────────────────────
@@ -239,7 +239,7 @@ function applyRouteColor() {
 }
 
 // ─── globalThis exports ───────────────────────────────────────────────────────
-// map + visitedLayerGroup are consts read (never reassigned) by app.js; the
+// map + visitedLayerGroup are consts read (never reassigned) via globalThis; the
 // mutable arrays/refs stay module-private and are driven via the helpers below.
 globalThis.map = map;
 globalThis.visitedLayerGroup = visitedLayerGroup;

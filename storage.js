@@ -33,7 +33,7 @@ function readStoredArray(key) {
 
 // Serialize an array back to localStorage — the write-side counterpart to
 // readStoredArray, so the JSON.stringify/setItem pairing lives in one place.
-// The cloud-mirror half (ExplorerSync.mutate) stays in app.js's syncedPut/
+// The cloud-mirror half (ExplorerSync.mutate) stays in syncedPut/
 // syncedDelete, which wrap this — storage.js itself does no network. Returns
 // true on a durable write, false when quota was exhausted and couldn't be
 // reclaimed (hard failure is also toasted). Callers that also mirror to the

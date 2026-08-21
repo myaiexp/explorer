@@ -1,8 +1,8 @@
 // Route-build dispatch by trip mode — picks buildOneWay / buildJunctionLoop / buildLoop.
 // Loaded after screening.js, before app.js. Reads no DOM: all mode flags are
-// passed in. The three builders are app.js classic-script globals, resolved
-// from the global scope at call time (the browser exposes top-level function
-// declarations on window; tests install fakes on globalThis).
+// passed in. The three builders are resolved from the global scope at call
+// time (the browser exposes top-level function declarations on window; tests
+// install fakes on globalThis).
 
 // Dispatch a single route build for the given trip mode. Replaces the if/else
 // block that was duplicated across generateDestination, the pick-on-map

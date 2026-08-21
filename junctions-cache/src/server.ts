@@ -1,4 +1,4 @@
-// Hono entrypoint — single GET /junctions endpoint backed by the cache.
+// Hono entrypoint for the junctions-cache service.
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
