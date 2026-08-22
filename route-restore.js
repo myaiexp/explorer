@@ -35,7 +35,9 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         locationInput, destName, tripMode,
     });
     session.junctions = r.junctions;
-    saveToHistory(session);
+    // Same gate as generateDestination: a dest with no outbound leg is a
+    // dashed straight-line fallback, not a walkable route worth persisting.
+    if (r.outbound) saveToHistory(session);
 }
 
 // Re-display a stored history/favorite entry. Lives here rather than in

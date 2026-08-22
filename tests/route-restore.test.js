@@ -179,4 +179,20 @@ describe('buildAndDisplay — successful build persists', () => {
     expect(displayRouteCalls).toHaveLength(0);
     expect(saveToHistoryCalls).toHaveLength(0);
   });
+
+  test('does not persist a fake walk when the build returns no outbound leg', async () => {
+    globalThis.buildRouteForMode = async () => ({
+      outbound: undefined, return: undefined, junctions: null,
+    });
+
+    await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'x',
+      destName: 'y',
+      onProgress: () => {},
+    });
+
+    expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(0);
+  });
 });

@@ -74,7 +74,10 @@ async function generateDestination() {
                 locationInput, destName, tripMode, straightMax, straightMin,
             });
             session.junctions = junctions;
-            saveToHistory(session);
+            // Missing outbound means routing built nothing. displayRoute still
+            // draws the dest (dashed straight-line fallback), but persisting
+            // would store a fake walk in history and the cloud backup.
+            if (outboundRoute) saveToHistory(session);
 
             if (waterLocked) {
                 showWarning('This area is mostly water — try a different start or larger radius.');
