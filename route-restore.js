@@ -14,7 +14,7 @@
 //   buildingMessage  forwarded to buildRouteForMode (shown for non-smart builds)
 async function buildAndDisplay(startLat, startLng, destLat, destLng, {
     tripMode, locationInput, destName, onProgress,
-    loadingMessage = null, buildingMessage = null,
+    loadingMessage = null, buildingMessage = null, poiCategory = null,
 }) {
     clearMap();
     if (loadingMessage) onProgress(loadingMessage);
@@ -33,6 +33,7 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         startLat, startLng, destLat, destLng,
         outbound: r.outbound, ret: r.return,
         locationInput, destName, tripMode,
+        poiCategory: poiCategory ?? null,
     });
     session.junctions = r.junctions;
     // Same gate as generateDestination: a dest with no outbound leg is a
@@ -73,6 +74,7 @@ function restoreResult(entry) {
         destLat: entry.destLat, destLng: entry.destLng,
         outbound, ret,
         locationInput: entry.startLabel, destName: entry.destName, tripMode: entry.tripMode,
+        poiCategory: entry.poiCategory ?? null,
     });
 }
 

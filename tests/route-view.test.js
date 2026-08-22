@@ -207,4 +207,26 @@ describe('displayRoute', () => {
             { dashed: true },
         );
     });
+
+    // Finding #7311: poiCategory used to be read off #locationTypeSelect, so
+    // restore / pick-on-map / share-link stamped whatever the form currently
+    // showed. The session field is now an explicit argument; the live dropdown
+    // is only the generate path's input, forwarded by generate.js.
+    test('stamps the passed poiCategory onto the session, ignoring the dropdown', () => {
+        document.getElementById('locationTypeSelect').innerHTML =
+            '<option value="food" selected>food</option>';
+        displayed({ poiCategory: 'nature' });
+        expect(getCurrentSession().poiCategory).toBe('nature');
+    });
+
+    test('omitted poiCategory is null even when the dropdown has a value', () => {
+        expect(document.getElementById('locationTypeSelect').value).toBe('park');
+        displayed();
+        expect(getCurrentSession().poiCategory).toBeNull();
+    });
+
+    test('explicit null poiCategory stays null', () => {
+        displayed({ poiCategory: null });
+        expect(getCurrentSession().poiCategory).toBeNull();
+    });
 });

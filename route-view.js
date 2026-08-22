@@ -122,7 +122,8 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
 // sync it to the cloud as a side effect of every history/favorite click).
 // Returns the built session (also stored via session-state.js).
 function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
-                        locationInput, destName, tripMode, straightMax = 0, straightMin = 0 }) {
+                        locationInput, destName, tripMode, straightMax = 0, straightMin = 0,
+                        poiCategory = null }) {
     const routeColor = getRouteColor();
 
     // Markers + radius circles (map-view.js owns the mutable Leaflet state).
@@ -161,7 +162,10 @@ function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
         startLat, startLng, startLabel: locationInput,
         destLat, destLng, destName: destName || null,
         tripMode: tripMode || 'round',
-        poiCategory: document.getElementById('locationTypeSelect')?.value || null,
+        // Caller-supplied — never the live #locationTypeSelect. Restore /
+        // pick-on-map / share-link have no category of their own and pass
+        // null; generateDestination forwards the dropdown that produced the dest.
+        poiCategory: poiCategory ?? null,
         distance: totalWalkKm,
         ...routeSessionFields(outbound, ret),
     });

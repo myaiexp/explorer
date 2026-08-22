@@ -229,6 +229,7 @@ describe('pipeline wiring', () => {
       startLat: 60, startLng: 24, destLat: 61, destLng: 25,
       outbound: OUTBOUND, ret: RETURN,
       locationInput: 'Home', destName: 'Park', tripMode: 'round',
+      poiCategory: 'park',
     }));
     expect(saveToHistoryCalls).toHaveLength(1);
     expect(saveToHistoryCalls[0].junctions).toEqual([{ lat: 60.5, lng: 24.5 }]);
