@@ -63,6 +63,9 @@ export const SCRIPT_DEPS = {
     'result-panel': ['session-state'],
     // geometry + result-panel are pure/real collaborators named in the header;
     // map-view / session / elevation / favorites are faked by route-view tests.
+    // map-view.test.js loads map-view.js for real against a Leaflet stub, but
+    // map-view is not a SCRIPT_DEPS key: adding it would force route-view to
+    // list it via the reverse-completeness check and clobber those stubs.
     'route-view':   ['session-state', 'geometry', 'result-panel'],
     'visits-io':    ['visit-shape'],
     'sync':         ['sync-flush', 'sync-sections'],

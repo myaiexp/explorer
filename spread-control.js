@@ -33,8 +33,6 @@ async function rerouteWithCurrentSpread() {
     try {
         await withLoading(async (onProgress) => {
             onProgress('Adjusting route…');
-            // Keep markers and circles, only clear route lines
-            clearRouteLines();
 
             const { tripMode } = session;
             let junctions = session.junctions || null;
@@ -46,11 +44,20 @@ async function rerouteWithCurrentSpread() {
             });
             const outbound = r.outbound;
             const ret = r.return;
+            // tryOsrm returns {outbound:null,return:null} on HTTP/parse failure
+            // rather than throwing. Clearing the polylines before the await used
+            // to blank the map, and the null legs then overwrote the session
+            // coords — visitId survived but the drawn route and its stored
+            // geometry did not. Keep the previous view until a replacement exists.
+            if (!outbound && !ret) {
+                throw new Error('Failed to adjust route.');
+            }
             if (tripMode !== 'one-way') junctions = r.junctions;
 
-            // Redraw routes, refit, badges, directions link, elevation — the same
-            // render tail displayRoute uses. No straight-line fallback: keep the
-            // previous view in place if a spread change yields no route.
+            // Keep markers and circles; only swap the route lines now that the
+            // new legs are in hand. No straight-line fallback — a spread change
+            // that yields no route must leave the previous view in place.
+            clearRouteLines();
             const { totalWalkKm } = renderRouteTail(
                 startLat, startLng, destLat, destLng, outbound, ret, tripMode, getRouteColor(),
                 { fallbackStraight: false });

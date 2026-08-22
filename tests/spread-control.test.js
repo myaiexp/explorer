@@ -2,7 +2,9 @@
 /**
  * Tests for spread-control.js — slider/stepper debounce, re-arm while a build
  * owns the app, cachedJunctions reuse, and the session rewrite that must keep
- * visitId so the mark-visited button stays honest (finding #7067).
+ * visitId so the mark-visited button stays honest (finding #7067). Finding #7303:
+ * tryOsrm's {outbound:null,return:null} resolve (HTTP/parse failure, not a throw)
+ * must not wipe the previous session or clear the drawn polylines first.
  *
  * spread-control.js binds the slider listener at load time, so the DOM has to
  * exist before loadScripts. Collaborators other than loading.js / session-state.js
@@ -176,7 +178,10 @@ describe('rerouteWithCurrentSpread', () => {
     });
 
     test('buildRouteForMode throw shows the error without wiping the previous session', async () => {
-        const session = baseSession();
+        const session = baseSession({
+            routeCoords: OUTBOUND.coords,
+            returnRouteCoords: RETURN.coords,
+        });
         setCurrentSession(session);
         buildRouteForMode.mockRejectedValue(new Error('OSRM unreachable'));
 
@@ -185,7 +190,37 @@ describe('rerouteWithCurrentSpread', () => {
         expect(errors).toEqual(['OSRM unreachable']);
         expect(getCurrentSession()).toBe(session);
         expect(getCurrentSession().visitId).toBe('visit-1');
+        expect(getCurrentSession().routeCoords).toBe(OUTBOUND.coords);
+        expect(getCurrentSession().distance).toBe(2.0);
         expect(renderRouteTail).not.toHaveBeenCalled();
+        // tryOsrm-style failure must not blank the map before the replacement
+        // exists — clearRouteLines used to run above the await, so a throw left
+        // markers with no polylines and no way to redraw the previous route.
+        expect(clearRouteLines).not.toHaveBeenCalled();
+    });
+
+    test('null legs keep the previous session and do not clear the drawn route', async () => {
+        // tryOsrm returns {outbound:null,return:null} on HTTP/parse failure —
+        // it does not throw. That used to fall through to setCurrentSession
+        // with nulled coords after the map had already been wiped.
+        const session = baseSession({
+            routeCoords: OUTBOUND.coords,
+            returnRouteCoords: RETURN.coords,
+            distance: 2.0,
+        });
+        setCurrentSession(session);
+        buildRouteForMode.mockResolvedValue({ outbound: null, return: null, junctions: null });
+
+        await rerouteWithCurrentSpread();
+
+        expect(getCurrentSession()).toBe(session);
+        expect(getCurrentSession().visitId).toBe('visit-1');
+        expect(getCurrentSession().routeCoords).toBe(OUTBOUND.coords);
+        expect(getCurrentSession().returnRouteCoords).toBe(RETURN.coords);
+        expect(getCurrentSession().distance).toBe(2.0);
+        expect(clearRouteLines).not.toHaveBeenCalled();
+        expect(renderRouteTail).not.toHaveBeenCalled();
+        expect(errors).toEqual(['Failed to adjust route.']);
     });
 
     test('no session is a no-op', async () => {

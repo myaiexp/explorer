@@ -17,6 +17,8 @@ Backend DB safety (`*_test` hard-throw, `fileParallelism: false`) lives in CLAUD
 
 Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, geometry, loop-quality]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
 
+`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check.
+
 ### Transform-before-eval
 
 `readScript(name)` returns source text. Two tests must transform it before evaluating:
