@@ -149,7 +149,7 @@ describe('tryOsrm', () => {
 describe('snapToRoad', () => {
     const via = { lat: 60, lng: 24 };
 
-    test('returns the snapped point when nearest is within maxSnapKm', async () => {
+    test('returns the snapped point when nearest is within snapRadius', async () => {
         // ~11 m north — well inside the 0.5 km default.
         installFetch({
             nearest: () => jsonResponse({ waypoints: [{ location: [24, 60.0001] }] }),
@@ -165,7 +165,7 @@ describe('snapToRoad', () => {
         expect(out).toBe(via);
     });
 
-    test('keeps the original via when nearest is beyond maxSnapKm', async () => {
+    test('keeps the original via when nearest is beyond snapRadius', async () => {
         // 60,24 → 60.1,24.1 is ~13 km.
         installFetch({
             nearest: () => jsonResponse({ waypoints: [{ location: [24.1, 60.1] }] }),
@@ -414,5 +414,34 @@ describe('buildJunctionLoop', () => {
         expect(out.return).toBeTruthy();
         expect(typeof out.overlap).toBe('number');
         expect(routeUrls(fetch)).toHaveLength(4);
+    });
+
+    test('omitting onProgress still uses the junction path, not the Overpass fallback', async () => {
+        const fetch = installFetch({
+            junctions: () => jsonResponse({ junctions: POOL }),
+        });
+        const out = await globalThis.buildJunctionLoop(
+            START.lat, START.lng, DEST.lat, DEST.lng,
+            { maxKm: 7, spread: SPREAD() },
+        );
+        // A TypeError from an unguarded onProgress used to land in the Overpass
+        // catch and silently degrade to envelope-snap (nearest). Junction path
+        // never calls nearest.
+        expect(out.junctions).toBe(POOL);
+        expect(typeof out.overlap).toBe('number');
+        expect(fetch.mock.calls.some(([url]) => String(url).includes('/nearest/'))).toBe(false);
+    });
+
+    test("emits 'Searching for junctions…' once, from the fetch, not also from the builder", async () => {
+        const onProgress = vi.fn();
+        installFetch({
+            junctions: () => jsonResponse({ junctions: POOL }),
+        });
+        await globalThis.buildJunctionLoop(
+            START.lat, START.lng, DEST.lat, DEST.lng,
+            { maxKm: 7, onProgress, spread: SPREAD() },
+        );
+        expect(onProgress.mock.calls.filter(([msg]) => msg === 'Searching for junctions…')).toHaveLength(1);
+        expect(onProgress).toHaveBeenCalledWith('Building both chiralities…');
     });
 });

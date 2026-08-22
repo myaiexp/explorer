@@ -20,8 +20,8 @@ const STO = { lat: 59.3293, lng: 18.0686 };       // Stockholm — outside (lng 
 let errors;
 let fetchWithTimeout;
 
-function jsonResponse(data) {
-    return { json: async () => data };
+function jsonResponse(data, { ok = true, status = 200 } = {}) {
+    return { ok, status, json: async () => data };
 }
 
 beforeEach(() => {
@@ -87,6 +87,24 @@ describe('geocodeAddress', () => {
         fetchWithTimeout.mockResolvedValue(jsonResponse([]));
         await expect(geocodeAddress('Nowhereville')).rejects.toThrow(
             'Could not find location: "Nowhereville"',
+        );
+    });
+
+    test('a throttled Nominatim response throws a user-facing busy message, not a JSON parse error', async () => {
+        fetchWithTimeout.mockResolvedValue({
+            ok: false,
+            status: 429,
+            json: async () => { throw new Error('Unexpected token < in JSON'); },
+        });
+        await expect(geocodeAddress('Jyväskylä')).rejects.toThrow(
+            'Address lookup is busy — try again in a moment, or use coordinates.',
+        );
+    });
+
+    test('a non-array success body is a miss, not a crash on data[0]', async () => {
+        fetchWithTimeout.mockResolvedValue(jsonResponse({ error: 'quota' }));
+        await expect(geocodeAddress('Jyväskylä')).rejects.toThrow(
+            'Could not find location: "Jyväskylä"',
         );
     });
 });

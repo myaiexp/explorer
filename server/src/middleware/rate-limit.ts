@@ -135,13 +135,6 @@ export function startBucketSweeper(intervalMs = 5 * MINUTE): void {
   sweepTimer.unref?.();
 }
 
-export function stopBucketSweeper(): void {
-  if (sweepTimer) {
-    clearInterval(sweepTimer);
-    sweepTimer = undefined;
-  }
-}
-
 function limited(
   c: Context,
   buckets: Map<string, Bucket>,
@@ -178,12 +171,8 @@ export function usernameWriteRateLimit() {
 /** 60 reads/min per IP — throttles probing of GET /:username and DELETE /:username */
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = clientIp(c);
-
-    if (!consume(ipReadBuckets, ip, 60, MINUTE)) {
-      const secs = retryAfter(ipReadBuckets, ip, 60, MINUTE);
-      return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
-    }
+    const denied = limited(c, ipReadBuckets, clientIp(c), 60, MINUTE);
+    if (denied) return denied;
     await next();
   };
 }
@@ -191,12 +180,8 @@ export function readRateLimit() {
 /** 10 account creations/hour per IP */
 export function accountCreationRateLimit() {
   return async (c: Context, next: Next) => {
-    const ip = clientIp(c);
-
-    if (!consume(ipAccountBuckets, ip, 10, HOUR)) {
-      const secs = retryAfter(ipAccountBuckets, ip, 10, HOUR);
-      return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
-    }
+    const denied = limited(c, ipAccountBuckets, clientIp(c), 10, HOUR);
+    if (denied) return denied;
     await next();
   };
 }

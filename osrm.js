@@ -50,15 +50,13 @@ async function tryNearest(url) {
     } catch { return null; }
 }
 
-// Snap a geometric via to the nearest road point within maxSnapKm.
+// Snap a geometric via to the nearest road point within snapRadius km.
 // Returns the snapped point, or the original if snapping fails or is too far.
-// maxSnapKm is a snap-search radius (callers pass snapRadius) — NOT the route
-// distance budget that other functions here call maxKm.
-async function snapToRoad(via, maxSnapKm = 0.5) {
+async function snapToRoad(via, snapRadius = 0.5) {
     const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
     if (!snapped) return via;
     const dist = haversineKm(via.lat, via.lng, snapped.lat, snapped.lng);
-    return dist <= maxSnapKm ? snapped : via;
+    return dist <= snapRadius ? snapped : via;
 }
 
 // Adapter for screenCandidates' tableFn contract: one OSRM /table call
@@ -188,18 +186,16 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     return data.junctions || [];
 }
 
-// Find the closest junction in the pool to `via` within maxSnapKm. Returns the
-// junction, or the original `via` if no junction is in range. maxSnapKm is a
-// snap-search radius (callers pass snapRadius) — NOT the route distance budget
-// that other functions here call maxKm.
-function snapToJunction(via, junctionPool, maxSnapKm) {
+// Find the closest junction in the pool to `via` within snapRadius km.
+// Returns the junction, or the original `via` if no junction is in range.
+function snapToJunction(via, junctionPool, snapRadius) {
     if (!junctionPool || junctionPool.length === 0) return via;
     let best = null, bestDist = Infinity;
     for (const j of junctionPool) {
         const d = haversineKm(via.lat, via.lng, j.lat, j.lng);
         if (d < bestDist) { bestDist = d; best = j; }
     }
-    return bestDist <= maxSnapKm ? best : via;
+    return bestDist <= snapRadius ? best : via;
 }
 
 // Pick lower-overlap of two candidate (outbound, return) pairs. Falls back
@@ -238,7 +234,7 @@ function pickBetterLoop(outA, retA, outB, retB) {
 //   winterMode       excludes winter-unmaintained ways from the junction fetch
 //   spread           precomputed { offsetMult, viaTs } from computeSpreadParams
 async function buildJunctionLoop(startLat, startLng, destLat, destLng, {
-    maxKm, onProgress, cachedJunctions = null, winterMode = false, spread = undefined,
+    maxKm, onProgress = () => {}, cachedJunctions = null, winterMode = false, spread = undefined,
 } = {}) {
     // Forward-order vias on each side (loopVias owns the envelope geometry).
     // Reversal happens at call time on the leg that needs it (return leg).
@@ -248,7 +244,7 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, {
     let junctions = cachedJunctions;
     if (!junctions) {
         try {
-            onProgress('Searching for junctions…');
+            // Only the Overpass fetch — a missing onProgress must not look like a network miss.
             junctions = await fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode);
         } catch {
             const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);

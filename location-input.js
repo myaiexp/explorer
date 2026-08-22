@@ -22,8 +22,11 @@ async function geocodeAddress(address) {
     const response = await fetchWithTimeout(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
     );
+    if (!response.ok) {
+        throw new Error('Address lookup is busy — try again in a moment, or use coordinates.');
+    }
     const data = await response.json();
-    if (data.length === 0) {
+    if (!Array.isArray(data) || data.length === 0) {
         throw new Error(`Could not find location: "${address}". Try being more specific or use coordinates instead.`);
     }
     return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
