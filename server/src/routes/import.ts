@@ -1,3 +1,4 @@
+// Bulk-import route — replace all four cloud-backup sections atomically.
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { eq } from 'drizzle-orm';
@@ -10,7 +11,7 @@ import {
   MAX_IMPORT_ROWS_PER_SECTION,
 } from '../lib/validate-fields.js';
 import { accountAuth } from '../middleware/auth.js';
-import { sectionWriteRateLimit } from '../middleware/rate-limit.js';
+import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';
 import {
   validateTripRow,
   validateVisitRow,
@@ -61,11 +62,13 @@ export function importRoutes(db: Db): Hono {
   });
 
   // POST /:username/import — replace all four sections atomically. Auth (token)
-  // confirms account ownership; the write rate limit caps replace-all churn.
+  // confirms account ownership. IP write cap runs first (bounds probing);
+  // the per-username cap runs after auth so a wrong token can't lock the owner.
   app.post(
     '/:username/import',
-    sectionWriteRateLimit(),
+    ipWriteRateLimit(),
     accountAuth(db),
+    usernameWriteRateLimit(),
     importBodyLimit,
     async (c) => {
     const username = c.req.param('username')!;

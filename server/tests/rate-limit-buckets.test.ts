@@ -1,8 +1,12 @@
-// Per-bucket cap + window-refill coverage for sectionWriteRateLimit (audit #1568)
+// Per-bucket cap + window-refill coverage for the write rate-limit pair
+// (audit #1568). Production mounts ipWriteRateLimit BEFORE accountAuth and
+// usernameWriteRateLimit AFTER it; this harness stacks them with no auth so
+// the bucket math is isolated from the DB.
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import {
-  sectionWriteRateLimit,
+  ipWriteRateLimit,
+  usernameWriteRateLimit,
   accountCreationRateLimit,
   resetRateLimiter,
   sweepStaleBuckets,
@@ -13,7 +17,12 @@ import {
 // clear of the pg pool. IP comes from trusted-proxy XFF (lib/client-ip.ts), the
 // username from the path param (read inside the middleware, as in sections.ts).
 const app = new Hono();
-app.put('/:username/write', sectionWriteRateLimit(), (c) => c.body(null, 204));
+app.put(
+  '/:username/write',
+  ipWriteRateLimit(),
+  usernameWriteRateLimit(),
+  (c) => c.body(null, 204)
+);
 app.post('/accounts', accountCreationRateLimit(), (c) => c.body(null, 201));
 
 const WINDOW_MS = 60_000;
@@ -34,7 +43,7 @@ beforeEach(() => {
   resetRateLimiter();
 });
 
-describe('sectionWriteRateLimit — IP write bucket (300/min)', () => {
+describe('ipWriteRateLimit — IP write bucket (300/min)', () => {
   test('300 writes from one IP across distinct usernames all pass; 301st is 429 with Retry-After', async () => {
     const ip = '203.0.113.7';
 
@@ -81,7 +90,7 @@ describe('sectionWriteRateLimit — IP write bucket (300/min)', () => {
   });
 });
 
-describe('sectionWriteRateLimit — per-username bucket (60/min)', () => {
+describe('usernameWriteRateLimit — per-username bucket (60/min)', () => {
   test('per-username bucket refills after the window elapses', async () => {
     vi.useFakeTimers();
     try {

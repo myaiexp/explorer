@@ -178,4 +178,75 @@ describe('rate limiting', () => {
     const res = await app.request('/api/accounts', { method: 'POST' });
     expect(res.status).toBe(201);
   });
+
+  // finding #7056 — the per-username write bucket used to decrement before
+  // accountAuth, so a missing/wrong token against a public username could lock
+  // the owner out of cloud-backup writes for a rolling minute. IP still caps
+  // unauthenticated probing; the username bucket is owner-only.
+  test('unauthenticated writes do not consume the per-username bucket', async () => {
+    const { username: u, token } = await createTestAccount();
+    const owner = { 'content-type': 'application/json', ...authHeaders(token) };
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request(`/api/${u}/visits/unauth-${i}`, {
+        method: 'PUT',
+        body: visitPayload(`unauth-${i}`),
+        headers: { 'content-type': 'application/json' },
+      });
+      expect(res.status).toBe(401);
+    }
+
+    const res = await app.request(`/api/${u}/visits/owner-after-probe`, {
+      method: 'PUT',
+      body: visitPayload('owner-after-probe'),
+      headers: owner,
+    });
+    expect(res.status).toBe(204);
+  });
+
+  test('wrong-token writes do not consume the per-username bucket', async () => {
+    const { username: u, token } = await createTestAccount();
+    const owner = { 'content-type': 'application/json', ...authHeaders(token) };
+    const wrong = { 'content-type': 'application/json', ...authHeaders('not-the-token') };
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request(`/api/${u}/visits/wrong-${i}`, {
+        method: 'PUT',
+        body: visitPayload(`wrong-${i}`),
+        headers: wrong,
+      });
+      expect(res.status).toBe(401);
+    }
+
+    const res = await app.request(`/api/${u}/visits/owner-after-wrong`, {
+      method: 'PUT',
+      body: visitPayload('owner-after-wrong'),
+      headers: owner,
+    });
+    expect(res.status).toBe(204);
+  });
+
+  test('unauthenticated import does not consume the per-username bucket', async () => {
+    const { username: u, token } = await createTestAccount();
+    const owner = { 'content-type': 'application/json', ...authHeaders(token) };
+    const emptyImport = JSON.stringify({
+      visits: [], favorites: [], savedLocations: [], history: [],
+    });
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request(`/api/${u}/import`, {
+        method: 'POST',
+        body: emptyImport,
+        headers: { 'content-type': 'application/json' },
+      });
+      expect(res.status).toBe(401);
+    }
+
+    const res = await app.request(`/api/${u}/visits/owner-after-import-probe`, {
+      method: 'PUT',
+      body: visitPayload('owner-after-import-probe'),
+      headers: owner,
+    });
+    expect(res.status).toBe(204);
+  });
 });

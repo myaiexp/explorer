@@ -142,20 +142,35 @@ export function stopBucketSweeper(): void {
   }
 }
 
-/** 60 writes/min per username param + 300 writes/min per IP */
-export function sectionWriteRateLimit() {
-  return async (c: Context, next: Next) => {
-    const ip = clientIp(c);
-    const username = c.req.param('username') ?? 'unknown';
+function limited(
+  c: Context,
+  buckets: Map<string, Bucket>,
+  key: string,
+  limit: number,
+  windowMs: number
+) {
+  if (consume(buckets, key, limit, windowMs)) return null;
+  const secs = retryAfter(buckets, key, limit, windowMs);
+  return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
+}
 
-    if (!consume(usernameBuckets, username, 60, MINUTE)) {
-      const secs = retryAfter(usernameBuckets, username, 60, MINUTE);
-      return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
-    }
-    if (!consume(ipWriteBuckets, ip, 300, MINUTE)) {
-      const secs = retryAfter(ipWriteBuckets, ip, 300, MINUTE);
-      return c.json({ error: 'Rate limit exceeded' }, 429, { 'Retry-After': String(secs) });
-    }
+/** 300 writes/min per IP. Mount BEFORE accountAuth so unauthenticated
+ *  probing is bounded without touching the per-username bucket. */
+export function ipWriteRateLimit() {
+  return async (c: Context, next: Next) => {
+    const denied = limited(c, ipWriteBuckets, clientIp(c), 300, MINUTE);
+    if (denied) return denied;
+    await next();
+  };
+}
+
+/** 60 writes/min per username. Mount AFTER accountAuth so a missing/wrong
+ *  token cannot lock the account owner out of cloud-backup writes. */
+export function usernameWriteRateLimit() {
+  return async (c: Context, next: Next) => {
+    const username = c.req.param('username') ?? 'unknown';
+    const denied = limited(c, usernameBuckets, username, 60, MINUTE);
+    if (denied) return denied;
     await next();
   };
 }
