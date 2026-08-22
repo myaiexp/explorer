@@ -38,6 +38,7 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 | `cloud-backup-ui.js` | `cloud-backup-ui.test.js` |
 | `overpass.js` | `overpass-exclude-parity.test.js`, `overpass.test.js`, `overpass-parse.test.js` |
 | `route-view.js` | `route-view.test.js` (visited-button derivation still in `mark-visited.test.js`) |
+| `visit-shape.js` | `visit-shape.test.js`, `visit-shape-parity.test.js` (client/server cap lockstep) |
 
 ## Sync harness
 

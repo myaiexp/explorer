@@ -320,7 +320,7 @@ describe('POST /api/:username/import', () => {
       ['savedLocation traversal id', { savedLocations: [{ id: '..', label: 'Home', value: '60,25' }] }],
       // validateSavedLocation: missing required `value`.
       ['savedLocation missing value', { savedLocations: [{ id: 'sl-1', label: 'Home' }] }],
-      // validateHistoryRow: missing required route-row fields.
+      // importTripRow: missing required route-row fields.
       ['history row missing required fields', { history: [{ id: 'bad', date: VISIT_BODY.date }] }],
     ];
     for (const [label, sectionBody] of rowCases) {

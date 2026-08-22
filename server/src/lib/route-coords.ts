@@ -1,5 +1,8 @@
 // Pure validator for routeCoords / returnRouteCoords blobs — bounds shape, size, and coordinate ranges.
 
+// TWIN: visit-shape.js MAX_ROUTE_COORDS. tests/visit-shape-parity.test.js fails
+// RED if the two copies drift.
+//
 // ≈ 100 km of dense GPS sampling. Caps the JSON blob size so a malicious or buggy
 // client cannot persist arbitrarily-large arrays that pressure memory on GET /:username.
 export const MAX_ROUTE_COORDS = 5000;

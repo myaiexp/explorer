@@ -2,6 +2,9 @@
 // Shared by the per-row PUT routes (sections.ts) and the bulk import (import.ts)
 // so both endpoints reject the same malformed dates and oversized strings.
 
+// TWIN: visit-shape.js (idOrNull / isoDateOrNull / stringOrNull caps).
+// tests/visit-shape-parity.test.js fails RED if these drift.
+//
 // Indexed/text-column length caps — generous for any real label/name, bounded so
 // an authenticated client can't bloat indexes or rows with multi-MB strings.
 export const MAX_LABEL_LEN = 500; // startLabel, poiCategory, tripMode, saved-location label/value

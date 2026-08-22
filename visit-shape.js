@@ -10,9 +10,12 @@
 // Pure: no DOM, no network, no storage — depends on nothing, so it only has to be
 // loaded before its consumers (map-view.js, then visits-io.js).
 
-// Mirrors the backup server's caps (server/src/lib/route-coords.ts and
-// validate-fields.ts) so a normalized row is one the API will accept — an
-// imported row that reaches the cloud outbox must not come back a silent 400.
+// TWIN: server/src/lib/route-coords.ts (MAX_ROUTE_COORDS) and
+// server/src/lib/validate-fields.ts (MAX_LABEL_LEN / MAX_NAME_LEN / MAX_DATE_LEN /
+// MAX_ID_LEN / SAFE_ID / isIsoDate). Separate deployables — static frontend, no
+// shared build — so tests/visit-shape-parity.test.js is the enforcement. A
+// normalized row is one the API will accept: an imported row that reaches the
+// cloud outbox must not come back a silent 400.
 const MAX_ROUTE_COORDS = 5000;
 const MAX_LABEL_LEN = 500;   // startLabel, tripMode, poiCategory
 const MAX_NAME_LEN = 2000;   // destName
@@ -81,10 +84,10 @@ function stringOrNull(v, max) {
 // Dropping the id costs the file's own dedupe for that row (re-importing it mints
 // a second UUID and so duplicates the walk); keeping the walk is worth that, and
 // only a hand-edited file ever gets here.
-// Mirrored in server/src/lib/validate-fields.ts (MAX_ID_LEN / SAFE_ID / idError)
-// — keep the two in lockstep so an imported row that reaches the cloud outbox
-// is one the API will accept, and import cannot persist an id the client would
-// never mint.
+// TWIN: server/src/lib/validate-fields.ts parseRowId / MAX_ID_LEN / SAFE_ID.
+// tests/visit-shape-parity.test.js fails RED if the charset, length, or
+// dot-segment rules drift — import cannot persist an id the client would
+// never mint, and a minted id must be one the API will accept.
 const MAX_ID_LEN = 128;
 const SAFE_ID = /^[A-Za-z0-9._~-]+$/;
 

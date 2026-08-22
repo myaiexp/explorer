@@ -24,15 +24,16 @@ import {
 // owner (delete key) — enough to drive the generic replace transaction below.
 type UserTable = PgTable & { username: PgColumn };
 
-// Bulk import wants a null short-circuit rather than an error string. Every
-// section adapter is the same three steps over a shared validator
-// (lib/validate-rows.ts): guard the row is an object, delegate with the row's own
-// `id` as identity (per-row PUT uses the path id instead), and collapse any
-// { error } to null. `nullable` names that pattern once, so deriving a validator
-// for a fifth section is a one-liner. Coordinate-shape validation lives inside
-// validateTripRow, so these no longer need the assertRouteCoords try/catch the
-// import loops used to repeat.
-function nullable<T>(
+// Collapse a { error } row-validator into the bulk-import shape: non-object or
+// invalid → null. Every section adapter is the same three steps over a shared
+// validator (lib/validate-rows.ts): guard the row is an object, delegate with
+// the row's own `id` as identity (per-row PUT uses the path id instead), and
+// map any { error } to null. `nullOnError` names that once, so a fifth section
+// is a one-liner. One wrapper per section, all `import*Row`; history is the
+// trip shape (no poiCategory) so it reuses importTripRow. Coordinate-shape
+// validation lives inside validateTripRow, so these no longer need the
+// assertRouteCoords try/catch the import loops used to repeat.
+function nullOnError<T>(
   validate: (id: unknown, username: string, body: AnyRecord) => RowResult<T>,
 ): (row: unknown, username: string) => T | null {
   return (row, username) => {
@@ -42,13 +43,10 @@ function nullable<T>(
   };
 }
 
-export const validateRouteRow = nullable(validateTripRow);
-export const validateVisit = nullable(validateVisitRow);
-const validateFavorite = nullable(validateFavoriteRow);
-const validateSavedLocation = nullable(validateSavedLocationRow);
-
-// History rows are exactly the shared trip shape (no poiCategory) — same core.
-export const validateHistoryRow = validateRouteRow;
+export const importTripRow = nullOnError(validateTripRow);
+export const importVisitRow = nullOnError(validateVisitRow);
+export const importFavoriteRow = nullOnError(validateFavoriteRow);
+export const importSavedLocationRow = nullOnError(validateSavedLocationRow);
 
 export function importRoutes(db: Db): Hono {
   const app = new Hono();
@@ -111,10 +109,10 @@ export function importRoutes(db: Db): Hono {
       raw: unknown[];
       validate: (row: unknown, username: string) => object | null;
     }> = [
-      { key: 'visit', table: schema.visits, raw: rawVisits, validate: validateVisit },
-      { key: 'favorite', table: schema.favorites, raw: rawFavorites, validate: validateFavorite },
-      { key: 'savedLocation', table: schema.savedLocations, raw: rawSavedLocations, validate: validateSavedLocation },
-      { key: 'history', table: schema.history, raw: rawHistory, validate: validateHistoryRow },
+      { key: 'visit', table: schema.visits, raw: rawVisits, validate: importVisitRow },
+      { key: 'favorite', table: schema.favorites, raw: rawFavorites, validate: importFavoriteRow },
+      { key: 'savedLocation', table: schema.savedLocations, raw: rawSavedLocations, validate: importSavedLocationRow },
+      { key: 'history', table: schema.history, raw: rawHistory, validate: importTripRow },
     ];
 
     // Validate every row up front — a single bad row 400s before any write.
