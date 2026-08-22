@@ -1,9 +1,9 @@
 // OSRM routing + loop building — self-hosted OSRM-foot wrappers (route / nearest
 // / table), road/junction snapping, and the envelope/junction loop builders.
 // No DOM: callers pass a precomputed `spread`. Loaded after net.js (for
-// fetchWithTimeout), geometry.js (for calculateDistance / envelopeOffsetPoint /
-// computeSpreadParams) and loop-quality.js (for loopOverlapFraction), before
-// route-dispatch.js + app.js.
+// fetchWithTimeout), geometry.js (for envelopeOffsetPoint / computeSpreadParams),
+// geo-utils.js (haversineKm / kmToDegLat) and loop-quality.js (loopOverlapFraction),
+// before route-dispatch.js + app.js.
 
 // Self-hosted OSRM-foot for Finland.
 const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
@@ -57,7 +57,7 @@ async function tryNearest(url) {
 async function snapToRoad(via, maxSnapKm = 0.5) {
     const snapped = await tryNearest(`${OSRM_FI_NEAREST}/${via.lng},${via.lat}?number=1`);
     if (!snapped) return via;
-    const dist = calculateDistance(via.lat, via.lng, snapped.lat, snapped.lng);
+    const dist = haversineKm(via.lat, via.lng, snapped.lat, snapped.lng);
     return dist <= maxSnapKm ? snapped : via;
 }
 
@@ -97,7 +97,7 @@ async function screeningTableFn(start, candidates) {
 // A/B endpoints, the via t-positions, and the snap radius (half the offset,
 // floored at 0.3 km) from start/dest + the spread params. Pure — no DOM.
 function buildLoopSetup(startLat, startLng, destLat, destLng, spread) {
-    const straightKm = calculateDistance(startLat, startLng, destLat, destLng);
+    const straightKm = haversineKm(startLat, startLng, destLat, destLng);
     // spread is required. Production always passes getSpreadParams(), which itself
     // defaults NaN/undefined slider values to the 50% params — so the graceful
     // fallback already lives at the source. A missing spread here is a caller bug:
@@ -196,7 +196,7 @@ function snapToJunction(via, junctionPool, maxSnapKm) {
     if (!junctionPool || junctionPool.length === 0) return via;
     let best = null, bestDist = Infinity;
     for (const j of junctionPool) {
-        const d = calculateDistance(via.lat, via.lng, j.lat, j.lng);
+        const d = haversineKm(via.lat, via.lng, j.lat, j.lng);
         if (d < bestDist) { bestDist = d; best = j; }
     }
     return bestDist <= maxSnapKm ? best : via;

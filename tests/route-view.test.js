@@ -284,7 +284,7 @@ describe('displayRoute', () => {
 
     test('round-trip badge copy with no legs uses the straight-line double', () => {
         displayed({ tripMode: 'round' });
-        const straight = calculateDistance(START.lat, START.lng, DEST.lat, DEST.lng);
+        const straight = haversineKm(START.lat, START.lng, DEST.lat, DEST.lng);
         expect(document.getElementById('distanceBadge').textContent)
             .toBe(`${(straight * 2).toFixed(1)} km round trip`);
     });

@@ -1,6 +1,6 @@
 // Overpass querying — raw interpreter calls plus POI / road fetchers. No DOM.
-// Loaded after net.js (for fetchWithTimeout) and geometry.js (for
-// calculateDistance) and before app.js; the fetchers take all inputs as params
+// Loaded after net.js (for fetchWithTimeout) and geo-utils.js (for
+// haversineKm + bboxAround) and before app.js; the fetchers take all inputs as params
 // and return plain {lat,lng[,name]} arrays.
 
 // Client-side timeouts. The interpreter query embeds its own server-side
@@ -69,7 +69,7 @@ async function fetchPOIsInRadius(centerLat, centerLng, minKm, maxKm, filter, onP
         } else {
             continue;
         }
-        const dist = calculateDistance(centerLat, centerLng, lat, lng);
+        const dist = haversineKm(centerLat, centerLng, lat, lng);
         if (dist >= minKm && dist <= maxKm) {
             pois.push({ lat, lng, name: el.tags?.name || null });
         }
@@ -99,7 +99,7 @@ async function fetchRoadsInRadius(centerLat, centerLng, minKm, maxKm, onProgress
     const points = [];
     for (const el of data.elements) {
         if (el.type === 'way' && el.center) {
-            const dist = calculateDistance(centerLat, centerLng, el.center.lat, el.center.lon);
+            const dist = haversineKm(centerLat, centerLng, el.center.lat, el.center.lon);
             if (dist >= minKm && dist <= maxKm) {
                 points.push({ lat: el.center.lat, lng: el.center.lon });
             }

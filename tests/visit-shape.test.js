@@ -203,6 +203,31 @@ describe('normalizeVisit — rows beyond repair', () => {
   });
 });
 
+describe('destCoordsOrNull — dest-only gate for list renderers', () => {
+  test('returns finite dest coords for a good row', () => {
+    expect(destCoordsOrNull(validRow())).toEqual({ destLat: 62.28, destLng: 25.8 });
+  });
+
+  test('accepts numeric strings the way latOrNull does', () => {
+    expect(destCoordsOrNull(validRow({ destLat: '62.28', destLng: '25.8' })))
+      .toEqual({ destLat: 62.28, destLng: 25.8 });
+  });
+
+  test('returns null when dest coords are missing, non-finite, or out of range', () => {
+    expect(destCoordsOrNull(validRow({ destLat: undefined }))).toBeNull();
+    expect(destCoordsOrNull(validRow({ destLng: 'x' }))).toBeNull();
+    expect(destCoordsOrNull(validRow({ destLat: 91 }))).toBeNull();
+    expect(destCoordsOrNull(null)).toBeNull();
+    expect(destCoordsOrNull('fav')).toBeNull();
+    expect(destCoordsOrNull({ payload: [] })).toBeNull();
+  });
+
+  test('does not require start coords — lists only need a destination', () => {
+    expect(destCoordsOrNull({ destLat: 60.1, destLng: 24.9, startLat: undefined }))
+      .toEqual({ destLat: 60.1, destLng: 24.9 });
+  });
+});
+
 describe('visitRenderParts — the guard for rows already in storage', () => {
   test('returns the drawable pieces for a good row', () => {
     const parts = visitRenderParts(validRow());

@@ -11,7 +11,7 @@
  * bound per account and the next init merge resurrects the capped entries.
  */
 
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 import { installSyncedMirrorStubs } from './helpers/synced-mirror.js';
 
@@ -34,7 +34,7 @@ beforeEach(() => {
   globalThis.maybeRequestConsent = () => {};
   ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs());
 
-  loadScripts('history');
+  loadScripts('visit-shape', 'history');
 });
 
 // A session whose entry sorts by date: larger i ⇒ newer. destName/destLat keep
@@ -133,5 +133,39 @@ describe('saveToHistory cap mirrors to the cloud', () => {
     expect(storedHistory().some((e) => e.id === 'h0')).toBe(true); // oldest still present
     expect(putCalls).toHaveLength(0);
     expect(deleteCalls).toHaveLength(0);
+  });
+});
+
+describe('renderHistorySection: a malformed row does not abort first paint', () => {
+  test('skips a row without finite dest coords and still renders the good ones', () => {
+    // Finding #7307: destLat.toFixed on a corrupt local row threw out of
+    // app.js's top-level init — the same class visitRenderParts already closed
+    // for visits.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    localStorage.setItem(HISTORY_KEY, JSON.stringify([
+      { id: 'good', destLat: 60, destLng: 25, destName: 'Park', date: '2026-01-01T00:00:00Z', distance: 1 },
+      { id: 'bad', destName: null, date: '2026-01-02T00:00:00Z' },
+    ]));
+
+    expect(() => window.renderHistorySection()).not.toThrow();
+
+    expect(document.getElementById('historySection').classList.contains('visible')).toBe(true);
+    expect(document.getElementById('historyList').children).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/skipped 1/));
+    warn.mockRestore();
+  });
+
+  test('when every row is unusable the section hides rather than staying empty-visible', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    document.getElementById('historySection').classList.add('visible');
+    localStorage.setItem(HISTORY_KEY, JSON.stringify([
+      { id: 'bad', destLat: NaN, destLng: 25 },
+    ]));
+
+    expect(() => window.renderHistorySection()).not.toThrow();
+
+    expect(document.getElementById('historySection').classList.contains('visible')).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/skipped 1/));
+    warn.mockRestore();
   });
 });

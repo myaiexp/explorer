@@ -114,7 +114,7 @@ describe('SCRIPT_DEPS', () => {
             expect.arrayContaining(['sync-flush', 'sync-sections']),
         );
         expect(SCRIPT_DEPS.overpass).toEqual(
-            expect.arrayContaining(['net', 'geometry']),
+            expect.arrayContaining(['net', 'geo-utils']),
         );
     });
 });

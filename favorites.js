@@ -1,4 +1,5 @@
 // Favorites CRUD — the star button plus the bookmarked-destinations list.
+// Loaded after visit-shape.js (for destCoordsOrNull).
 
 // FAVORITES_KEY + getFavorites live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
@@ -9,9 +10,14 @@
 // as `dest` (a session or another favorite)? Matched by dest coords at 6-decimal
 // precision. Sole owner of the match rule so the star button and the favorites
 // list can never disagree — change the precision (or match by id) here once.
+// A stored row (or a session) without finite dest coords is not a match — never
+// throw, so a corrupt favorite cannot abort first paint via the star button.
 function sameFavoriteDest(fav, dest) {
-    return fav.destLat.toFixed(6) === dest.destLat.toFixed(6) &&
-           fav.destLng.toFixed(6) === dest.destLng.toFixed(6);
+    const a = destCoordsOrNull(fav);
+    const b = destCoordsOrNull(dest);
+    if (!a || !b) return false;
+    return a.destLat.toFixed(6) === b.destLat.toFixed(6) &&
+           a.destLng.toFixed(6) === b.destLng.toFixed(6);
 }
 
 function toggleFavorite() {
@@ -67,17 +73,28 @@ function renderFavoritesSection() {
         return;
     }
 
-    section.classList.add('visible');
     list.replaceChildren();
+    let skipped = 0;
+    let rendered = 0;
     favs.forEach((entry, i) => {
+        // Skip rather than throw: this runs from app.js's top level, so one
+        // unusable stored row used to abort history, hash restore, and the rest
+        // of init — the same class visitRenderParts closed for visits.
+        const dest = destCoordsOrNull(entry);
+        if (!dest) { skipped++; return; }
         const label = entry.destName ||
-            `${entry.destLat.toFixed(4)}, ${entry.destLng.toFixed(4)}`;
-        const dist = entry.distance ? `${entry.distance.toFixed(1)} km` : '';
+            `${dest.destLat.toFixed(4)}, ${dest.destLng.toFixed(4)}`;
+        const dist = Number.isFinite(entry.distance) ? `${entry.distance.toFixed(1)} km` : '';
         const item = buildListItem(label, dist,
             () => { restoreResult(getFavorites()[i]); updateFavoriteBtn(); },
             (e) => deleteFavorite(i, e));
         list.appendChild(item);
+        rendered++;
     });
+    if (skipped > 0) {
+        console.warn(`renderFavoritesSection: skipped ${skipped} unusable favorite row(s)`);
+    }
+    section.classList.toggle('visible', rendered > 0);
 }
 
 globalThis.sameFavoriteDest = sameFavoriteDest;

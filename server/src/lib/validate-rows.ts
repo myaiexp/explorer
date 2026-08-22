@@ -107,6 +107,11 @@ export function validateFavoriteRow(
   if ('error' in parsedId) return parsedId;
   const payload = 'payload' in source ? source.payload : source;
   if (payload === undefined || payload === null) return { error: 'Missing required field: payload' };
+  // JSONB will accept an array or a string, but the client unwraps payload as
+  // an object and the list renderer toFixed's destLat. A 204 of [] / "x" is a
+  // row the UI cannot draw and that used to abort first paint (#7307).
+  if (typeof payload !== 'object' || Array.isArray(payload))
+    return { error: 'payload must be an object' };
   if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN)
     return { error: `payload exceeds maximum size of ${MAX_FAVORITE_PAYLOAD_LEN}` };
   return { row: { id: parsedId.id, username, payload } };

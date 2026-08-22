@@ -7,8 +7,11 @@
 // row that survives import can always be rendered — the two used to disagree
 // (import accepted anything array-shaped, render dereferenced fields blind), and
 // a single bad row aborted app.js's top-level init on every later page load.
-// Pure: no DOM, no network, no storage — depends on nothing, so it only has to be
-// loaded before its consumers (map-view.js, then visits-io.js).
+// destCoordsOrNull is the dest-only slice of that gate: favorites.js and
+// history.js skip a stored row that lacks drawable dest coords the same way
+// (finding #7307). Pure: no DOM, no network, no storage — depends on nothing, so
+// it only has to be loaded before its consumers (map-view.js, favorites.js,
+// history.js, then visits-io.js).
 
 // TWIN: server/src/lib/route-coords.ts (MAX_ROUTE_COORDS) and
 // server/src/lib/validate-fields.ts (MAX_LABEL_LEN / MAX_NAME_LEN / MAX_DATE_LEN /
@@ -156,25 +159,36 @@ function normalizeVisit(row, nowIso = new Date().toISOString()) {
     };
 }
 
+// Dest lat/lng a list renderer (or the star-button match) can safely toFixed.
+// Null when there is no real destination — missing, non-numeric, or out of
+// range. Lists only need dest (a favorite is a bookmark of a place); the visit
+// overlay still requires start+dest via visitRenderParts.
+function destCoordsOrNull(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const destLat = latOrNull(entry.destLat);
+    const destLng = lngOrNull(entry.destLng);
+    if (destLat === null || destLng === null) return null;
+    return { destLat, destLng };
+}
+
 // What renderVisitedLayer can safely draw for a row already in storage — rows
 // written before import validation existed, or merged down from an older cloud
 // backup, are not normalized. Returns null when there is nothing to place (no
 // usable start/dest), else the drawable pieces, each independently nullable so
 // one bad field degrades that piece instead of throwing mid-overlay.
 function visitRenderParts(visit) {
-    if (!visit || typeof visit !== 'object') return null;
+    const dest = destCoordsOrNull(visit);
+    if (!dest) return null;
 
     const startLat = latOrNull(visit.startLat);
     const startLng = lngOrNull(visit.startLng);
-    const destLat = latOrNull(visit.destLat);
-    const destLng = lngOrNull(visit.destLng);
-    if (startLat === null || startLng === null || destLat === null || destLng === null) return null;
+    if (startLat === null || startLng === null) return null;
 
     const distance = finiteNum(visit.distance);
     const date = isoDateOrNull(visit.date);
     return {
         start: [startLat, startLng],
-        dest: [destLat, destLng],
+        dest: [dest.destLat, dest.destLng],
         routeCoords: coordPairsOrNull(visit.routeCoords),
         returnRouteCoords: coordPairsOrNull(visit.returnRouteCoords),
         // Popup text: empty string, never undefined — the popups concatenate these.
@@ -185,4 +199,5 @@ function visitRenderParts(visit) {
 }
 
 globalThis.normalizeVisit = normalizeVisit;
+globalThis.destCoordsOrNull = destCoordsOrNull;
 globalThis.visitRenderParts = visitRenderParts;

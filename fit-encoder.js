@@ -3,6 +3,8 @@
 // recognise a navigable course: file_id, file_creator, course, lap,
 // event(start/stop), record (per coord), course_point (per turn cue).
 // Spec reference: https://developer.garmin.com/fit/protocol/
+// Loaded after geo-utils.js — cumulative distance and nearest-coord lookups
+// call globalThis.haversineM directly (no local alias).
 
 (function (global) {
     'use strict';
@@ -83,12 +85,6 @@
         }
     }
 
-    // Haversine distance in meters — canonical impl lives in geo-utils.js,
-    // which must load before this file (see index.html order). Aliased once
-    // at IIFE-exec time; the cumulative-distance and nearest-coord call sites
-    // below use it unchanged.
-    const haversine = globalThis.haversineM;
-
     function toSemicircles(deg) { return Math.round(deg * SEMICIRCLE); }
     function toFitTime(unix)    { return Math.max(0, Math.round(unix - FIT_EPOCH)); }
 
@@ -103,7 +99,7 @@
         // Cumulative distance per coord
         const cumDist = new Float64Array(coords.length);
         for (let i = 1; i < coords.length; i++) {
-            cumDist[i] = cumDist[i - 1] + haversine(
+            cumDist[i] = cumDist[i - 1] + globalThis.haversineM(
                 coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1]
             );
         }
@@ -263,7 +259,7 @@
     function nearestCoordIndex(coords, lat, lng) {
         let bestIdx = 0, bestDist = Infinity;
         for (let i = 0; i < coords.length; i++) {
-            const d = haversine(coords[i][0], coords[i][1], lat, lng);
+            const d = globalThis.haversineM(coords[i][0], coords[i][1], lat, lng);
             if (d < bestDist) { bestDist = d; bestIdx = i; }
         }
         return bestIdx;

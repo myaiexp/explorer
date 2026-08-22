@@ -302,6 +302,26 @@ describe('favorites PUT', () => {
     expect((await res.json()).error).toMatch(/payload exceeds maximum size/);
     expect(ops).toHaveLength(0);
   });
+
+  it('rejects a non-object payload (array) with 400 so a 204 cannot persist an undrawable row', async () => {
+    // Finding #7307: validateFavoriteRow used to accept {payload: []} / {payload: "x"}
+    // as JSONB, sync-down left them unusable, and the list renderer threw on first paint.
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/favorites/f1', jsonReq('PUT', { payload: [] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/payload must be an object/);
+    expect(ops).toHaveLength(0);
+  });
+
+  it('rejects a non-object payload (string) with 400', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/favorites/f1', jsonReq('PUT', { payload: 'x' }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/payload must be an object/);
+    expect(ops).toHaveLength(0);
+  });
 });
 
 describe('favorites DELETE', () => {

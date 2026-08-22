@@ -3,7 +3,7 @@
  * cache fetch.
  *
  * fetchCorridorJunctions lives inside osrm.js, which can't be imported wholesale
- * (its other functions reference cross-module globals like calculateDistance).
+ * (its other functions reference cross-module globals like haversineKm).
  * The function is self-contained — it only uses Math / URLSearchParams / Number
  * / String / fetch and an optional onProgress callback — so we pull osrm.js's
  * source via helpers/load.js's readScript('osrm'), extract just this one

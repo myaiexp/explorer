@@ -4,8 +4,8 @@
  * now shared by buildLoop, buildJunctionLoop, and buildDirectionsUrl.
  *
  * Loading: geo-utils.js + geometry.js provide the globals loopVias/buildLoopSetup
- * read at call time (haversineKm, calculateDistance, envelopeOffsetPoint,
- * computeSpreadParams); osrm.js only assigns globals at load (no top-level calls),
+ * read at call time (haversineKm, envelopeOffsetPoint, computeSpreadParams);
+ * osrm.js only assigns globals at load (no top-level calls),
  * so the whole file runs cleanly in the realm. loopOverlapFraction is unused here.
  * helpers/load.js's SCRIPT_DEPS already lists osrm's edges (net, geometry,
  * loop-quality; geo-utils arrives transitively), so loading 'osrm' pulls them.
@@ -22,7 +22,7 @@ const B = { lat: 60.1, lng: 24.1 };
 
 function setup() {
     const spread = globalThis.computeSpreadParams(50);
-    const straight = globalThis.calculateDistance(A.lat, A.lng, B.lat, B.lng);
+    const straight = globalThis.haversineKm(A.lat, A.lng, B.lat, B.lng);
     const offsetKm = Math.max(0.1, straight * spread.offsetMult);
     return { spread, offsetKm };
 }

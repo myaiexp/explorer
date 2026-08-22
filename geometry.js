@@ -1,10 +1,7 @@
-// Pure geometry helpers — distance, bearings, envelope vias, random points,
-// spread-slider mapping. No DOM, no network. Loaded after geo-utils.js (for
-// haversineKm + kmToDegLat) and before the overpass/osrm/app scripts that consume these.
-
-// Haversine great-circle distance in km — canonical impl lives in geo-utils.js
-// (shared with novelty.js); geo-utils.js loads before this file per index.html.
-const calculateDistance = globalThis.haversineKm;
+// Pure geometry helpers — bearings, envelope vias, random points, spread-slider
+// mapping. No DOM, no network. Loaded after geo-utils.js (for haversineKm +
+// kmToDegLat) and before the osrm/app scripts that consume these. Distance is
+// haversineKm from geo-utils.js — this file does not re-alias it.
 
 function bearingRad(lat1, lng1, lat2, lng2) {
     const toRad = Math.PI / 180;
@@ -57,7 +54,6 @@ function computeSpreadParams(sliderValue) {
 // Browser script tags hoist top-level function declarations to window; explicit
 // globalThis assignment also makes these loadable from non-script consumers
 // (e.g. vm.runInThisContext in tests).
-globalThis.calculateDistance = calculateDistance;
 globalThis.bearingRad = bearingRad;
 globalThis.envelopeOffsetPoint = envelopeOffsetPoint;
 globalThis.generateRandomPointAnnulus = generateRandomPointAnnulus;

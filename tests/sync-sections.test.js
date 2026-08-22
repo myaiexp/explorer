@@ -148,8 +148,9 @@ describe('account switch: a failed download after confirm preserves local data',
 // the flat favorite blob (unlike visits/history/savedLocations, which have typed
 // columns and come back already-flat). On sync-down the client must UNWRAP payload
 // back to the flat shape the renderer reads (f.destLat, f.destName, …) — writing the
-// raw row verbatim leaves favorites as {id, payload:{…}}, so f.destLat is undefined and
-// the renderer crashes on `f.destLat.toFixed(6)`.
+// raw row verbatim leaves favorites as {id, payload:{…}}, so f.destLat is undefined.
+// The list renderer now skips that row instead of throwing (#7307), but the star
+// button still needs the flat shape to match.
 
 describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
     const serverFavRow = {

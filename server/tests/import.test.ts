@@ -312,6 +312,8 @@ describe('POST /api/:username/import', () => {
     const rowCases: Array<[string, Record<string, unknown>]> = [
       // validateFavorite: explicit `payload === null` guard.
       ['favorite with payload: null', { favorites: [{ id: 'f-1', payload: null }] }],
+      ['favorite with payload: []', { favorites: [{ id: 'f-1', payload: [] }] }],
+      ['favorite with payload: string', { favorites: [{ id: 'f-1', payload: 'x' }] }],
       // validateFavorite: missing/empty id.
       ['favorite missing id', { favorites: [{ payload: { name: 'Park' } }] }],
       // validateFavorite / validateTripRow: id charset + length (finding #7061).

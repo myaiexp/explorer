@@ -59,7 +59,9 @@
     // where payload is the flat favorite blob; every other section already comes back
     // flat (typed columns). Unwrap favorites to the flat shape the app + renderer read
     // (f.destLat, f.destName, …), preserving id + updatedAt for last-write-wins. Without
-    // this a synced-down favorite stays {id, payload:{…}} and crashes the renderer (#2065).
+    // this a synced-down favorite stays {id, payload:{…}} and destLat is undefined
+    // (#2065). The list renderer skips that row instead of throwing (#7307), but
+    // the star button still needs the flat shape to match.
     function normalizeServerRows(section, serverRows) {
         if (section !== 'favorites') { return serverRows; }
         return serverRows.map(function (row) {

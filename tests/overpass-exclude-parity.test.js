@@ -13,7 +13,7 @@
  * pointing here.
  *
  * The frontend copy is read as its real runtime value (overpass.js only declares
- * functions + these consts at load — no DOM/network/calculateDistance until a
+ * functions + these consts at load — no DOM/network/haversineKm until a
  * fetcher is called), so we load it via helpers/load.js's loadScripts('overpass')
  * and read the globals. The .ts copy can't be evaluated as-is (it's outside the
  * loader's repo-root *.js glob anyway), so its two literals are extracted from

@@ -5,7 +5,7 @@
  *
  * Loading: fit-encoder.js is a non-module browser IIFE that exposes only
  * { encodeCourse, osrmStepsToCoursePoints, CP } on globalThis. The closure
- * also holds ByteWriter, crc16, toSemicircles, toFitTime, haversine,
+ * also holds ByteWriter, crc16, toSemicircles, toFitTime,
  * osrmStepToType and nearestCoordIndex — all of which the audit requires us
  * to test. We read its text via helpers/load.js's readScript() and
  * string-inject an `_internals` export at load time only (the export line is
@@ -13,13 +13,12 @@
  * escape hatch loadScripts() itself doesn't cover. If the export line ever
  * changes, the injection throws loudly.
  *
- * `haversine` is now an alias of the canonical globalThis.haversineM (audit
- * #1262), so geo-utils.js must run in the realm first — exactly as it does in
- * the browser load order; helpers/load.js's SCRIPT_DEPS lists geo-utils as
- * fit-encoder's dependency, but since we bypass loadScripts() for the
- * injection, we load geo-utils explicitly ourselves before it. The distance
- * assertions stay self-consistent: the encoder and these tests call the same
- * `internals.haversine` reference.
+ * Distance uses the canonical globalThis.haversineM from geo-utils.js (audit
+ * #1262 / #7313), so geo-utils.js must run in the realm first — exactly as it
+ * does in the browser load order; helpers/load.js's SCRIPT_DEPS lists geo-utils
+ * as fit-encoder's dependency, but since we bypass loadScripts() for the
+ * injection, we load geo-utils explicitly ourselves before it. Cumulative-
+ * distance assertions call the same globalThis.haversineM the encoder uses.
  *
  * The FIT CRC-16 is exactly CRC-16/ARC (reflected, poly 0xA001, init 0,
  * catalog check value 0xBB3D for "123456789"). We validate the SUT's
@@ -34,14 +33,14 @@ const EXPORT_LINE =
     'global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP };';
 const INJECTED =
     'global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP, ' +
-    '_internals: { ByteWriter, crc16, writeDefinition, haversine, ' +
+    '_internals: { ByteWriter, crc16, writeDefinition, ' +
     'toSemicircles, toFitTime, osrmStepToType, nearestCoordIndex, ' +
     'FIT_EPOCH, SEMICIRCLE, WALK_MPS, T, M } };';
 
 let enc, internals, CP;
 
 beforeAll(() => {
-    loadScripts('geo-utils');   // exposes globalThis.haversineM (aliased by the encoder)
+    loadScripts('geo-utils');   // exposes globalThis.haversineM (encoder calls it directly)
     const RAW = readScript('fit-encoder');
     const SRC = RAW.replace(EXPORT_LINE, INJECTED);
     if (SRC === RAW) throw new Error('injection failed — export line changed in fit-encoder.js');
@@ -252,35 +251,8 @@ describe('FIT_EPOCH / toFitTime', () => {
     });
 });
 
-// ── haversine (local copy) ───────────────────────────────────────────────────
-
-describe('haversine', () => {
-    // Reference: on a sphere of R=6371000 m, 1° of latitude is R·π/180.
-    const ONE_DEG = 6371000 * Math.PI / 180; // ≈ 111194.93 m
-
-    test('1° latitude at the meridian ≈ R·π/180', () => {
-        expect(internals.haversine(0, 0, 1, 0)).toBeCloseTo(ONE_DEG, 1);
-    });
-
-    test('1° longitude at the equator ≈ R·π/180', () => {
-        expect(internals.haversine(0, 0, 0, 1)).toBeCloseTo(ONE_DEG, 1);
-    });
-
-    test('identical points → 0', () => {
-        expect(internals.haversine(60.17, 24.94, 60.17, 24.94)).toBe(0);
-    });
-
-    test('symmetric', () => {
-        const a = internals.haversine(60.17, 24.94, 61.50, 23.76);
-        const b = internals.haversine(61.50, 23.76, 60.17, 24.94);
-        expect(a).toBeCloseTo(b, 6);
-    });
-
-    test('Helsinki→Tampere ≈ 161 km (spherical model)', () => {
-        const d = internals.haversine(60.1699, 24.9384, 61.4978, 23.7610);
-        expect(d / 1000).toBeCloseTo(161.3, 0);
-    });
-});
+// Haversine itself lives in geo-utils.js (haversineM) and is covered there.
+// encodeCourse's cumulative-distance test below pins that the encoder calls it.
 
 // ── osrmStepToType ───────────────────────────────────────────────────────────
 
@@ -424,7 +396,7 @@ describe('encodeCourse', () => {
         const recs = parseFit(out).messages.filter((m) => m.globalMesg === G.RECORD);
         expect(readU32LE(recs[0].fields[5])).toBe(0);
         const expectedCm = Math.round(
-            internals.haversine(coords[0][0], coords[0][1], coords[1][0], coords[1][1]) * 100
+            globalThis.haversineM(coords[0][0], coords[0][1], coords[1][0], coords[1][1]) * 100
         );
         expect(readU32LE(recs[1].fields[5])).toBe(expectedCm);
     });

@@ -5,17 +5,16 @@
  * they lived in app.js (which touches Leaflet `L` at top level). geometry.js is a
  * non-module browser script; we run it via vm and read the helpers off globalThis.
  *
- * calculateDistance aliases globalThis.haversineKm (geo-utils.js in the browser),
- * and the helpers now read globalThis.kmToDegLat for the km→degree projection, so
- * geo-utils.js must load before geometry.js — helpers/load.js's SCRIPT_DEPS
- * encodes that edge, so loading 'geometry' pulls it in automatically.
+ * The helpers read globalThis.haversineKm and globalThis.kmToDegLat from
+ * geo-utils.js, so geo-utils.js must load before geometry.js — helpers/load.js's
+ * SCRIPT_DEPS encodes that edge, so loading 'geometry' pulls it in automatically.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    // geo-utils.js supplies haversineKm (the calculateDistance alias geometry.js
-    // reads at load) plus kmToDegLat/kmToDegLng, used inside the helpers below.
+    // geo-utils.js supplies haversineKm plus kmToDegLat/kmToDegLng, used inside
+    // the helpers below. geometry.js does not re-alias haversineKm.
     loadScripts('geometry');
 });
 
@@ -67,7 +66,7 @@ describe('generateRandomPointAnnulus', () => {
         const cLat = 62, cLng = 25, minKm = 1, maxKm = 3;
         for (let i = 0; i < 300; i++) {
             const p = globalThis.generateRandomPointAnnulus(cLat, cLng, minKm, maxKm);
-            const d = globalThis.calculateDistance(cLat, cLng, p.lat, p.lng);
+            const d = globalThis.haversineKm(cLat, cLng, p.lat, p.lng);
             // Degree-space sampling + the 111 km/deg approximation → allow a small margin.
             expect(d).toBeGreaterThanOrEqual(minKm - 0.1);
             expect(d).toBeLessThanOrEqual(maxKm + 0.1);
@@ -76,8 +75,11 @@ describe('generateRandomPointAnnulus', () => {
 });
 
 describe('globalThis exports', () => {
-    test('calculateDistance is wired to haversineKm (0 for identical points)', () => {
-        expect(typeof globalThis.calculateDistance).toBe('function');
-        expect(globalThis.calculateDistance(60, 25, 60, 25)).toBe(0);
+    test('does not re-export haversineKm as calculateDistance', () => {
+        // Finding #7313: the km helper has one name. A leftover alias splits
+        // call sites across two vocabularies and hides half of them from search.
+        expect(globalThis.calculateDistance).toBeUndefined();
+        expect(typeof globalThis.haversineKm).toBe('function');
+        expect(globalThis.haversineKm(60, 25, 60, 25)).toBe(0);
     });
 });

@@ -10,7 +10,7 @@
  * globalThis before loading it via helpers/load.js.
  */
 
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 import { installSyncedMirrorStubs } from './helpers/synced-mirror.js';
 
@@ -64,7 +64,7 @@ beforeEach(() => {
   globalThis.maybeRequestConsent = () => {};
   ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs());
 
-  loadScripts('favorites');
+  loadScripts('visit-shape', 'favorites');
 });
 
 describe('toggleFavorite: add/remove round trip', () => {
@@ -263,5 +263,58 @@ describe('renderFavoritesSection: visibility + rebuild', () => {
 
     // If the list were appended-to instead of replaced, this would be 3.
     expect(document.getElementById('favoritesList').children).toHaveLength(1);
+  });
+
+  test('a row without finite dest coords is skipped instead of aborting first paint', () => {
+    // Finding #7307: destLat.toFixed on a missing/non-number dest threw out of
+    // app.js's top-level init and skipped history, hash restore, and later work.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([
+      { id: 'good', destLat: 1, destLng: 1, destName: 'A' },
+      { id: 'bad', destName: null },
+      { id: 'wrapped', payload: [] },
+    ]));
+
+    expect(() => window.renderFavoritesSection()).not.toThrow();
+
+    expect(document.getElementById('favoritesSection').classList.contains('visible')).toBe(true);
+    expect(document.getElementById('favoritesList').children).toHaveLength(1);
+    expect(document.getElementById('favoritesList').children[0].dataset.label).toBe('A');
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/skipped 2/));
+    warn.mockRestore();
+  });
+
+  test('when every row is unusable the section hides rather than staying empty-visible', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    document.getElementById('favoritesSection').classList.add('visible');
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([
+      { id: 'bad', destLat: 'x', destLng: 1 },
+    ]));
+
+    expect(() => window.renderFavoritesSection()).not.toThrow();
+
+    expect(document.getElementById('favoritesSection').classList.contains('visible')).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/skipped 1/));
+    warn.mockRestore();
+  });
+});
+
+describe('sameFavoriteDest / updateFavoriteBtn: a bad stored row does not throw', () => {
+  test('sameFavoriteDest returns false when either side lacks finite dest coords', () => {
+    const dest = session({ destLat: 60.1, destLng: 25.1 });
+    expect(window.sameFavoriteDest({ destLat: undefined, destLng: 25.1 }, dest)).toBe(false);
+    expect(window.sameFavoriteDest({ payload: 'x' }, dest)).toBe(false);
+    expect(window.sameFavoriteDest(dest, { destLat: 60.1 })).toBe(false);
+  });
+
+  test('updateFavoriteBtn ignores a malformed stored favorite instead of throwing', () => {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([
+      { id: 'bad' },
+      { id: 'good', destLat: 60.5, destLng: 25.5 },
+    ]));
+    currentSession = session({ destLat: 60.5, destLng: 25.5 });
+
+    expect(() => window.updateFavoriteBtn()).not.toThrow();
+    expect(document.getElementById('favoriteBtn').classList.contains('active')).toBe(true);
   });
 });
