@@ -31,24 +31,35 @@ interface Section<T extends PgTable & { id: PgColumn; username: PgColumn }> {
   buildRow: BuildRow<T>;
 }
 
+// Shared Hono app + db. Middleware is NOT in here — registerSection builds the
+// write chain itself so the security order cannot be transposed at a call site.
+interface SectionDeps {
+  app: Hono;
+  db: Db;
+}
+
 // Wires PUT (upsert) + DELETE for one section. The PUT body flow — JSON parse →
 // isObject guard → buildRow → upsert — and the DELETE flow are identical across
-// sections; only `table`/`path`/`buildRow` differ. Order is ip-limit → auth →
-// username-limit: unauthenticated probes burn the IP bucket, not the owner's
+// sections; only `table`/`path`/`buildRow` differ. The write-guard chain is
+// constructed here (not passed in) so ip-limit → auth → username-limit lives in
+// exactly one place: unauthenticated probes burn the IP bucket, not the owner's
 // 60/min write budget. `auth` 401s when the account is missing, so both
 // handlers can assume :username names an existing account — no re-check here.
 function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn }>(
-  app: Hono,
-  db: Db,
-  ipRl: ReturnType<typeof ipWriteRateLimit>,
-  auth: ReturnType<typeof accountAuth>,
-  userRl: ReturnType<typeof usernameWriteRateLimit>,
-  writeBodyLimit: ReturnType<typeof bodyLimit>,
+  { app, db }: SectionDeps,
   { path, table, buildRow }: Section<T>
 ): void {
+  // ip-limit → auth → username-limit. One tuple, spread on both verbs, so the
+  // order cannot be restated differently on PUT vs DELETE.
+  const writeGuards = [ipWriteRateLimit(), accountAuth(db), usernameWriteRateLimit()] as const;
   // bodyLimit only on PUT (DELETE carries no body) — rejects oversized bodies,
   // including giant unknown keys, before c.req.json() buffers them in memory.
-  app.put(`/:username/${path}/:id`, ipRl, auth, userRl, writeBodyLimit, async (c) => {
+  const writeBodyLimit = bodyLimit({
+    maxSize: MAX_WRITE_BODY_BYTES,
+    onError: (c) => c.json({ error: 'Request body too large' }, 413),
+  });
+
+  app.put(`/:username/${path}/:id`, ...writeGuards, writeBodyLimit, async (c) => {
     const username = c.req.param('username')!;
     const id = c.req.param('id')!;
 
@@ -86,7 +97,7 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
     return new Response(null, { status: 204 });
   });
 
-  app.delete(`/:username/${path}/:id`, ipRl, auth, userRl, async (c) => {
+  app.delete(`/:username/${path}/:id`, ...writeGuards, async (c) => {
     const username = c.req.param('username')!;
     const id = c.req.param('id')!;
 
@@ -98,37 +109,31 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
 
 export function sectionsRoutes(db: Db): Hono {
   const app = new Hono();
-  const ipRl = ipWriteRateLimit();
-  const auth = accountAuth(db);
-  const userRl = usernameWriteRateLimit();
-  const writeBodyLimit = bodyLimit({
-    maxSize: MAX_WRITE_BODY_BYTES,
-    onError: (c) => c.json({ error: 'Request body too large' }, 413),
-  });
+  const deps: SectionDeps = { app, db };
 
   // Each section delegates to the shared validator (lib/validate-rows.ts), which
   // returns { error } | { row }; the PUT handler surfaces the error string as its
   // 400 body. `id` comes from the path — for favorites that means `body` here
   // never carries the id, so the no-wrapper fallback stores exactly the body.
-  registerSection(app, db, ipRl, auth, userRl, writeBodyLimit, {
+  registerSection(deps, {
     path: 'visits',
     table: schema.visits,
     buildRow: (id, username, body) => validateVisitRow(id, username, body),
   });
 
-  registerSection(app, db, ipRl, auth, userRl, writeBodyLimit, {
+  registerSection(deps, {
     path: 'favorites',
     table: schema.favorites,
     buildRow: (id, username, body) => validateFavoriteRow(id, username, body),
   });
 
-  registerSection(app, db, ipRl, auth, userRl, writeBodyLimit, {
+  registerSection(deps, {
     path: 'saved-locations',
     table: schema.savedLocations,
     buildRow: (id, username, body) => validateSavedLocationRow(id, username, body),
   });
 
-  registerSection(app, db, ipRl, auth, userRl, writeBodyLimit, {
+  registerSection(deps, {
     path: 'history',
     table: schema.history,
     buildRow: (id, username, body) => validateTripRow(id, username, body),
