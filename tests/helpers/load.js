@@ -77,8 +77,10 @@ export function readScript(name) {
 
 /**
  * Evaluate one script's source in the current realm. The escape hatch for tests
- * that must transform the source first (fit-encoder injects an internals export)
- * or extract a single declaration from it (corridor-junctions).
+ * that must transform the source first (fit-encoder injects an internals export
+ * then evalScript). evalScript discards its return value — callers that need a
+ * value back (corridor-junctions extracts fetchCorridorJunctions) use readScript
+ * plus a returning `new Function(...)()` instead.
  */
 export function evalScript(src) {
     new Function(src).call(globalThis); // eslint-disable-line no-new-func
