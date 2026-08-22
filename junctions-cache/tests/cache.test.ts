@@ -54,6 +54,11 @@ function tmpCacheFile(): string {
 async function loadFresh(cachePath: string) {
     vi.resetModules();
     process.env.CACHE_PATH = cachePath;
+    // Keep the test debounce at 200ms so real-timer save tests stay snappy;
+    // production default is 2000ms (CACHE_SAVE_DEBOUNCE_MS).
+    if (process.env.CACHE_SAVE_DEBOUNCE_MS === undefined) {
+        process.env.CACHE_SAVE_DEBOUNCE_MS = '200';
+    }
     const overpass = await import('../src/overpass.js');
     const logMod = await import('../src/log.js');
     const cache = await import('../src/cache.js');
@@ -88,6 +93,8 @@ afterEach(() => {
     // leak into other tests (the module reads them once at import).
     delete process.env.CACHE_TTL_MS;
     delete process.env.CACHE_MAX_ENTRIES;
+    delete process.env.CACHE_MAX_POINTS;
+    delete process.env.CACHE_SAVE_DEBOUNCE_MS;
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -201,7 +208,8 @@ describe('getJunctions', () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(r1).toEqual({ cache: 'miss', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
-        expect(r2).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+        // Waiter joined the in-flight Overpass fetch — not an in-memory hit.
+        expect(r2).toEqual({ cache: 'coalesced', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
     });
 
     test('a rejecting Overpass fetch rejects every concurrent waiter with the same error, then clears inflight (audit #3157)', async () => {
@@ -333,9 +341,12 @@ describe('getJunctionsAnchored', () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(r1.cache).toBe('miss');
-        expect(r2.cache).toBe('hit');
-        expect(r2.junctions).toEqual([{ lat: 60.0, lng: 24.0 }, { lat: 60.5, lng: 24.5 }]);
-        expect(r2.total).toBe(4);
+        expect(r2).toEqual({
+            cache: 'coalesced',
+            junctions: [{ lat: 60.0, lng: 24.0 }, { lat: 60.5, lng: 24.5 }],
+            total: 4,
+            overpassMs: expect.any(Number),
+        });
     });
 });
 
@@ -599,6 +610,78 @@ describe('max-entry cap (oldest-first eviction)', () => {
     });
 });
 
+describe('max-points cap (oldest-first eviction)', () => {
+    const A = { minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 };
+    const B = { minLat: 62, minLng: 26, maxLat: 63, maxLng: 27 };
+    const C = { minLat: 64, minLng: 28, maxLat: 65, maxLng: 29 };
+
+    test('inserting past the point budget evicts oldest-first until under the cap', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_MAX_POINTS = '3';
+        process.env.CACHE_MAX_ENTRIES = '100'; // entry cap must not be the limiter
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+
+        // 2 pts each: A then B → total 4 > 3 → evict A. Persistent mock so A's
+        // later refetch (the miss assertion) still has a junctions array.
+        fetchMock.mockResolvedValue([{ lat: 1, lng: 1 }, { lat: 1.1, lng: 1.1 }]);
+
+        await cache.getJunctions(A, 'default');
+        vi.setSystemTime(Date.now() + 1000);
+        await cache.getJunctions(B, 'default');
+
+        expect(cache.cacheSize()).toBe(1);
+        expect((await cache.getJunctions(B, 'default')).cache).toBe('hit');
+        expect((await cache.getJunctions(A, 'default')).cache).toBe('miss');
+    });
+
+    test('a single entry larger than the point budget is kept — no miss-loop', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_MAX_POINTS = '1';
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValue([{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 3 }]);
+
+        expect((await cache.getJunctions(A, 'default')).cache).toBe('miss');
+        // Evicting the only entry would force every subsequent request to miss.
+        expect((await cache.getJunctions(A, 'default')).cache).toBe('hit');
+        expect(cache.cacheSize()).toBe(1);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('two over-budget entries keep only the newest', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_MAX_POINTS = '3';
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValue([{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 3 }, { lat: 4, lng: 4 }]); // 4 pts each
+
+        await cache.getJunctions(A, 'default');
+        vi.setSystemTime(Date.now() + 1000);
+        await cache.getJunctions(B, 'default');
+
+        expect(cache.cacheSize()).toBe(1);
+        expect((await cache.getJunctions(B, 'default')).cache).toBe('hit');
+        expect((await cache.getJunctions(A, 'default')).cache).toBe('miss');
+    });
+
+    test('point budget and entry cap both apply — whichever is tighter wins', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_MAX_ENTRIES = '2';
+        process.env.CACHE_MAX_POINTS = '100';
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValue([{ lat: 1, lng: 1 }]); // 1 pt each — entry cap binds
+
+        await cache.getJunctions(A, 'default');
+        vi.setSystemTime(Date.now() + 1000);
+        await cache.getJunctions(B, 'default');
+        vi.setSystemTime(Date.now() + 1000);
+        await cache.getJunctions(C, 'default');
+
+        expect(cache.cacheSize()).toBe(2);
+        expect((await cache.getJunctions(B, 'default')).cache).toBe('hit');
+        expect((await cache.getJunctions(C, 'default')).cache).toBe('hit');
+        expect((await cache.getJunctions(A, 'default')).cache).toBe('miss');
+    });
+});
+
 describe('loadCache pruning (TTL + cap on the snapshot)', () => {
     test('drops entries past the TTL on load, keeps fresh ones, and shrinks the file', async () => {
         vi.useRealTimers();
@@ -619,6 +702,27 @@ describe('loadCache pruning (TTL + cap on the snapshot)', () => {
         // The debounced save shrinks the on-disk snapshot to just the fresh key.
         await waitFor(() => Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length === 1);
         expect(Object.keys(JSON.parse(readFileSync(file, 'utf8')))).toEqual([freshKey]);
+    });
+
+    test('enforces the point budget on load, keeping the newest by cachedAt', async () => {
+        vi.useRealTimers();
+        process.env.CACHE_MAX_POINTS = '3';
+        const file = tmpCacheFile();
+        const now = Date.now();
+        const oldKey = '10.0000,10.0000,11.0000,11.0000|default';
+        const newKey = '60.0000,24.0000,61.0000,25.0000|default';
+        writeFileSync(file, JSON.stringify({
+            [oldKey]: { junctions: [{ lat: 10, lng: 10 }, { lat: 10.1, lng: 10.1 }], cachedAt: now - 1000 },
+            [newKey]: { junctions: [{ lat: 60.5, lng: 24.5 }, { lat: 60.6, lng: 24.6 }], cachedAt: now },
+        }));
+        const { cache } = await loadFresh(file);
+
+        await cache.loadCache();
+
+        expect(cache.cacheSize()).toBe(1);
+        const r = await cache.getJunctions(BBOX, 'default');
+        expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }, { lat: 60.6, lng: 24.6 }] });
+        await waitFor(() => Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length === 1);
     });
 
     test('enforces the entry cap on load, keeping the newest by cachedAt', async () => {

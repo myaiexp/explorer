@@ -32,17 +32,37 @@ function envPositiveInt(name: string, fallback: number): number {
 // saveCache re-serialized an ever-growing store on every write.
 //   TTL: OSM road-junction data changes slowly; 30 days keeps entries useful
 //        while forcing an eventual refetch of stale roads.
-//   CAP: a 50 km anchored fetch can hold tens of thousands of points, so bound
-//        the entry COUNT and evict the oldest (by cachedAt) first.
+//   CAPS: a 50 km anchored fetch can hold tens of thousands of points, so bound
+//         both the entry COUNT and the total POINT count and evict oldest
+//         (by cachedAt) first. Entry count alone left 500 × ~30k-point sets
+//         free to grow toward a gigabyte.
 const CACHE_TTL_MS = envPositiveInt('CACHE_TTL_MS', 30 * 24 * 60 * 60 * 1000);
 const CACHE_MAX_ENTRIES = envPositiveInt('CACHE_MAX_ENTRIES', 500);
+const CACHE_MAX_POINTS = envPositiveInt('CACHE_MAX_POINTS', 1_000_000);
+const CACHE_SAVE_DEBOUNCE_MS = envPositiveInt('CACHE_SAVE_DEBOUNCE_MS', 2000);
 
 type Entry = { junctions: LatLng[]; cachedAt: number };
 
 const store = new Map<string, Entry>();
 const inflight = new Map<string, Promise<LatLng[]>>();
-let dirty = false;
+let totalPoints = 0;
+let generation = 0;
+let savedGeneration = 0;
 let saving: Promise<void> | null = null;
+
+function setEntry(key: string, entry: Entry): void {
+    const prev = store.get(key);
+    if (prev) totalPoints -= prev.junctions.length;
+    store.set(key, entry);
+    totalPoints += entry.junctions.length;
+}
+
+function deleteEntry(key: string): void {
+    const prev = store.get(key);
+    if (!prev) return;
+    totalPoints -= prev.junctions.length;
+    store.delete(key);
+}
 
 function quantizeCoord(n: number): string {
     return n.toFixed(QUANTIZE_DECIMALS);
@@ -103,7 +123,7 @@ export async function loadCache(): Promise<void> {
         const obj = JSON.parse(raw) as Record<string, unknown>;
         let dropped = 0;
         for (const [k, v] of Object.entries(obj)) {
-            if (isValidEntry(v)) store.set(k, v);
+            if (isValidEntry(v)) setEntry(k, v);
             else dropped++;
         }
         if (dropped > 0) {
@@ -116,7 +136,7 @@ export async function loadCache(): Promise<void> {
         const pruned = prune(Date.now());
         if (pruned > 0) {
             log('INFO', { event: 'cache_pruned_on_load', pruned, kept: store.size, path: CACHE_PATH });
-            scheduleSave();
+            bumpAndSave();
         }
         log('INFO', { event: 'cache_loaded', entries: store.size, path: CACHE_PATH });
     } catch (e) {
@@ -133,22 +153,25 @@ export async function loadCache(): Promise<void> {
 }
 
 async function saveCache(): Promise<void> {
-    dirty = false;
+    if (generation === savedGeneration) return;
+    const gen = generation;
     const obj: Record<string, Entry> = {};
     for (const [k, v] of store) obj[k] = v;
     await mkdir(dirname(CACHE_PATH), { recursive: true });
     const tmp = CACHE_PATH + '.tmp';
     await writeFile(tmp, JSON.stringify(obj));
     await rename(tmp, CACHE_PATH);
+    savedGeneration = gen;
 }
 
-function scheduleSave(): void {
-    dirty = true;
+function bumpAndSave(): void {
+    generation++;
     if (saving) return;
     saving = (async () => {
-        // small debounce so bursts coalesce into one write
-        await new Promise(r => setTimeout(r, 200));
-        while (dirty) await saveCache();
+        // Debounce well above a single miss so a burst of distinct keys
+        // (re-rolls, nearby starts) stringifies the store once, not per insert.
+        await new Promise(r => setTimeout(r, CACHE_SAVE_DEBOUNCE_MS));
+        while (generation !== savedGeneration) await saveCache();
         saving = null;
     })().catch(e => {
         log('ERROR', { event: 'cache_save_failed', err: (e as Error).message });
@@ -164,67 +187,76 @@ function readFresh(key: string): Entry | undefined {
     const entry = store.get(key);
     if (!entry) return undefined;
     if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
-        store.delete(key);
-        scheduleSave();
+        deleteEntry(key);
+        bumpAndSave();
         return undefined;
     }
     return entry;
 }
 
 // Bound the store: drop everything past the TTL, then evict oldest-cachedAt-first
-// until at or under the entry cap. Runs after every insert (overflow ≤ 1) and once
-// after a bulk load (may drop many). Returns the count removed, for load logging.
+// until at or under BOTH the entry cap and the point budget. Runs after every
+// insert (overflow ≤ 1) and once after a bulk load (may drop many). Returns the
+// count removed, for load logging. Never evicts the newest entry — a single
+// fetch larger than CACHE_MAX_POINTS would otherwise be stored then immediately
+// dropped, and the next request would miss-loop.
 function prune(now: number): number {
     let removed = 0;
     for (const [k, v] of store) {
-        if (now - v.cachedAt > CACHE_TTL_MS) { store.delete(k); removed++; }
+        if (now - v.cachedAt > CACHE_TTL_MS) { deleteEntry(k); removed++; }
     }
-    if (store.size > CACHE_MAX_ENTRIES) {
-        const byAge = [...store.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);
-        const overflow = store.size - CACHE_MAX_ENTRIES;
-        for (let i = 0; i < overflow; i++) {
-            const oldest = byAge[i];
-            if (oldest) { store.delete(oldest[0]); removed++; }
-        }
+    if (store.size <= CACHE_MAX_ENTRIES && totalPoints <= CACHE_MAX_POINTS) return removed;
+    const byAge = [...store.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+    for (let i = 0; i < byAge.length - 1; i++) {
+        if (store.size <= CACHE_MAX_ENTRIES && totalPoints <= CACHE_MAX_POINTS) break;
+        const oldest = byAge[i];
+        if (!oldest) continue;
+        deleteEntry(oldest[0]);
+        removed++;
     }
     return removed;
 }
 
 export type LookupResult =
     | { cache: 'hit'; junctions: LatLng[] }
-    | { cache: 'miss'; junctions: LatLng[]; overpassMs: number };
+    | { cache: 'miss' | 'coalesced'; junctions: LatLng[]; overpassMs: number };
 
-export async function getJunctions(bbox: Bbox, exclude: ExcludePreset): Promise<LookupResult> {
-    const key = keyFor(bbox, exclude);
+export type AnchoredLookupResult = LookupResult & { total: number };
+
+// Shared hit / inflight-join / Overpass-miss protocol. Key derivation and the
+// result projection (identity vs filterToBbox) stay in the wrappers so a TTL,
+// inflight, or persist fix cannot fork between bbox and anchored modes.
+async function lookupOrFetch(key: string, fetchFn: () => Promise<LatLng[]>): Promise<LookupResult> {
     const cached = readFresh(key);
     if (cached) return { cache: 'hit', junctions: cached.junctions };
 
     const existing = inflight.get(key);
     if (existing) {
+        const t0 = Date.now();
         const junctions = await existing;
-        return { cache: 'hit', junctions };
+        return { cache: 'coalesced', junctions, overpassMs: Date.now() - t0 };
     }
 
     // t0 spans any throttle-queue wait too, so overpassMs reflects total miss
     // latency under contention (it equals raw fetch time when slots are free).
     const t0 = Date.now();
-    const promise = runWithOverpassSlot(() => fetchJunctionsFromOverpass(bbox, exclude));
+    const promise = runWithOverpassSlot(fetchFn);
     inflight.set(key, promise);
     try {
         const junctions = await promise;
         const overpassMs = Date.now() - t0;
-        store.set(key, { junctions, cachedAt: Date.now() });
+        setEntry(key, { junctions, cachedAt: Date.now() });
         prune(Date.now());
-        scheduleSave();
+        bumpAndSave();
         return { cache: 'miss', junctions, overpassMs };
     } finally {
         inflight.delete(key);
     }
 }
 
-export type AnchoredLookupResult =
-    | { cache: 'hit'; junctions: LatLng[]; total: number }
-    | { cache: 'miss'; junctions: LatLng[]; total: number; overpassMs: number };
+export async function getJunctions(bbox: Bbox, exclude: ExcludePreset): Promise<LookupResult> {
+    return lookupOrFetch(keyFor(bbox, exclude), () => fetchJunctionsFromOverpass(bbox, exclude));
+}
 
 // Cache a wide-bbox fetch by (start, maxKm, exclude); filter to `requested`
 // before returning so the wire payload stays small.
@@ -233,45 +265,17 @@ export async function getJunctionsAnchored(
     exclude: ExcludePreset,
     requested: Bbox
 ): Promise<AnchoredLookupResult> {
-    const key = startKeyFor(start, exclude);
-    const cached = readFresh(key);
-    if (cached) {
-        return {
-            cache: 'hit',
-            junctions: filterToBbox(cached.junctions, requested),
-            total: cached.junctions.length
-        };
-    }
-
-    const existing = inflight.get(key);
-    if (existing) {
-        const all = await existing;
-        return {
-            cache: 'hit',
-            junctions: filterToBbox(all, requested),
-            total: all.length
-        };
-    }
-
     const wide = wideBboxFromStart(start);
-    const t0 = Date.now();
-    const promise = runWithOverpassSlot(() => fetchJunctionsFromOverpass(wide, exclude));
-    inflight.set(key, promise);
-    try {
-        const all = await promise;
-        const overpassMs = Date.now() - t0;
-        store.set(key, { junctions: all, cachedAt: Date.now() });
-        prune(Date.now());
-        scheduleSave();
-        return {
-            cache: 'miss',
-            junctions: filterToBbox(all, requested),
-            total: all.length,
-            overpassMs
-        };
-    } finally {
-        inflight.delete(key);
-    }
+    const result = await lookupOrFetch(
+        startKeyFor(start, exclude),
+        () => fetchJunctionsFromOverpass(wide, exclude)
+    );
+    const projected = {
+        ...result,
+        junctions: filterToBbox(result.junctions, requested),
+        total: result.junctions.length
+    };
+    return projected;
 }
 
 export function cacheSize(): number {

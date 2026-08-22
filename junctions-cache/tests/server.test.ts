@@ -199,6 +199,27 @@ describe('GET /junctions — legacy bbox lookup', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    test('a concurrent waiter is cache=coalesced and still carries overpassMs', async () => {
+        const { fetch, fetchMock } = await loadServer();
+        let resolveFetch: (v: { lat: number; lng: number }[]) => void = () => {};
+        fetchMock.mockReturnValue(new Promise(r => { resolveFetch = r; }));
+
+        const p1 = get(fetch, `/junctions?bbox=${OK_BBOX}`);
+        const p2 = get(fetch, `/junctions?bbox=${OK_BBOX}`);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        resolveFetch([{ lat: 60.2, lng: 24.2 }]);
+        const [r1, r2] = await Promise.all([p1, p2]);
+
+        expect(r1.status).toBe(200);
+        expect(r2.status).toBe(200);
+        expect(r1.body.cache).toBe('miss');
+        expect(r2.body.cache).toBe('coalesced');
+        expect(typeof r1.body.overpassMs).toBe('number');
+        expect(typeof r2.body.overpassMs).toBe('number');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     test('Overpass failure → 502 with the busy message', async () => {
         const { fetch, fetchMock } = await loadServer();
         fetchMock.mockRejectedValue(new Error('overpass exhausted'));

@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { serve } from '@hono/node-server';
 import { timingSafeEqual } from 'node:crypto';
-import { getJunctions, getJunctionsAnchored, loadCache, cacheSize } from './cache.js';
+import { getJunctions, getJunctionsAnchored, loadCache, cacheSize, type LookupResult } from './cache.js';
 import { ipRateLimit } from './rate-limit.js';
 import { log, getRecentLogs } from './log.js';
 import type { Bbox, ExcludePreset } from './overpass.js';
@@ -36,6 +36,12 @@ function logsTokenOk(c: Context): boolean {
     const a = Buffer.from(got);
     const b = Buffer.from(expected);
     return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// overpassMs is on every live Overpass wait — originator (`miss`) and
+// inflight-join (`coalesced`). Instant in-memory hits omit it.
+function overpassMsOf(result: LookupResult): number | undefined {
+    return result.cache === 'hit' ? undefined : result.overpassMs;
 }
 
 const app = new Hono();
@@ -120,13 +126,13 @@ app.get('/junctions', junctionsRateLimit, async c => {
                 exclude,
                 count: result.junctions.length,
                 total: result.total,
-                overpass_ms: result.cache === 'miss' ? result.overpassMs : undefined
+                overpass_ms: overpassMsOf(result)
             });
             return c.json({
                 cache: result.cache,
                 count: result.junctions.length,
                 total: result.total,
-                overpassMs: result.cache === 'miss' ? result.overpassMs : undefined,
+                overpassMs: overpassMsOf(result),
                 junctions: result.junctions
             });
         } catch (e) {
@@ -145,12 +151,12 @@ app.get('/junctions', junctionsRateLimit, async c => {
             bbox: bboxLog,
             exclude,
             count: result.junctions.length,
-            overpass_ms: result.cache === 'miss' ? result.overpassMs : undefined
+            overpass_ms: overpassMsOf(result)
         });
         return c.json({
             cache: result.cache,
             count: result.junctions.length,
-            overpassMs: result.cache === 'miss' ? result.overpassMs : undefined,
+            overpassMs: overpassMsOf(result),
             junctions: result.junctions
         });
     } catch (e) {

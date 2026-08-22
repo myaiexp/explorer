@@ -12,7 +12,7 @@ pnpm build && pnpm start    # production
 
 Listens on `127.0.0.1:5001` (override with `PORT`/`HOST`). Persists cache to `./data/cache.json` (override with `CACHE_PATH`).
 
-The store is bounded so neither memory nor the JSON snapshot grows without limit: entries expire after `CACHE_TTL_MS` (default 30 days — a stale entry is refetched on the next read, not served forever), and the entry count is capped at `CACHE_MAX_ENTRIES` (default 500, oldest-`cachedAt`-first eviction on insert). Both bounds are also applied when the snapshot is loaded at startup.
+The store is bounded so neither memory nor the JSON snapshot grows without limit: entries expire after `CACHE_TTL_MS` (default 30 days — a stale entry is refetched on the next read, not served forever), the entry count is capped at `CACHE_MAX_ENTRIES` (default 500), and the total junction count is capped at `CACHE_MAX_POINTS` (default 1,000,000). Eviction is oldest-`cachedAt`-first until both caps are satisfied; a single fetch larger than the point budget is kept (otherwise it would miss-loop). All three bounds are also applied when the snapshot is loaded at startup. Snapshot writes are debounced by `CACHE_SAVE_DEBOUNCE_MS` (default 2000 ms) so a burst of misses stringifies the store once, not per insert.
 
 ## Tests
 
@@ -47,13 +47,19 @@ Response:
 
 ```json
 {
-    "cache": "hit" | "miss",
+    "cache": "hit" | "miss" | "coalesced",
     "count": 1834,
     "total": 30412,
     "overpassMs": 2345,
     "junctions": [{ "lat": 62.123, "lng": 21.456 }, ...]
 }
 ```
+
+| `cache` | meaning | `overpassMs` |
+| --- | --- | --- |
+| `hit` | served from the in-memory store | omitted |
+| `miss` | this request originated the Overpass fetch | wait including throttle-queue |
+| `coalesced` | joined another request's in-flight Overpass fetch | this waiter's wait |
 
 `total` is the size of the underlying cached set (anchored mode only); `count` is the filtered slice returned in `junctions`.
 
