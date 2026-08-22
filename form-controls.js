@@ -1,6 +1,7 @@
 // Form controls — the number-input steppers, the trip-mode distance label, and
 // the keyboard shortcuts that trigger a build. Loaded after generate.js
-// (generateDestination); resolved as a global at call time.
+// (generateDestination) and route-view.js (syncDistanceLabel); the label helper
+// is resolved as a global at call time.
 
 function stepNumInput(id, delta) {
     const input = document.getElementById(id);
@@ -15,11 +16,7 @@ function stepNumInput(id, delta) {
 // Distance means different things per trip mode — label it so the number the
 // user types matches what they get.
 document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-        const isOneWay = document.getElementById('oneWay').checked;
-        document.getElementById('distanceLabel').textContent =
-            isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
-    });
+    radio.addEventListener('change', () => syncDistanceLabel());
 });
 
 // Enter in any of the three inputs, or Ctrl/Cmd+Enter anywhere, generates.

@@ -74,7 +74,13 @@ beforeEach(() => {
   globalThis.clearMap = () => { clearMapCalls++; };
   globalThis.saveSettings = () => { saveSettingsCalls++; };
   globalThis.getVisits = () => [{ destLat: 62, destLng: 26 }];
-  globalThis.getSpreadParams = () => SPREAD;
+  globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
+    tripMode,
+    smartRouting: false,
+    winterMode: false,
+    maxKm: parseFloat(document.getElementById('maxDistance').value),
+    spread: SPREAD,
+  }));
   globalThis.OVERLAP_BAD_THRESHOLD = 0.4;
   globalThis.POI_TYPES = [{ key: 'park' }, { key: 'cafe' }];
 
@@ -199,18 +205,22 @@ describe('straight-line scale', () => {
     const opts = resolveOpts();
     expect(opts.straightMin).toBeCloseTo(1 / 1.3);
     expect(opts.straightMax).toBeCloseTo(5.2 / 1.3);
+    expect(readRouteBuildOptions).toHaveBeenCalledWith('one-way');
   });
 });
 
 describe('pipeline wiring', () => {
   test('happy path displays, persists, and forwards dests / modes / spread', async () => {
-    document.getElementById('winterMode').checked = true;
-    document.getElementById('smartRouting').checked = true;
+    readRouteBuildOptions.mockReturnValue({
+      tripMode: 'round', smartRouting: true, winterMode: true,
+      maxKm: 5.2, spread: SPREAD,
+    });
 
     await generate();
 
     expect(resolveStart).toHaveBeenCalledOnce();
     expect(clearMapCalls).toBe(1);
+    expect(readRouteBuildOptions).toHaveBeenCalledWith('round');
     expect(resolveCandidatePool).toHaveBeenCalledWith(60, 24, expect.objectContaining({
       existingDests: [[62, 26]],
       winterMode: true,
@@ -235,6 +245,22 @@ describe('pipeline wiring', () => {
     expect(errors).toHaveLength(0);
     expect(warnings).toHaveLength(0);
     expect(document.getElementById('notification').classList.contains('active')).toBe(false);
+  });
+
+  test('winterMode from the helper reaches dest-pool even when smartRouting is off', async () => {
+    readRouteBuildOptions.mockReturnValue({
+      tripMode: 'round', smartRouting: false, winterMode: true,
+      maxKm: 5.2, spread: SPREAD,
+    });
+
+    await generate();
+
+    expect(resolveCandidatePool).toHaveBeenCalledWith(60, 24, expect.objectContaining({
+      winterMode: true,
+    }));
+    expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
+      smartRouting: false, winterMode: true,
+    }));
   });
 
   test('getAllExistingDestinations maps visits to [lat, lng] pairs', () => {

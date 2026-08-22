@@ -9,12 +9,14 @@
  * is the opposite path — a successful build does persist.
  *
  * route-restore.js resolves clearMap / buildRouteForMode / displayRoute /
- * getSpreadParams / saveToHistory as free globals at call time; this suite
- * stubs them and loads only route-restore.
+ * readRouteBuildOptions / saveToHistory as free globals at call time; this
+ * suite stubs them and loads only route-restore.
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+
+const SPREAD = { offsetKm: 1, spreadFactor: 0.5 };
 
 const FORM_HTML = `
   <input type="checkbox" id="smartRouting">
@@ -40,7 +42,13 @@ beforeEach(() => {
     return { ...args, junctions: null };
   };
   globalThis.saveToHistory = (session) => { saveToHistoryCalls.push(session); };
-  globalThis.getSpreadParams = () => ({ offsetKm: 1, spreadFactor: 0.5 });
+  globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
+    tripMode,
+    smartRouting: tripMode !== 'one-way',
+    winterMode: false,
+    maxKm: 5,
+    spread: SPREAD,
+  }));
   globalThis.buildRouteForMode = async (...args) => {
     buildRouteCalls.push(args);
     return {
@@ -148,8 +156,25 @@ describe('buildAndDisplay — successful build persists', () => {
     expect(saveToHistoryCalls[0].junctions).toEqual([{ lat: 62.15, lng: 25.75 }]);
   });
 
-  test('one-way never enables smart routing even when the checkbox is on', async () => {
-    document.getElementById('smartRouting').checked = true;
+  test('spreads readRouteBuildOptions into buildRouteForMode', async () => {
+    const blob = {
+      tripMode: 'round', smartRouting: true, winterMode: true,
+      maxKm: 9, spread: { offsetKm: 2 },
+    };
+    readRouteBuildOptions.mockReturnValue(blob);
+
+    await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'x',
+      destName: 'y',
+      onProgress: () => {},
+    });
+
+    expect(readRouteBuildOptions).toHaveBeenCalledWith('round');
+    expect(buildRouteCalls[0][4]).toEqual(expect.objectContaining(blob));
+  });
+
+  test('one-way helper result (smart off) is forwarded into buildRouteForMode', async () => {
     await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
       tripMode: 'one-way',
       locationInput: 'x',
@@ -157,10 +182,12 @@ describe('buildAndDisplay — successful build persists', () => {
       onProgress: () => {},
     });
 
+    expect(readRouteBuildOptions).toHaveBeenCalledWith('one-way');
     const opts = buildRouteCalls[0][4];
     expect(opts.tripMode).toBe('one-way');
     expect(opts.smartRouting).toBe(false);
     expect(opts.winterMode).toBe(false);
+    expect(opts.spread).toBe(SPREAD);
     expect(saveToHistoryCalls).toHaveLength(1);
   });
 

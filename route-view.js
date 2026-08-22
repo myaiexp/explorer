@@ -19,6 +19,32 @@ function getSpreadParams() {
     return computeSpreadParams(parseInt(document.getElementById('spreadSlider').value, 10));
 }
 
+// Routing-mode form state — the one DOM read for smart / winter / maxKm / spread.
+// buildAndDisplay, rerouteWithCurrentSpread, and generateDestination used to
+// each re-read these; a new flag (or a one-way/smart interaction) could land
+// on pick-on-map and miss spread-reroute. smartRouting is off for one-way
+// (no junctions to snap). winterMode is the checkbox as-is: dest-pool road
+// filtering is independent of smart routing, and buildRouteForMode only
+// consults winterMode on the smart-loop branch.
+function readRouteBuildOptions(tripMode) {
+    return {
+        tripMode,
+        smartRouting: tripMode !== 'one-way' && document.getElementById('smartRouting').checked,
+        winterMode: document.getElementById('winterMode').checked,
+        maxKm: parseFloat(document.getElementById('maxDistance').value),
+        spread: getSpreadParams(),
+    };
+}
+
+// Trip-mode distance label — the number the user types is one-way km or
+// round-trip km depending on the radio. form-controls.js (change) and
+// settings.js (restore) both call this so the two strings live in one place.
+function syncDistanceLabel() {
+    const isOneWay = document.getElementById('oneWay').checked;
+    document.getElementById('distanceLabel').textContent =
+        isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
+}
+
 // ─── Duration badges ──────────────────────────────────────────────────────────
 
 function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
@@ -175,6 +201,8 @@ function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
 }
 
 globalThis.getSpreadParams = getSpreadParams;
+globalThis.readRouteBuildOptions = readRouteBuildOptions;
+globalThis.syncDistanceLabel = syncDistanceLabel;
 globalThis.updateDurationBadges = updateDurationBadges;
 globalThis.buildDirectionsUrl = buildDirectionsUrl;
 globalThis.renderRouteTail = renderRouteTail;

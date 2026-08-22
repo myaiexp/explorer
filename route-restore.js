@@ -1,15 +1,15 @@
 // Route to a destination the user already has — the two "we know where we're
 // going" flows: build a route to a chosen point (pick-on-map, shared link) and
 // re-display a stored history/favorite entry. Loaded after route-view.js
-// (displayRoute/getSpreadParams), route-dispatch.js (buildRouteForMode),
+// (displayRoute/readRouteBuildOptions), route-dispatch.js (buildRouteForMode),
 // map-view.js (clearMap) and history.js (saveToHistory); resolved as globals at
 // call time. Neither picks a destination — that's generate.js.
 
 // Shared 'clear → build → display → stash junctions' body for pick-on-map and
-// shared-link restore. Both clear the map, build a route for the chosen trip mode
-// (smart-routing read from the DOM, never for one-way), render it, and stash the
-// junction pool on the new session. Callers differ only in where start/label/
-// destName/tripMode come from and which progress message precedes the build:
+// shared-link restore. Both clear the map, build a route for the chosen trip
+// mode (options from readRouteBuildOptions), render it, and stash the junction
+// pool on the new session. Callers differ only in where start/label/destName/
+// tripMode come from and which progress message precedes the build:
 //   loadingMessage   emitted via onProgress before the build (unconditional)
 //   buildingMessage  forwarded to buildRouteForMode (shown for non-smart builds)
 async function buildAndDisplay(startLat, startLng, destLat, destLng, {
@@ -18,16 +18,11 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
 }) {
     clearMap();
     if (loadingMessage) onProgress(loadingMessage);
-    const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
     const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-        tripMode,
-        smartRouting,
-        winterMode: smartRouting && document.getElementById('winterMode').checked,
-        maxKm: parseFloat(document.getElementById('maxDistance').value),
+        ...readRouteBuildOptions(tripMode),
         onProgress,
         cachedJunctions: null,
         buildingMessage,
-        spread: getSpreadParams(),
     });
     const session = displayRoute({
         startLat, startLng, destLat, destLng,

@@ -1,5 +1,5 @@
 // Spread slider control — the loop-width slider and its debounced auto-reroute.
-// Loaded after route-view.js (renderRouteTail/getSpreadParams), loading.js and
+// Loaded after route-view.js (renderRouteTail/readRouteBuildOptions), loading.js and
 // session-state.js; resolved as globals at call time.
 
 const SPREAD_DEBOUNCE_MS = 400;   // slider drag
@@ -38,16 +38,11 @@ async function rerouteWithCurrentSpread() {
 
             const { tripMode } = session;
             let junctions = session.junctions || null;
-            const smartRouting = tripMode !== 'one-way' && document.getElementById('smartRouting').checked;
             const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
-                tripMode,
-                smartRouting,
-                winterMode: smartRouting && document.getElementById('winterMode').checked,
-                maxKm: parseFloat(document.getElementById('maxDistance').value),
+                ...readRouteBuildOptions(tripMode),
                 onProgress,
                 cachedJunctions: junctions,
                 buildingMessage: null,
-                spread: getSpreadParams(),
             });
             const outbound = r.outbound;
             const ret = r.return;

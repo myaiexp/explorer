@@ -62,7 +62,13 @@ beforeEach(() => {
     globalThis.showError = (msg) => { errors.push(msg); };
     globalThis.showWarning = (msg) => { warnings.push(msg); };
     globalThis.getRouteColor = () => '#ff0000';
-    globalThis.getSpreadParams = () => SPREAD;
+    globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
+        tripMode,
+        smartRouting: tripMode !== 'one-way',
+        winterMode: false,
+        maxKm: 5,
+        spread: SPREAD,
+    }));
     clearRouteLines = vi.fn();
     globalThis.clearRouteLines = clearRouteLines;
     renderRouteTail = vi.fn(() => ({ totalWalkKm: 2.4 }));
@@ -131,12 +137,15 @@ describe('rerouteWithCurrentSpread', () => {
     test('preserves visitId, reuses cachedJunctions, and writes the new junctions', async () => {
         const session = baseSession();
         setCurrentSession(session);
-        document.getElementById('smartRouting').checked = true;
-        document.getElementById('winterMode').checked = true;
+        readRouteBuildOptions.mockReturnValue({
+            tripMode: 'round', smartRouting: true, winterMode: true,
+            maxKm: 5, spread: SPREAD,
+        });
 
         await rerouteWithCurrentSpread();
 
         expect(buildRouteForMode).toHaveBeenCalledTimes(1);
+        expect(readRouteBuildOptions).toHaveBeenCalledWith('round');
         const [lat, lng, dLat, dLng, opts] = buildRouteForMode.mock.calls[0];
         expect([lat, lng, dLat, dLng]).toEqual([62.1, 25.7, 62.2, 25.8]);
         expect(opts.cachedJunctions).toBe(JUNCTIONS);
@@ -162,6 +171,7 @@ describe('rerouteWithCurrentSpread', () => {
         await rerouteWithCurrentSpread();
         expect(getCurrentSession().junctions).toBe(JUNCTIONS);
         expect(getCurrentSession().visitId).toBe('visit-1');
+        expect(readRouteBuildOptions).toHaveBeenCalledWith('one-way');
         expect(buildRouteForMode.mock.calls[0][4].smartRouting).toBe(false);
     });
 

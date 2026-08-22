@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
 /**
  * Tests for route-view.js — displayRoute / renderRouteTail / buildDirectionsUrl
- * / getSpreadParams / updateDurationBadges. Finding #7071: the only prior load
- * of this module was mark-visited.test.js, which stubbed the drawing layer to
- * assert the visited button. These pin the render tail itself.
+ * / getSpreadParams / readRouteBuildOptions / syncDistanceLabel /
+ * updateDurationBadges. Finding #7071: the only prior load of this module was
+ * mark-visited.test.js, which stubbed the drawing layer to assert the visited
+ * button. These pin the render tail itself. Findings #7321 / #7316: the
+ * routing-mode form reads that used to be copy-pasted at three UI call sites.
  *
  * SCRIPT_DEPS pulls session-state, geometry, result-panel. session.js is loaded
  * extra so computeRouteTotals / routeSessionFields are real. map-view /
  * elevation / favorites / osrm (loopVias) are faked on globalThis.
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { loadScripts } from './helpers/load.js';
 
 const PANEL_HTML = `
@@ -26,7 +30,13 @@ const PANEL_HTML = `
   <span id="bikeBadge"></span>
   <span id="carBadge"></span>
   <select id="locationTypeSelect"><option value="park">park</option></select>
-  <input id="spreadSlider" type="range" value="50">`;
+  <input id="spreadSlider" type="range" value="50">
+  <input type="checkbox" id="smartRouting">
+  <input type="checkbox" id="winterMode">
+  <input id="maxDistance" value="5">
+  <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
+  <input type="radio" name="tripMode" id="oneWay" value="one-way">
+  <label id="distanceLabel">Round-trip distance (km)</label>`;
 
 const START = { lat: 62.1, lng: 25.7 };
 const DEST  = { lat: 62.2, lng: 25.8 };
@@ -77,6 +87,86 @@ describe('getSpreadParams', () => {
         expect(getSpreadParams()).toEqual(computeSpreadParams(100));
         document.getElementById('spreadSlider').value = '50';
         expect(getSpreadParams()).toEqual(computeSpreadParams(50));
+    });
+});
+
+describe('readRouteBuildOptions', () => {
+    function setModes({ smart = false, winter = false, maxKm = '5', spread = '50' } = {}) {
+        document.getElementById('smartRouting').checked = smart;
+        document.getElementById('winterMode').checked = winter;
+        document.getElementById('maxDistance').value = maxKm;
+        document.getElementById('spreadSlider').value = spread;
+    }
+
+    test('round-trip + both checkboxes → smart and winter on, spread from the slider', () => {
+        setModes({ smart: true, winter: true, maxKm: '12.5', spread: '100' });
+        expect(readRouteBuildOptions('round')).toEqual({
+            tripMode: 'round',
+            smartRouting: true,
+            winterMode: true,
+            maxKm: 12.5,
+            spread: computeSpreadParams(100),
+        });
+    });
+
+    test('one-way never enables smart routing, even when both checkboxes are on', () => {
+        setModes({ smart: true, winter: true });
+        const opts = readRouteBuildOptions('one-way');
+        expect(opts.tripMode).toBe('one-way');
+        expect(opts.smartRouting).toBe(false);
+        // Dest-pool winter filtering is independent of smart routing (the
+        // checkbox hint says so); dispatch already ignores winterMode unless
+        // it takes the smart-loop branch, so the helper does not re-gate it.
+        expect(opts.winterMode).toBe(true);
+    });
+
+    test('round-trip + winter without smart still reports winterMode (dest-pool)', () => {
+        setModes({ smart: false, winter: true });
+        const opts = readRouteBuildOptions('round');
+        expect(opts.smartRouting).toBe(false);
+        expect(opts.winterMode).toBe(true);
+    });
+
+    test('round-trip + smart without winter → winterMode false', () => {
+        setModes({ smart: true, winter: false });
+        const opts = readRouteBuildOptions('round');
+        expect(opts.smartRouting).toBe(true);
+        expect(opts.winterMode).toBe(false);
+    });
+});
+
+describe('syncDistanceLabel', () => {
+    test('one-way vs round-trip copy', () => {
+        document.getElementById('oneWay').checked = true;
+        document.getElementById('roundTrip').checked = false;
+        syncDistanceLabel();
+        expect(document.getElementById('distanceLabel').textContent).toBe('One-way distance (km)');
+
+        document.getElementById('oneWay').checked = false;
+        document.getElementById('roundTrip').checked = true;
+        syncDistanceLabel();
+        expect(document.getElementById('distanceLabel').textContent).toBe('Round-trip distance (km)');
+    });
+});
+
+describe('routing-mode form policy has a single owner (findings #7321 / #7316)', () => {
+    const root = resolve(__dirname, '..');
+    const src = (name) => readFileSync(resolve(root, name), 'utf8');
+
+    test('callers do not re-read smartRouting / winterMode from the DOM', () => {
+        for (const file of ['route-restore.js', 'spread-control.js', 'generate.js']) {
+            expect(src(file), file).not.toMatch(/getElementById\('smartRouting'\)/);
+            expect(src(file), file).not.toMatch(/getElementById\('winterMode'\)/);
+        }
+    });
+
+    test('distance-label strings live only in syncDistanceLabel', () => {
+        for (const file of ['form-controls.js', 'settings.js']) {
+            expect(src(file), file).not.toMatch(/One-way distance \(km\)/);
+            expect(src(file), file).not.toMatch(/Round-trip distance \(km\)/);
+        }
+        expect(src('route-view.js')).toMatch(/One-way distance \(km\)/);
+        expect(src('route-view.js')).toMatch(/Round-trip distance \(km\)/);
     });
 });
 

@@ -1,4 +1,6 @@
 // Settings persistence — save/restore the walk preference form to localStorage.
+// restoreSettings calls syncDistanceLabel (route-view.js) at call time — this
+// file loads first, but app.js restores after every script has evaluated.
 
 const SETTINGS_KEY = 'walk_settings';
 
@@ -51,10 +53,8 @@ function restoreSettings() {
     if (settings.tripMode === 'round' || settings.tripMode === 'one-way') {
         document.getElementById(settings.tripMode === 'one-way' ? 'oneWay' : 'roundTrip').checked = true;
     }
-    // Sync distance label with restored trip mode
-    const isOneWay = document.getElementById('oneWay').checked;
-    document.getElementById('distanceLabel').textContent =
-        isOneWay ? 'One-way distance (km)' : 'Round-trip distance (km)';
+    // Sync distance label with restored trip mode (strings live in route-view.js).
+    syncDistanceLabel();
 }
 
 // Auto-save on input changes

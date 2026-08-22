@@ -2,8 +2,8 @@
 // display and persist it. The one entry point that picks a *new* destination
 // (pick-mode.js and share-link.js route to a destination the user already chose).
 // Loaded after loading.js, location-input.js, destination-resolve.js,
-// route-view.js, result-panel.js, history.js and session-state.js; resolved as
-// globals at call time.
+// route-view.js (readRouteBuildOptions), result-panel.js, history.js and
+// session-state.js; resolved as globals at call time.
 
 // Every visited destination, as [lat, lng] pairs — passed down as `existingDests`
 // so the novelty ranking can push new picks away from places already walked.
@@ -46,10 +46,12 @@ async function generateDestination() {
             const straightMin = minKm / scale;
             const straightMax = maxKm / scale;
 
-            // Mode toggles read once here, at the UI layer, and passed down so
-            // the destination-resolve pipeline stays DOM-free.
-            const winterMode = document.getElementById('winterMode').checked;
-            const smartRouting = document.getElementById('smartRouting').checked;
+            // Mode toggles + spread read once here, at the UI layer, and passed
+            // down so the destination-resolve pipeline stays DOM-free. maxKm
+            // was already parsed (and validated) above; keep that snapshot so
+            // a field change during geocode cannot sneak an unvalidated budget
+            // into the build.
+            const { smartRouting, winterMode, spread } = readRouteBuildOptions(tripMode);
 
             // Resolve a candidate pool, then screen it for water-reachability.
             const resolved = await resolveCandidatePool(startLat, startLng, {
@@ -59,10 +61,8 @@ async function generateDestination() {
                 existingDests, onProgress });
             const { candidatePool, waterLocked } = screened;
 
-            // Build route (the spread is read from the DOM here, at the UI layer,
-            // and passed down). Smart round-trips may substitute a lower-overlap
-            // destination, so read dest/destName back from the build result.
-            const spread = getSpreadParams();
+            // Smart round-trips may substitute a lower-overlap destination, so
+            // read dest/destName back from the build result.
             const built = await buildRouteForDestination(startLat, startLng, {
                 candidatePool, dest: screened.dest, destName: screened.destName,
                 existingDests, maxKm, tripMode, spread, smartRouting, winterMode, onProgress });
