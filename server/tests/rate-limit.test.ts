@@ -249,4 +249,33 @@ describe('rate limiting', () => {
     });
     expect(res.status).toBe(204);
   });
+
+  // finding #7057 — DELETE /:username was the only mutating account endpoint
+  // without an IP limiter, so unauthenticated callers could issue unbounded
+  // accountAuth lookups (same 401 for missing/wrong token as GET). Shares the
+  // GET /:username 60/min IP read bucket; limiter runs before auth.
+  test('60 DELETEs/min per IP on DELETE /:username — 61st returns 429', async () => {
+    const { username: u } = await createTestAccount();
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request(`/api/${u}`, { method: 'DELETE' });
+      expect(res.status).toBe(401);
+    }
+
+    const res = await app.request(`/api/${u}`, { method: 'DELETE' });
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get('Retry-After'))).toBeGreaterThan(0);
+  });
+
+  test('DELETE /:username shares the GET /:username IP read bucket', async () => {
+    const { username: u, token } = await createTestAccount();
+    const headers = authHeaders(token);
+
+    for (let i = 0; i < 60; i++) {
+      expect((await app.request(`/api/${u}`, { headers })).status).toBe(200);
+    }
+
+    const res = await app.request(`/api/${u}`, { method: 'DELETE', headers });
+    expect(res.status).toBe(429);
+  });
 });

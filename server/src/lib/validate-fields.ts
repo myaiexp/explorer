@@ -8,6 +8,15 @@ export const MAX_LABEL_LEN = 500; // startLabel, poiCategory, tripMode, saved-lo
 export const MAX_NAME_LEN = 2000; // destName (POI names are occasionally long)
 export const MAX_DATE_LEN = 40; // ISO-8601 timestamps are ≤ ~29 chars
 
+// Row ids become URL path segments (PUT /:username/<section>/:id) and PK
+// columns. Mirror visit-shape.js idOrNull: RFC 3986 unreserved charset, 128-char
+// cap, and reject dot-only segments ('.' / '..' survive percent-encoding and
+// would be normalized away by the browser). Finding #7061 — import had no
+// bound, so an authenticated client could persist arbitrarily large or
+// punctuation-heavy ids.
+export const MAX_ID_LEN = 128;
+export const SAFE_ID = /^[A-Za-z0-9._~-]+$/;
+
 // Serialized favorites JSONB payload cap (~0.5 MB) — favorites are small bookmark
 // blobs; this stops an arbitrarily-large object being persisted as JSONB.
 export const MAX_FAVORITE_PAYLOAD_LEN = 512_000;
@@ -38,6 +47,21 @@ export function isIsoDate(v: unknown): v is string {
     /^\d{4}-\d{2}-\d{2}/.test(v) &&
     !Number.isNaN(Date.parse(v))
   );
+}
+
+// A usable row id, or a 400 reason. Empty/non-string keeps the historical
+// 'Missing required field: id' wording so PUT/import error bodies don't change
+// for the cases they already rejected.
+export function parseRowId(id: unknown): { error: string } | { id: string } {
+  if (typeof id !== 'string' || !id) return { error: 'Missing required field: id' };
+  if (id.length > MAX_ID_LEN) return { error: `id exceeds maximum length of ${MAX_ID_LEN}` };
+  if (!SAFE_ID.test(id) || /^\.+$/.test(id)) return { error: 'id contains invalid characters' };
+  return { id };
+}
+
+export function idError(id: unknown): string | null {
+  const parsed = parseRowId(id);
+  return 'error' in parsed ? parsed.error : null;
 }
 
 // True when v is a string longer than max. Non-strings are not "too long" — the

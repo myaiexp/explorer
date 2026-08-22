@@ -3,8 +3,9 @@
 // Defense-in-depth behind the nginx edge limiter: the public path is already
 // `limit_req`'d, but this also covers direct tailnet access (which bypasses
 // nginx) and bounds a single client's request rate per endpoint. The client IP
-// is read from X-Forwarded-For (set by the nginx proxy), falling back to the
-// raw socket address for direct connections.
+// is the TCP socket address; X-Forwarded-For is honoured only when that peer is
+// in TRUSTED_PROXIES (loopback by default — nginx). Direct tailnet access is
+// therefore keyed on the real peer, not a spoofable XFF.
 //
 // TWIN: server/src/middleware/rate-limit.ts carries the same token-bucket core.
 // The two are deliberately kept independent — separate deployables on separate

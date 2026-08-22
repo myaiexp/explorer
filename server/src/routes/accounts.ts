@@ -4,7 +4,7 @@ import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { createAccount } from '../username.js';
 import { clientIpForStorage } from '../lib/client-ip.js';
-import { accountCreationRateLimit } from '../middleware/rate-limit.js';
+import { accountCreationRateLimit, readRateLimit } from '../middleware/rate-limit.js';
 import { accountAuth } from '../middleware/auth.js';
 
 export function accountsRoutes(db: Db): Hono {
@@ -28,10 +28,12 @@ export function accountsRoutes(db: Db): Hono {
   });
 
   // DELETE /:username — cascade deletes all child rows via FK.
-  // accountAuth already 401s any missing account (identical to a wrong token, by
-  // the anti-enumeration design), so the handler may assume :username exists —
-  // same convention as sections.ts. No existence re-check here.
-  app.delete('/:username', accountAuth(db), async (c) => {
+  // IP read limit runs first (same 60/min bucket as GET /:username) so
+  // unauthenticated probing is throttled before the Postgres lookup (finding
+  // #7057). accountAuth already 401s any missing account (identical to a wrong
+  // token, by the anti-enumeration design), so the handler may assume :username
+  // exists — same convention as sections.ts. No existence re-check here.
+  app.delete('/:username', readRateLimit(), accountAuth(db), async (c) => {
     const username = c.req.param('username')!;
     await db.delete(schema.accounts).where(eq(schema.accounts.username, username));
     return new Response(null, { status: 204 });

@@ -314,6 +314,10 @@ describe('POST /api/:username/import', () => {
       ['favorite with payload: null', { favorites: [{ id: 'f-1', payload: null }] }],
       // validateFavorite: missing/empty id.
       ['favorite missing id', { favorites: [{ payload: { name: 'Park' } }] }],
+      // validateFavorite / validateTripRow: id charset + length (finding #7061).
+      ['favorite id with slash', { favorites: [{ id: 'a/b', payload: { name: 'Park' } }] }],
+      ['visit id over 128 chars', { visits: [{ ...VISIT_BODY, id: 'a'.repeat(129) }] }],
+      ['savedLocation traversal id', { savedLocations: [{ id: '..', label: 'Home', value: '60,25' }] }],
       // validateSavedLocation: missing required `value`.
       ['savedLocation missing value', { savedLocations: [{ id: 'sl-1', label: 'Home' }] }],
       // validateHistoryRow: missing required route-row fields.

@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Tests for junctions-cache/src/log.ts — getRecentLogs ring-buffer slicing.
 // Audit finding #3174: getRecentLogs(0) was clamped to 1 (Math.max(1, ...)),
 // returning one log instead of an empty array. These cases pin the limit

@@ -118,6 +118,11 @@ const rejectCases: Array<[string, unknown]> = [
   ['id missing', { ...validRow(), id: undefined }],
   ['id empty string', { ...validRow(), id: '' }],
   ['id non-string', { ...validRow(), id: 123 }],
+  ['id over 128 chars', { ...validRow(), id: 'a'.repeat(129) }],
+  ['id with slash', { ...validRow(), id: 'a/b' }],
+  ['id traversal segment', { ...validRow(), id: '..' }],
+  ['id bare dot', { ...validRow(), id: '.' }],
+  ['id with space', { ...validRow(), id: 'id with space' }],
   ['date missing', { ...validRow(), date: undefined }],
   ['date empty string', { ...validRow(), date: '' }],
   ['date non-string', { ...validRow(), date: 0 }],
@@ -155,10 +160,11 @@ describe('field bounds (date + length caps)', () => {
     expect(validateRouteRow({ ...validRow(), date: '2026-04-27T10:00:00.123Z' }, USER)).not.toBeNull();
   });
 
-  it('accepts strings exactly at the length cap (500 label / 2000 name)', () => {
+  it('accepts strings exactly at the length cap (500 label / 2000 name / 128 id)', () => {
     expect(validateRouteRow({ ...validRow(), startLabel: 'x'.repeat(500) }, USER)).not.toBeNull();
     expect(validateRouteRow({ ...validRow(), destName: 'x'.repeat(2000) }, USER)).not.toBeNull();
     expect(validateRouteRow({ ...validRow(), tripMode: 'x'.repeat(500) }, USER)).not.toBeNull();
+    expect(validateRouteRow({ ...validRow(), id: 'a'.repeat(128) }, USER)).not.toBeNull();
   });
 
   it('rejects an over-length poiCategory on validateVisit only', () => {

@@ -13,6 +13,7 @@ import {
   isIsoDate,
   tooLong,
   payloadLength,
+  parseRowId,
 } from './validate-fields.js';
 
 // A validated + normalized row ready to upsert, or a human-readable 400 reason.
@@ -28,7 +29,8 @@ export function validateTripRow(
   username: string,
   body: AnyRecord
 ): RowResult<typeof schema.history.$inferInsert> {
-  if (typeof id !== 'string' || !id) return { error: 'Missing required field: id' };
+  const parsedId = parseRowId(id);
+  if ('error' in parsedId) return parsedId;
   const { date, startLat, startLng, destLat, destLng, distance } = body;
   if (typeof date !== 'string' || !date) return { error: 'Missing required field: date' };
   if (!isIsoDate(date)) return { error: 'date must be an ISO-8601 timestamp' };
@@ -54,7 +56,7 @@ export function validateTripRow(
 
   return {
     row: {
-      id,
+      id: parsedId.id,
       username,
       date,
       startLat,
@@ -101,12 +103,13 @@ export function validateFavoriteRow(
   username: string,
   source: AnyRecord
 ): RowResult<typeof schema.favorites.$inferInsert> {
-  if (typeof id !== 'string' || !id) return { error: 'Missing required field: id' };
+  const parsedId = parseRowId(id);
+  if ('error' in parsedId) return parsedId;
   const payload = 'payload' in source ? source.payload : source;
   if (payload === undefined || payload === null) return { error: 'Missing required field: payload' };
   if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN)
     return { error: `payload exceeds maximum size of ${MAX_FAVORITE_PAYLOAD_LEN}` };
-  return { row: { id, username, payload } };
+  return { row: { id: parsedId.id, username, payload } };
 }
 
 export function validateSavedLocationRow(
@@ -114,7 +117,8 @@ export function validateSavedLocationRow(
   username: string,
   body: AnyRecord
 ): RowResult<typeof schema.savedLocations.$inferInsert> {
-  if (typeof id !== 'string' || !id) return { error: 'Missing required field: id' };
+  const parsedId = parseRowId(id);
+  if ('error' in parsedId) return parsedId;
   const { label, value } = body;
   if (typeof label !== 'string') return { error: 'Missing required field: label' };
   if (typeof value !== 'string') return { error: 'Missing required field: value' };
@@ -122,5 +126,5 @@ export function validateSavedLocationRow(
     return { error: `label exceeds maximum length of ${MAX_LABEL_LEN}` };
   if (value.length > MAX_LABEL_LEN)
     return { error: `value exceeds maximum length of ${MAX_LABEL_LEN}` };
-  return { row: { id, username, label, value } };
+  return { row: { id: parsedId.id, username, label, value } };
 }

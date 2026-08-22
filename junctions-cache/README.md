@@ -17,7 +17,7 @@ The store is bounded so neither memory nor the JSON snapshot grows without limit
 ## Tests
 
 ```bash
-pnpm test        # vitest (node env; every tests/*.test.ts carries // @vitest-environment node)
+pnpm test        # vitest (environment: 'node' in vitest.config.ts)
 pnpm typecheck   # tsc over src + tests via tsconfig.test.json
 ```
 
@@ -25,7 +25,7 @@ pnpm typecheck   # tsc over src + tests via tsconfig.test.json
 
 ## Abuse controls
 
-- **Per-IP rate limits** (token bucket, keyed on `X-Forwarded-For` then socket): `/junctions` 60/min, `/logs` 30/min, `/health` 120/min. These are defense-in-depth behind the nginx edge `limit_req` and also cover direct tailnet access that bypasses nginx.
+- **Per-IP rate limits** (token bucket, keyed on the TCP socket IP; `X-Forwarded-For` is used only when the peer is a trusted proxy — nginx on loopback, or `TRUSTED_PROXIES`): `/junctions` 60/min, `/logs` 30/min, `/health` 120/min. These are defense-in-depth behind the nginx edge `limit_req` and also cover direct tailnet access that bypasses nginx (direct peers are keyed on the real socket address, so a spoofed XFF cannot mint a new bucket).
 - **Global Overpass concurrency cap** (`overpass-limit.ts`): at most 2 outbound Overpass fetches run at once (with a bounded wait queue; overflow → 502). In-flight dedup only collapses identical bboxes, so this is what stops a burst of *distinct* misses from fanning out into many parallel Overpass queries and getting the shared public instance banned.
 - **`LOGS_TOKEN`** (env var): `/logs` is **closed by default** — it echoes anchored-lookup events that include the walker's `start` at ~110 m precision (≈ home) and roaming radius, and is publicly reachable via the VPS proxy at `/api/junctions/logs`. Set `LOGS_TOKEN` to reopen it behind an `Authorization: Bearer <LOGS_TOKEN>` (constant-time check); unset ⇒ `401`. journald (see [Logs](#logs)) is the primary, already-authenticated log path, so leaving it closed loses nothing operationally.
 

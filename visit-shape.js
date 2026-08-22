@@ -81,6 +81,10 @@ function stringOrNull(v, max) {
 // Dropping the id costs the file's own dedupe for that row (re-importing it mints
 // a second UUID and so duplicates the walk); keeping the walk is worth that, and
 // only a hand-edited file ever gets here.
+// Mirrored in server/src/lib/validate-fields.ts (MAX_ID_LEN / SAFE_ID / idError)
+// — keep the two in lockstep so an imported row that reaches the cloud outbox
+// is one the API will accept, and import cannot persist an id the client would
+// never mint.
 const MAX_ID_LEN = 128;
 const SAFE_ID = /^[A-Za-z0-9._~-]+$/;
 

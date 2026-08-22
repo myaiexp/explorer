@@ -175,7 +175,7 @@ export function usernameWriteRateLimit() {
   };
 }
 
-/** 60 reads/min per IP — throttles probing of the account-fetch endpoint */
+/** 60 reads/min per IP — throttles probing of GET /:username and DELETE /:username */
 export function readRateLimit() {
   return async (c: Context, next: Next) => {
     const ip = clientIp(c);

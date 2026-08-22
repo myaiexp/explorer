@@ -4,7 +4,9 @@ import {
   isIsoDate,
   tooLong,
   payloadLength,
+  idError,
   MAX_DATE_LEN,
+  MAX_ID_LEN,
 } from './validate-fields.js';
 
 describe('isIsoDate', () => {
@@ -43,6 +45,43 @@ describe('tooLong', () => {
     expect(tooLong(undefined, 10)).toBe(false);
     expect(tooLong(12345, 1)).toBe(false);
     expect(tooLong({}, 1)).toBe(false);
+  });
+});
+
+describe('idError', () => {
+  // Mirrors visit-shape.js idOrNull: ids become URL path segments and PK
+  // columns, so import/PUT must reject anything the client would drop.
+  it('accepts uuids, legacy numeric strings, dots-in-names, and the 128-char cap', () => {
+    expect(idError('0f9c1e7a-3b2d-4c8e-9a11-7d6f5b4c3a21')).toBeNull();
+    expect(idError('1714500000000')).toBeNull();
+    expect(idError('walk.2026.04.27')).toBeNull();
+    expect(idError('a'.repeat(MAX_ID_LEN))).toBeNull();
+    expect(idError('id_with-tilde~ok')).toBeNull();
+  });
+
+  it('rejects missing or empty ids', () => {
+    expect(idError(undefined)).toBe('Missing required field: id');
+    expect(idError('')).toBe('Missing required field: id');
+    expect(idError(123)).toBe('Missing required field: id');
+  });
+
+  it('rejects strings over the 128-char cap', () => {
+    expect(idError('a'.repeat(MAX_ID_LEN + 1))).toBe(
+      `id exceeds maximum length of ${MAX_ID_LEN}`
+    );
+  });
+
+  it.each([
+    ['a path separator', 'a/b'],
+    ['a traversal segment', '..'],
+    ['a bare dot', '.'],
+    ['only dots', '...'],
+    ['a leading traversal', '../../accounts'],
+    ['a percent escape', '%2e%2e'],
+    ['a query fragment', 'id?x=1'],
+    ['whitespace', 'id with space'],
+  ])('rejects an id with %s', (_label, id) => {
+    expect(idError(id)).toBe('id contains invalid characters');
   });
 });
 
