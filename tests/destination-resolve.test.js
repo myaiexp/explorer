@@ -112,6 +112,21 @@ describe('resolveCandidatePool', () => {
         expect(onProgress).toHaveBeenCalledWith('No matching places found nearby, using random point…');
     });
 
+    // Stale settings restore a poiType with no matching <option>, so the select
+    // value is '' (or a retired key). That must not reach Overpass as an empty
+    // union — the user would see "Overpass unavailable" for a bad dropdown.
+    test.each(['', 'stale_key'])('poi: unknown type %j → random fallback, no Overpass fetch', async (raw) => {
+        globalThis.fetchPOIsInRadius.mockResolvedValue([]);
+        const onProgress = vi.fn();
+        const r = await globalThis.resolveCandidatePool(60, 24, {
+            ...base, routingStrategy: 'poi', rawLocationType: raw, onProgress });
+        expect(globalThis.fetchPOIsInRadius).not.toHaveBeenCalled();
+        expect(onProgress).toHaveBeenCalledWith('Unknown place type, using random point…');
+        expect(onProgress).not.toHaveBeenCalledWith('Overpass unavailable, using random point…');
+        expect(r.candidatePool).toHaveLength(15);
+        expect(r.destName).toBeNull();
+    });
+
     test('any_poi: all POI filters passed as an array, label "any POI"', async () => {
         globalThis.fetchPOIsInRadius.mockResolvedValue([{ lat: 60.1, lng: 24.1, name: 'X' }]);
         const onProgress = vi.fn();
@@ -159,11 +174,21 @@ describe('screenCandidatePool', () => {
         expect(r.destName).toBe('Far');
     });
 
-    test('bestRejected without a name falls back to the incoming destName', async () => {
+    test('unnamed survivor does not inherit the previous destName', async () => {
+        const survivors = [{ lat: 60.3, lng: 24.3 }];
+        globalThis.screenCandidates.mockResolvedValue({ survivors, bestRejected: null });
+        const r = await globalThis.screenCandidatePool(60, 24, {
+            candidatePool: pool, dest: pool[0], destName: 'orig', existingDests: [], onProgress: vi.fn() });
+        expect(r.dest).toBe(survivors[0]);
+        expect(r.destName).toBeNull();
+        expect(r.waterLocked).toBe(false);
+    });
+
+    test('unnamed bestRejected does not inherit the previous destName', async () => {
         globalThis.screenCandidates.mockResolvedValue({ survivors: [], bestRejected: { lat: 60.9, lng: 24.9 } });
         const r = await globalThis.screenCandidatePool(60, 24, {
             candidatePool: pool, dest: pool[0], destName: 'orig', existingDests: [], onProgress: vi.fn() });
-        expect(r.destName).toBe('orig');
+        expect(r.destName).toBeNull();
         expect(r.waterLocked).toBe(true);
     });
 
@@ -258,17 +283,20 @@ describe('findBestLoop', () => {
         expect(best.destName).toBe('b');
     });
 
-    test('corridor junction pool is fetched once and reused across attempts', async () => {
+    test('each retry fetches its own corridor — cachedJunctions stays null', async () => {
+        // The pool from attempt 1 is corridor-filtered to dest1. dest2 sits in
+        // a different direction; reusing dest1's junctions would silently skip
+        // snapping on retries. The start-anchored service cache still hits.
         const pool = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }];
-        const shared = [{ j: 'shared' }];
         globalThis.buildJunctionLoop
-            .mockResolvedValueOnce(loop(0.5, shared))   // bad → retry
-            .mockResolvedValueOnce(loop(0.5, shared));  // still bad, budget exhausted
+            .mockResolvedValueOnce(loop(0.5, [{ j: 'dest1' }]))
+            .mockResolvedValueOnce(loop(0.5, [{ j: 'dest2' }]));
         await globalThis.findBestLoop(60, 24, opts(pool));
         expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(2);
-        // first call: cachedJunctions null; second: the pool from call 1
+        expect(globalThis.buildJunctionLoop.mock.calls[0][2]).toBe(1);
+        expect(globalThis.buildJunctionLoop.mock.calls[1][2]).toBe(2);
         expect(globalThis.buildJunctionLoop.mock.calls[0][4].cachedJunctions).toBeNull();
-        expect(globalThis.buildJunctionLoop.mock.calls[1][4].cachedJunctions).toBe(shared);
+        expect(globalThis.buildJunctionLoop.mock.calls[1][4].cachedJunctions).toBeNull();
     });
 
     test('a measured overlap is preferred over an earlier null (unknown) overlap', async () => {

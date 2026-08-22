@@ -47,11 +47,13 @@ function randomPoolResult(startLat, startLng, straightMin, straightMax, existing
 // goes straight to a random pool. `rawLocationType` is the underlying <select>
 // value — only meaningful in the 'poi' branch, where it names the specific POI
 // key to look up. `winterMode` (roads branch) is passed in, not read from the
-// DOM. Two distinct fallbacks with accurate progress messages: a genuine fetch
-// failure (only the fetch call is in the try) vs. a successful-but-empty
-// response. Errors from capPool/pickMostNovelDestination are NOT caught here —
-// they surface to generateDestination's handler instead of being silently masked
-// as "Overpass unavailable". Returns the full pool plus an initial novelty pick:
+// DOM. Three distinct fallbacks with accurate progress messages: a genuine fetch
+// failure (only the fetch call is in the try), a successful-but-empty response,
+// and a 'poi' key that isn't in the catalog (stale settings restore a value
+// with no matching <option>, leaving select.value === ''). Errors from
+// capPool/pickMostNovelDestination are NOT caught here — they surface to
+// generateDestination's handler instead of being silently masked as "Overpass
+// unavailable". Returns the full pool plus an initial novelty pick:
 // { candidatePool, dest, destName }.
 async function resolveCandidatePool(startLat, startLng, {
     routingStrategy, rawLocationType, straightMin, straightMax, existingDests, onProgress, winterMode = false,
@@ -73,16 +75,26 @@ async function resolveCandidatePool(startLat, startLng, {
         return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
     }
     if (routingStrategy === 'any_poi' || routingStrategy === 'poi') {
-        const filters = routingStrategy === 'any_poi'
-            ? POI_TYPES.map(p => p.filter)
-            : [POI_TYPES.find(p => p.key === rawLocationType)?.filter].filter(Boolean);
-        const label = routingStrategy === 'any_poi'
-            ? 'any POI'
-            : POI_TYPES.find(p => p.key === rawLocationType)?.label || 'places';
+        let filters, label;
+        if (routingStrategy === 'any_poi') {
+            filters = POI_TYPES.map(p => p.filter);
+            label = 'any POI';
+        } else {
+            // One catalog lookup. fetchPOIsInRadius already wraps a scalar
+            // filter in an array, so pass poiType.filter as-is — do not
+            // wrap-then-unwrap, and do not send an empty union on a miss.
+            const poiType = POI_TYPES.find(p => p.key === rawLocationType);
+            if (!poiType) {
+                onProgress('Unknown place type, using random point…');
+                return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
+            }
+            filters = poiType.filter;
+            label = poiType.label || 'places';
+        }
         onProgress(`Searching for ${label}…`);
         let pois;
         try {
-            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters.length === 1 ? filters[0] : filters, onProgress);
+            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters, onProgress);
         } catch {
             onProgress('Overpass unavailable, using random point…');
             return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
@@ -101,9 +113,11 @@ async function resolveCandidatePool(startLat, startLng, {
 
 // Screen the candidate pool for water-reachability before route building.
 // Survivors replace the pool and get a fresh novelty pick; if none survive, the
-// best-rejected candidate is used and waterLocked is flagged. On screening
-// failure (or no screened result) the unscreened pool/dest/destName pass through
-// unchanged. Returns { candidatePool, dest, destName, waterLocked }.
+// best-rejected candidate is used and waterLocked is flagged. destName comes
+// from the new pick only (unnamed OSM features stay unnamed — do not inherit
+// the pre-screening candidate's label). On screening failure (or no screened
+// result) the unscreened pool/dest/destName pass through unchanged. Returns
+// { candidatePool, dest, destName, waterLocked }.
 async function screenCandidatePool(startLat, startLng, { candidatePool, dest, destName, existingDests, onProgress }) {
     try {
         onProgress('Checking reachability…');
@@ -115,13 +129,13 @@ async function screenCandidatePool(startLat, startLng, { candidatePool, dest, de
         if (screened.survivors.length > 0) {
             const pool = screened.survivors;
             const pick = pickMostNovelDestination(pool, existingDests);
-            return { candidatePool: pool, dest: pick, destName: pick.name || destName, waterLocked: false };
+            return { candidatePool: pool, dest: pick, destName: pick.name || null, waterLocked: false };
         }
         if (screened.bestRejected) {
             return {
                 candidatePool: [screened.bestRejected],
                 dest: screened.bestRejected,
-                destName: screened.bestRejected.name || destName,
+                destName: screened.bestRejected.name || null,
                 waterLocked: true,
             };
         }
@@ -144,15 +158,17 @@ function isBetterLoop(candidate, best) {
 }
 
 // Smart-routing retry loop: rank the pool by novelty and build a junction loop
-// for each candidate (reusing the corridor junction pool across attempts),
-// keeping the lowest-overlap result. Stops early once a loop beats the overlap
-// threshold. Returns the best { dest, destName, outbound, return, overlap,
-// junctions } seen, or null if nothing was built.
+// for each candidate, keeping the lowest-overlap result. Stops early once a
+// loop beats the overlap threshold. Each attempt fetches its own corridor —
+// the pool is bbox-filtered to that dest, so reusing attempt 1's junctions
+// would silently disable snapping on dests in a different direction. The
+// junctions-cache service keys on start+maxKm+exclude, so the refetch is a
+// cache hit, not a new Overpass query. Returns the best { dest, destName,
+// outbound, return, overlap, junctions } seen, or null if nothing was built.
 async function findBestLoop(startLat, startLng, { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress }) {
     const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
     const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
 
-    let cachedJunctions = null;
     let bestSeen = null;
 
     for (let i = 0; i < retryBudget; i++) {
@@ -162,9 +178,9 @@ async function findBestLoop(startLat, startLng, { candidatePool, dest, existingD
         onProgress(retryBudget > 1
             ? `Building route… (attempt ${i + 1}/${retryBudget})`
             : 'Building route…');
+        // cachedJunctions: null on every dest — corridor pools do not transfer.
         const result = await buildJunctionLoop(startLat, startLng, tryDest.lat, tryDest.lng,
-            { maxKm, onProgress, cachedJunctions, winterMode, spread });
-        if (cachedJunctions === null) cachedJunctions = result.junctions;
+            { maxKm, onProgress, cachedJunctions: null, winterMode, spread });
 
         const candidate = {
             dest: tryDest,
