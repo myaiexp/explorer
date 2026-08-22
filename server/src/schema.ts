@@ -11,9 +11,10 @@ import {
 
 export const accounts = pgTable('accounts', {
   username: text('username').primaryKey(),
-  // High-entropy secret (32 random bytes, base64url). The credential for all
-  // read+write access — the human-readable username is only a public handle.
-  token: text('token').notNull(),
+  // SHA-256 hex digest of the 32-byte base64url bearer (audit #7058). The
+  // plaintext is returned once at POST /accounts and never stored. Unique so
+  // two accounts cannot share a credential even after hashing.
+  token: text('token').notNull().unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   ipFirstSeen: inet('ip_first_seen'),
 });

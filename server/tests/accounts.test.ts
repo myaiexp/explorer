@@ -12,6 +12,7 @@ import {
   TRUSTED_PROXY_ENV,
 } from './helpers.js';
 import { schema } from '../src/db.js';
+import { hashToken } from '../src/lib/token-hash.js';
 
 beforeEach(async () => {
   await truncateAll();
@@ -30,7 +31,32 @@ describe('POST /api/accounts', () => {
     const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
     expect(rows).toHaveLength(1);
     expect(rows[0].username).toBe(username);
-    expect(rows[0].token).toBe(token);
+    // The DB holds the SHA-256 digest, never the bearer itself (audit #7058).
+    expect(rows[0].token).not.toBe(token);
+    expect(rows[0].token).toBe(hashToken(token));
+  });
+
+  test('a dumped digest is not a usable Bearer credential', async () => {
+    const res = await app.request('/api/accounts', { method: 'POST' });
+    const { username, token } = await res.json() as { username: string; token: string };
+    const rows = await db.select().from(schema.accounts).where(eq(schema.accounts.username, username));
+    const dumped = rows[0].token;
+
+    const asHash = await app.request(`/api/${username}`, {
+      method: 'DELETE',
+      headers: authHeaders(dumped),
+    });
+    expect(asHash.status).toBe(401);
+    expect(await db.select().from(schema.accounts).where(eq(schema.accounts.username, username)))
+      .toHaveLength(1);
+
+    const asPlain = await app.request(`/api/${username}`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    });
+    expect(asPlain.status).toBe(204);
+    expect(await db.select().from(schema.accounts).where(eq(schema.accounts.username, username)))
+      .toHaveLength(0);
   });
 
   test('each call returns a different username', async () => {

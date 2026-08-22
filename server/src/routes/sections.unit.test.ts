@@ -3,6 +3,7 @@ import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { sectionsRoutes } from './sections.js';
 import { resetRateLimiter } from '../middleware/rate-limit.js';
+import { hashToken } from '../lib/token-hash.js';
 
 // Captures the single insert/delete op a handler issues against the fake Db.
 interface RecordedOp {
@@ -27,8 +28,9 @@ function makeFakeDb(opts: { userExists: boolean }) {
         from() {
           return {
             where() {
-              // Auth middleware reads `.token` off row 0.
-              return Promise.resolve(opts.userExists ? [{ username: 'alice', token: 'sekret' }] : []);
+              // Auth middleware hashes the presented bearer and compares to
+              // `.token` (a SHA-256 digest) on row 0.
+              return Promise.resolve(opts.userExists ? [{ username: 'alice', token: hashToken('sekret') }] : []);
             },
           };
         },
@@ -58,7 +60,7 @@ function makeFakeDb(opts: { userExists: boolean }) {
   return { db: db as unknown as Db, ops };
 }
 
-// Valid auth for the fake account (its stored token is 'sekret').
+// Valid auth for the fake account (plaintext bearer; the fake row stores the hash).
 const AUTH = { Authorization: 'Bearer sekret' };
 
 function jsonReq(method: 'PUT', body: unknown) {

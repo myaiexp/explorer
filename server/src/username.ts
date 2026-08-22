@@ -1,7 +1,8 @@
+// Username + bearer-token generation for new cloud-backup accounts.
 import { randomBytes } from 'node:crypto';
-import { eq } from 'drizzle-orm';
 import type { Db } from './db.js';
 import { schema } from './db.js';
+import { hashToken } from './lib/token-hash.js';
 import adjectives from './wordlists/adjectives.js';
 import nouns from './wordlists/nouns.js';
 
@@ -45,18 +46,20 @@ export async function createAccount(
   ip: string | null,
   genUsername: () => string = generateUsername,
 ): Promise<CreatedAccount> {
-  const token = generateToken();
   for (let attempt = 0; attempt < 10; attempt++) {
     const username = genUsername();
+    // Fresh token each attempt so a unique-violation on accounts.token (the
+    // digest is unique too) does not retry the same colliding secret.
+    const token = generateToken();
     try {
       await db.insert(schema.accounts).values({
         username,
-        token,
+        token: hashToken(token),
         ipFirstSeen: ip ?? undefined,
       });
       return { username, token };
     } catch (err: unknown) {
-      // unique violation on PK — retry with a freshly generated username
+      // unique violation on username PK or token digest — retry with a new pair
       if (isUniqueViolation(err)) {
         continue;
       }

@@ -2,10 +2,11 @@
 import { describe, test, expect } from 'vitest';
 import type { Db } from '../src/db.js';
 import { createAccount } from '../src/username.js';
+import { hashToken } from '../src/lib/token-hash.js';
 
 // Minimal db stub: createAccount only ever calls db.insert(...).values(...).
 // `values` is the awaited insert; we control whether it resolves or rejects.
-function stubDb(values: () => Promise<unknown>): Db {
+function stubDb(values: (row?: unknown) => Promise<unknown>): Db {
   return { insert: () => ({ values }) } as unknown as Db;
 }
 
@@ -47,5 +48,18 @@ describe('createAccount catch-branch contract', () => {
     // The secret token is generated alongside the username.
     expect(typeof token).toBe('string');
     expect(token.length).toBeGreaterThanOrEqual(40);
+  });
+
+  test('inserts the SHA-256 digest, not the plaintext bearer (audit #7058)', async () => {
+    let inserted: { username: string; token: string } | undefined;
+    const db = stubDb((values) => {
+      inserted = values as { username: string; token: string };
+      return Promise.resolve();
+    });
+
+    const { token } = await createAccount(db, null);
+    expect(inserted).toBeDefined();
+    expect(inserted!.token).not.toBe(token);
+    expect(inserted!.token).toBe(hashToken(token));
   });
 });

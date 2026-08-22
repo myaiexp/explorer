@@ -4,6 +4,7 @@ import type { Context, Next } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
+import { hashToken } from '../lib/token-hash.js';
 
 // Pull the token from `Authorization: Bearer <token>` (preferred) or the
 // `X-Account-Token` fallback header. Returns null when neither is present.
@@ -42,7 +43,9 @@ export function accountAuth(db: Db) {
       .where(eq(schema.accounts.username, username));
 
     const stored = rows[0]?.token;
-    if (!stored || !safeEqual(provided, stored)) {
+    // Hash the presented bearer so a dump of accounts.token cannot be replayed
+    // as Authorization — the stored value is a SHA-256 digest, not the secret.
+    if (!stored || !safeEqual(hashToken(provided), stored)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
