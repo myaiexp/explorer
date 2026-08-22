@@ -1,17 +1,15 @@
 // @vitest-environment node
-// Integration tests for junctions-cache/src/server.ts — the Hono route layer.
+// Integration tests for junctions-cache/src/app.ts — the Hono route layer.
 // Audit finding #1565: /health, /logs and the /junctions request validation
 // (bbox parsing/range/area caps, start-anchored coord/maxKm caps, partial-param
 // handling, Overpass-error → 502) had zero coverage.
 // Audit finding #3159: partial anchor params (some-but-not-all of
 // startLat/startLng/maxKm) now 400 instead of silently falling through to bbox.
 //
-// server.ts is import-for-side-effect: it builds a non-exported Hono `app`,
-// `await loadCache()`s, then `serve({ fetch: app.fetch, ... })`. To reach the
-// router without binding a real port and without touching server.ts on disk
-// (git diff must stay empty), `@hono/node-server`'s `serve` is mocked to CAPTURE
-// the `app.fetch` it is handed. Driving `new Request(...)` through that captured
-// fetch is exactly what Hono's `app.request()` does internally.
+// createApp() is a pure factory (bootstrap lives in index.ts), so tests import
+// it directly and drive `app.fetch` — no serve() mock, no port bind. Exhaustive
+// query-parameter parsing lives in parse-request.test.ts; this file still hits
+// the 400s through the route so the wiring cannot drift.
 //
 // Boundaries mocked: the Overpass fetcher (network), and log.js (so /logs can
 // assert what getRecentLogs receives and so runs don't spew structured lines).
@@ -25,11 +23,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// serveMock is hoisted so the vi.mock factory (itself hoisted above imports) can
-// reference it. server.ts calls serve() exactly once at import; we read the
-// captured options.fetch back out.
-const { serveMock } = vi.hoisted(() => ({ serveMock: vi.fn() }));
-vi.mock('@hono/node-server', () => ({ serve: serveMock }));
 vi.mock('../src/overpass.js', () => ({ fetchJunctionsFromOverpass: vi.fn() }));
 vi.mock('../src/log.js', () => ({ log: vi.fn(), getRecentLogs: vi.fn() }));
 
@@ -42,21 +35,18 @@ function tmpCacheFile(): string {
 
 type FetchFn = (req: Request) => Promise<Response>;
 
-// Fresh server instance with an isolated empty cache. resetModules + a per-test
+// Fresh app instance with an isolated empty cache. resetModules + a per-test
 // CACHE_PATH give cache.ts a clean store; re-importing the mocked modules yields
-// fresh vi.fns that the freshly-imported server.ts wires to. Returns the captured
-// app.fetch plus the boundary mocks so tests can program/inspect them.
+// fresh vi.fns that the freshly-imported createApp() wires to.
 async function loadServer() {
     vi.resetModules();
     process.env.CACHE_PATH = tmpCacheFile();
-    serveMock.mockClear();
     const overpass = await import('../src/overpass.js');
     const logMod = await import('../src/log.js');
-    await import('../src/server.js');
-    const opts = serveMock.mock.calls[0]?.[0] as { fetch: FetchFn } | undefined;
-    if (!opts) throw new Error('serve() was not called — server did not start');
+    const { createApp } = await import('../src/app.js');
+    const app = createApp();
     return {
-        fetch: opts.fetch,
+        fetch: app.fetch as FetchFn,
         fetchMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
         getRecentLogs: logMod.getRecentLogs as unknown as Mock,
     };
@@ -358,7 +348,7 @@ describe('GET /junctions — partial start params → 400', () => {
 });
 
 // ── GET /logs — n-param parsing (authorized) ──────────────────────────────────
-// server.ts parses `n` and applies a NaN fallback (→ 100) before handing it to
+// app.ts parses `n` and applies a NaN fallback (→ 100) before handing it to
 // getRecentLogs; the clamp to [1,500] lives in log.ts (out of scope here, mocked).
 // /logs is CLOSED by default (see the auth-gate block below), so these parse-path
 // tests must present the LOGS_TOKEN bearer to reach getRecentLogs at all.

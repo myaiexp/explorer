@@ -6,9 +6,11 @@ Server-side cache for OSM road-junction lookups, fronting the public Overpass AP
 
 ```bash
 pnpm install
-pnpm dev                    # tsx watch
-pnpm build && pnpm start    # production
+pnpm dev                    # tsx watch src/index.ts
+pnpm build && pnpm start    # production (`node dist/index.js`)
 ```
+
+Layout mirrors the cloud-backup server: `src/app.ts` exports `createApp()` (routes only), `src/index.ts` owns `await loadCache()` + `serve()`, `src/lib/parse-request.ts` validates `/junctions` query params. `src/server.ts` is a one-line import of `index.ts` so a systemd unit still `ExecStart=`ing `dist/server.js` keeps working.
 
 Listens on `127.0.0.1:5001` (override with `PORT`/`HOST`). Persists cache to `./data/cache.json` (override with `CACHE_PATH`).
 
@@ -75,4 +77,4 @@ Format: ISO timestamp + level + key=value pairs.
 
 ## Deploy
 
-Lives at `/home/shelly/Projects/explorer/junctions-cache` on shelly (`WorkingDirectory` of `wander-junctions.service`; bare repo `ssh://shelly/home/shelly/explorer.git`). Pushed via the `shelly` git remote — the post-receive hook checks out, runs `pnpm install --frozen-lockfile && pnpm build` when `junctions-cache/` changed, and restarts the unit. Persistent cache: `CACHE_PATH=/home/shelly/.local/state/wander-junctions/cache.json`. VPS nginx proxies `https://mase.fi/api/junctions/` → `100.69.160.113:5001`. Same-origin from `/explorer` — no CORS (the client is `fetch('/api/junctions/junctions')`); the edge `limit_req` is the DoS control.
+Lives at `/home/shelly/Projects/explorer/junctions-cache` on shelly (`WorkingDirectory` of `wander-junctions.service`; bare repo `ssh://shelly/home/shelly/explorer.git`). Canonical unit file: `deploy/wander-junctions.service` (`ExecStart=/usr/bin/node dist/index.js`). Pushed via the `shelly` git remote — the post-receive hook checks out, runs `pnpm install --frozen-lockfile && pnpm build` when `junctions-cache/` changed, and restarts the unit. Persistent cache: `CACHE_PATH=/home/shelly/.local/state/wander-junctions/cache.json`. VPS nginx proxies `https://mase.fi/api/junctions/` → `100.69.160.113:5001`. Same-origin from `/explorer` — no CORS (the client is `fetch('/api/junctions/junctions')`); the edge `limit_req` is the DoS control.

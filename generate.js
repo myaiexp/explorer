@@ -72,6 +72,7 @@ async function generateDestination() {
                 startLat, startLng, destLat: dest.lat, destLng: dest.lng,
                 outbound: outboundRoute, ret: returnRoute,
                 locationInput, destName, tripMode, straightMax, straightMin,
+                poiCategory: rawLocationType,
             });
             session.junctions = junctions;
             // Missing outbound means routing built nothing. displayRoute still

@@ -1,0 +1,20 @@
+[Unit]
+Description=Wander junctions cache (Overpass proxy)
+After=network.target
+
+[Service]
+Type=simple
+User=shelly
+WorkingDirectory=/home/shelly/Projects/explorer/junctions-cache
+ExecStart=/usr/bin/node dist/index.js
+Environment=PORT=5001
+Environment=HOST=100.69.160.113
+Environment=CACHE_PATH=/home/shelly/.local/state/wander-junctions/cache.json
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

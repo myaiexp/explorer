@@ -107,6 +107,16 @@ describe('restoreResult — re-display must not persist', () => {
     expect(args.outbound.coords).toEqual([[62.1, 25.7], [62.2, 25.8]]);
   });
 
+  test('forwards entry.poiCategory so restore does not inherit the live form', () => {
+    restoreResult(sampleEntry({ poiCategory: 'culture' }));
+    expect(displayRouteCalls[0].poiCategory).toBe('culture');
+  });
+
+  test('passes poiCategory: null when the entry has none (history/favorite)', () => {
+    restoreResult(sampleEntry());
+    expect(displayRouteCalls[0].poiCategory).toBeNull();
+  });
+
   test('legacy entries without per-leg distances assign the total to outbound', () => {
     restoreResult(sampleEntry({
       routeDistance: undefined,
@@ -154,6 +164,20 @@ describe('buildAndDisplay — successful build persists', () => {
     expect(saveToHistoryCalls).toHaveLength(1);
     // Junction pool from the build is stashed on the session that was persisted.
     expect(saveToHistoryCalls[0].junctions).toEqual([{ lat: 62.15, lng: 25.75 }]);
+    // Pick-on-map / share-link have no category of their own; passing null
+    // (not omitting the field) is what stops displayRoute inheriting the form.
+    expect(displayRouteCalls[0].poiCategory).toBeNull();
+  });
+
+  test('forwards an explicit poiCategory option through to displayRoute', async () => {
+    await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'x',
+      destName: 'y',
+      poiCategory: 'activity',
+      onProgress: () => {},
+    });
+    expect(displayRouteCalls[0].poiCategory).toBe('activity');
   });
 
   test('spreads readRouteBuildOptions into buildRouteForMode', async () => {
