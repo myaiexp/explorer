@@ -34,6 +34,7 @@ function showConsentToast() {
         acceptBtn.textContent = 'Accept';
 
         let settled = false;
+        let autoTimer;
         const settle = (choice) => {
             if (settled) return;
             settled = true;
@@ -47,6 +48,11 @@ function showConsentToast() {
             settle('declined');
         });
         acceptBtn.addEventListener('click', () => {
+            if (settled) return;
+            // Drop the auto-decline timer as soon as Accept is in flight —
+            // otherwise a slow POST /accounts that straddles the 30s mark
+            // would persist declined on top of (or instead of) the accept.
+            clearTimeout(autoTimer);
             acceptBtn.disabled = true;
             declineBtn.disabled = true;
             acceptBtn.textContent = 'Saving…';
@@ -63,14 +69,14 @@ function showConsentToast() {
         buttons.appendChild(declineBtn);
         buttons.appendChild(acceptBtn);
         toast.appendChild(buttons);
-        document.body.appendChild(toast);
 
-        const autoTimer = setTimeout(() => {
+        autoTimer = setTimeout(() => {
             if (!settled) {
                 ExplorerSync.decline();
                 settle('declined');
             }
         }, 30000);
+        document.body.appendChild(toast);
     });
 }
 

@@ -34,7 +34,8 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 | `export.js` | `export-download.test.js`, `export.test.js` |
 | `visited.js` | `mark-visited.test.js`, `visited-sync.test.js` |
 | `visits-io.js` | `visits-import.test.js` |
-| `osrm.js` | `loop-vias.test.js`, `corridor-junctions.test.js` |
+| `osrm.js` | `osrm.test.js`, `loop-vias.test.js`, `corridor-junctions.test.js` |
+| `cloud-backup-ui.js` | `cloud-backup-ui.test.js` |
 | `overpass.js` | `overpass-exclude-parity.test.js`, `overpass.test.js`, `overpass-parse.test.js` |
 | `route-view.js` | `route-view.test.js` (visited-button derivation still in `mark-visited.test.js`) |
 
