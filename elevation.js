@@ -1,8 +1,9 @@
 // Route elevation profile — Open-Meteo sampling + hand-built SVG chart. Holds no
 // map or route-color state of its own: the chart color is passed in by the
-// caller, keeping this module DOM-only and dependency-free. Loaded after net.js
-// (for fetchWithTimeout) and before app.js (and before export.js, which uses
-// fetchElevations for FIT export); used there as globals.
+// caller. Loaded after net.js (for fetchWithTimeout) and geo-utils.js (for
+// haversineM); export.js uses fetchElevations for FIT export. Sampling is an
+// Open-Meteo URL-length budget — the public contract is one altitude per
+// input coord, interpolated by distance along the path.
 
 // Tighter than net.js's 20 s default: elevation is optional decoration on the map
 // path, but confirmFITExport AWAITS it after the modal has already closed — so a
@@ -11,19 +12,67 @@
 // to hold the export hostage.
 const ELEVATION_TIMEOUT_MS = 10000;
 
-// Sample up to 100 points evenly along the route and fetch their elevations from
-// Open-Meteo. Returns the elevation array, or null on a non-OK response; rejects
-// if the request times out (every caller already treats a rejection as "no
-// elevation" and carries on).
-async function fetchElevations(coords) {
-    // Sample up to 100 points evenly along the route
-    const maxPts = 100;
-    const step = Math.max(1, Math.floor(coords.length / maxPts));
-    const sampled = [];
-    for (let i = 0; i < coords.length; i += step) sampled.push(coords[i]);
-    if (sampled[sampled.length - 1] !== coords[coords.length - 1]) {
-        sampled.push(coords[coords.length - 1]);
+// Vertex indices sent to Open-Meteo: every `step` along the polyline, plus the
+// last vertex so the series always covers the full path.
+function sampleRouteIndices(n, maxPts = 100) {
+    if (n <= 0) return [];
+    const step = Math.max(1, Math.floor(n / maxPts));
+    const indices = [];
+    for (let i = 0; i < n; i += step) indices.push(i);
+    if (indices[indices.length - 1] !== n - 1) indices.push(n - 1);
+    return indices;
+}
+
+function lerpElevation(e0, e1, t) {
+    if (e0 == null && e1 == null) return 0;
+    if (e0 == null) return e1;
+    if (e1 == null) return e0;
+    return e0 + t * (e1 - e0);
+}
+
+// Stretch a sampled elevation series back onto every vertex of `coords` by
+// distance along the path. Returns null if the sample counts don't line up —
+// callers treat null as "no elevation" rather than a misaligned series.
+function expandElevations(coords, sampledElevations, sampleIndices) {
+    if (!sampledElevations || !sampleIndices) return null;
+    if (sampledElevations.length !== sampleIndices.length) return null;
+    if (sampleIndices.length === 0) return coords.length === 0 ? [] : null;
+    if (sampledElevations.length === coords.length) return sampledElevations;
+
+    const n = coords.length;
+    const cum = new Float64Array(n);
+    for (let i = 1; i < n; i++) {
+        cum[i] = cum[i - 1] + haversineM(
+            coords[i - 1][0], coords[i - 1][1],
+            coords[i][0], coords[i][1],
+        );
     }
+
+    const out = new Array(n);
+    let s = 0;
+    const lastS = sampleIndices.length - 1;
+    for (let i = 0; i < n; i++) {
+        while (s < lastS && cum[sampleIndices[s + 1]] < cum[i]) s++;
+        if (s >= lastS) {
+            out[i] = sampledElevations[lastS];
+            continue;
+        }
+        const d0 = cum[sampleIndices[s]];
+        const d1 = cum[sampleIndices[s + 1]];
+        const span = d1 - d0;
+        const t = span <= 0 ? 0 : Math.min(1, Math.max(0, (cum[i] - d0) / span));
+        out[i] = lerpElevation(sampledElevations[s], sampledElevations[s + 1], t);
+    }
+    return out;
+}
+
+// Sample up to 100 points for the Open-Meteo request, then interpolate the
+// series back onto every input coord. Returns one elevation per coord, or null
+// on a non-OK / unusable response; rejects if the request times out (every
+// caller already treats a rejection as "no elevation" and carries on).
+async function fetchElevations(coords) {
+    const indices = sampleRouteIndices(coords.length);
+    const sampled = indices.map(i => coords[i]);
 
     const lats = sampled.map(c => c[0].toFixed(4)).join(',');
     const lngs = sampled.map(c => c[1].toFixed(4)).join(',');
@@ -34,7 +83,7 @@ async function fetchElevations(coords) {
     );
     if (!res.ok) return null;
     const data = await res.json();
-    return data.elevation || null;
+    return expandElevations(coords, data.elevation || null, indices);
 }
 
 // Render the elevation profile SVG (gradient area + line + gain/loss/range stats)

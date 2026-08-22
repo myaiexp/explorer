@@ -1,21 +1,20 @@
 /**
- * Tests for elevation.js — the Open-Meteo sampling half. Focus: the request goes
- * through net.js's fetchWithTimeout, not bare fetch (audit #5410 / #5444).
+ * Tests for elevation.js — Open-Meteo sampling + per-coord interpolation.
+ * Focus: the request goes through net.js's fetchWithTimeout, not bare fetch
+ * (audit #5410 / #5444), and the returned array is one altitude per input
+ * coord even when the request itself is downsampled (finding #7300 / #7302).
  *
- * That distinction is load-bearing on the FIT-export path: confirmFITExport
- * AWAITS fetchElevations after the modal has already closed, so without a timeout
- * a stalled Open-Meteo leaves the user with no file, no error, and no spinner
- * until the browser's own multi-minute socket default fires.
+ * The timeout is load-bearing on the FIT-export path: confirmFITExport AWAITS
+ * fetchElevations after the modal has already closed, so without it a stalled
+ * Open-Meteo leaves the user with no file, no error, and no spinner until the
+ * browser's own multi-minute socket default fires.
  */
 
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
-// Both are plain browser scripts that register their helpers on globalThis
-// (net.js's fetchWithTimeout is what elevation.js resolves at call time);
-// helpers/load.js evaluates them once here, mirroring index.html's order — net.js
-// first.
-loadScripts('net', 'elevation');
+// SCRIPT_DEPS.elevation → net (fetchWithTimeout) + geo-utils (haversineM).
+loadScripts('elevation');
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -65,5 +64,36 @@ describe('fetchElevations', () => {
     test('a non-OK response yields null (unchanged contract for both callers)', async () => {
         global.fetch = vi.fn(() => Promise.resolve({ ok: false, status: 503 }));
         await expect(fetchElevations(coords)).resolves.toBeNull();
+    });
+
+    // Finding #7302: a 3-point route never exercises sampling (step stays 1).
+    // 400 coords → step 4 → ~101 Open-Meteo points; the public contract is still
+    // one altitude per input coord, interpolated back onto the full polyline.
+    test('a long polyline samples the Open-Meteo request but returns one elevation per coord', async () => {
+        const n = 400;
+        const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
+        global.fetch = vi.fn((url) => {
+            const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({
+                    elevation: Array.from({ length: nLats }, (_, i) => 100 + i),
+                }),
+            });
+        });
+
+        const result = await fetchElevations(long);
+        expect(result).toHaveLength(n);
+
+        const [url] = global.fetch.mock.calls[0];
+        const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+        expect(nLats).toBeLessThan(n);
+        expect(nLats).toBeLessThanOrEqual(101);
+
+        // Samples at 0, 4, … plus the last vertex. First sample → 100; last → 100+nLats-1.
+        expect(result[0]).toBe(100);
+        expect(result[n - 1]).toBe(100 + nLats - 1);
+        // Index 2 sits halfway (by distance, equal spacing) between samples 0 and 4.
+        expect(result[2]).toBeCloseTo(100.5, 5);
     });
 });

@@ -225,4 +225,44 @@ describe('confirmFITExport', () => {
         expect(FitEncoder.encodeCourse.mock.calls[0][0].elevations).toBe(elev);
         expect(lastDownload).toBe('park-x.fit');
     });
+
+    test('drops elevations whose length does not match the exported coords', async () => {
+        const coordsOut = [[62.1, 25.7], [62.2, 25.8], [62.3, 25.9]];
+        globalThis.getCurrentSession = () => sessionWith(coordsOut);
+        // Sampled Open-Meteo series: 2 values for 3 coords. Forwarding this
+        // verbatim is the production bug — encodeCourse would stamp the rest
+        // as sea level. confirmFITExport must drop them instead.
+        globalThis.fetchElevations = vi.fn(() => Promise.resolve([11, 22]));
+        await confirmFITExport();
+        expect(FitEncoder.encodeCourse.mock.calls[0][0].elevations).toBeNull();
+        expect(lastDownload).toBe('park-x.fit');
+    });
+
+    // Finding #7302: the suites above stub fetchElevations to matching-length
+    // arrays, so a downsample/full-coords glue error cannot fail them. Load
+    // the real sampler (fetch mocked) and assert the encoder sees one altitude
+    // per exported coord.
+    test('real fetchElevations interpolates a long polyline to encodeCourse', async () => {
+        loadScripts('elevation');
+        const n = 400;
+        const coordsOut = Array.from({ length: n }, (_, i) => [62.1 + i * 0.001, 25.7]);
+        globalThis.getCurrentSession = () => sessionWith(coordsOut);
+        globalThis.fetch = vi.fn((url) => {
+            const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({
+                    elevation: Array.from({ length: nLats }, (_, i) => 50 + i),
+                }),
+            });
+        });
+
+        await confirmFITExport();
+
+        const arg = FitEncoder.encodeCourse.mock.calls[0][0];
+        expect(arg.coords).toHaveLength(n);
+        expect(arg.elevations).toHaveLength(n);
+        expect(arg.elevations[0]).toBe(50);
+        expect(lastDownload).toBe('park-x.fit');
+    });
 });

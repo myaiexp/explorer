@@ -1,10 +1,13 @@
 // The route view — render a resolved route onto the map + result panel and make
 // it the current session.
 //
-// Loaded after map-view.js (markers/polylines/route color), session.js
-// (computeRouteTotals/routeSessionFields), elevation.js, geometry.js,
-// session-state.js, favorites.js and result-panel.js — all resolved as globals at
-// call time. Every path that puts a route on screen ends up in displayRoute:
+// Loaded after geometry.js, session-state.js and result-panel.js (the
+// collaborators tests load for real).
+//
+// map-view.js (markers/polylines/route color), session.js
+// (computeRouteTotals/routeSessionFields), elevation.js and favorites.js
+// resolve as globals at call time — tests fake them. Every path that puts a
+// route on screen ends up in displayRoute:
 // generate.js directly, pick-mode.js / share-link.js / the history + favorites
 // lists via route-restore.js, and spread-control.js via renderRouteTail.
 

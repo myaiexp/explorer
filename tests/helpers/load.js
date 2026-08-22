@@ -56,6 +56,8 @@ export const SCRIPT_DEPS = {
     'novelty':      ['geo-utils'],
     'screening':    ['geo-utils', 'novelty'],  // novelty supplies partialShuffle (capPool dep)
     'fit-encoder':  ['geo-utils'],             // haversineM
+    // Sampling interpolates with haversineM; fetch goes through fetchWithTimeout.
+    'elevation':    ['net', 'geo-utils'],
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
     'osrm':         ['net', 'geometry', 'loop-quality'],
     'overpass':     ['net', 'geo-utils'],      // haversineKm + bboxAround

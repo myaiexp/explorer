@@ -54,6 +54,10 @@ async function confirmFITExport() {
 
     let elevations = null;
     try { elevations = await fetchElevations(coords); } catch { /* optional */ }
+    // encodeCourse indexes elevations[i] as coords[i]. A sampled Open-Meteo
+    // series is the wrong length; dropping it omits altitude rather than
+    // stamping the tail of the course as sea level (finding #7300).
+    if (elevations && elevations.length !== coords.length) elevations = null;
 
     const name = destName || 'Wander route';
     const bytes = FitEncoder.encodeCourse({ name, coords, coursePoints, elevations });

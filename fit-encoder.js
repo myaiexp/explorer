@@ -93,7 +93,12 @@
         const name = (input.name || 'Wander route').slice(0, 15);
         const coords = input.coords;
         if (!coords || coords.length < 2) throw new Error('encodeCourse: need >=2 coordinates');
-        const elevations = input.elevations || null;
+        // One altitude per coord, or none. A short sampled series would stamp
+        // the first N records with every-Nth vertex's height and the rest as
+        // sea level (finding #7300) — drop the field rather than invent 0 m.
+        const elevations = (input.elevations && input.elevations.length === coords.length)
+            ? input.elevations
+            : null;
         const coursePoints = input.coursePoints || [];
 
         // Cumulative distance per coord

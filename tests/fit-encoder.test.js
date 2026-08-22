@@ -441,4 +441,17 @@ describe('elevation encoding', () => {
     test('null elevation entry encodes as 0 m → 2500', () => {
         expect(altitudes([null, 0])).toEqual([2500, 2500]);
     });
+
+    test('mismatched elevation length omits altitude rather than filling 0 m', () => {
+        // One sample for two coords — the downsample/full-coords glue bug.
+        // Writing altitude on the second RECORD as 0 m (sea level) is the
+        // failure mode; omitting the field entirely is the safe fallback.
+        const short = enc.encodeCourse({ name: 'Elev', coords, elevations: [100] });
+        const long = enc.encodeCourse({ name: 'Elev', coords, elevations: [100, 200, 300] });
+        for (const out of [short, long]) {
+            const recs = parseFit(out).messages.filter((m) => m.globalMesg === G.RECORD);
+            expect(recs).toHaveLength(coords.length);
+            for (const rec of recs) expect(rec.fields[2]).toBeUndefined();
+        }
+    });
 });

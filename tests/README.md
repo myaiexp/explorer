@@ -15,9 +15,9 @@ Backend DB safety (`*_test` hard-throw, `fileParallelism: false`) lives in CLAUD
 
 `SCRIPT_DEPS` is the single copy of index.html's load-order graph. Direct dependencies only — `loadScripts` walks transitively. A module that gains a real dependency is one edit here rather than a hunt through every test that loads it. `helpers/load.test.js` fails RED if an edge contradicts index.html's `<script>` order.
 
-Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, geometry, loop-quality]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
+Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, geometry, loop-quality]`, `elevation → [net, geo-utils]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
 
-`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check.
+`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check. `elevation` is a key (its tests load it for real, with net + geo-utils); route-view's Loaded-after sentence lists only the real-load collaborators so the same check does not pull elevation.js into those fakes.
 
 ### Transform-before-eval
 
