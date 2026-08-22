@@ -58,6 +58,8 @@ export const SCRIPT_DEPS = {
     'fit-encoder':  ['geo-utils'],             // aliases haversineM
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
     'osrm':         ['net', 'geometry', 'loop-quality'],
+    // geometry → geo-utils (bboxAround + haversine); net is fetchWithTimeout.
+    'overpass':     ['net', 'geometry'],
     'result-panel': ['session-state'],
     // geometry + result-panel are pure/real collaborators named in the header;
     // map-view / session / elevation / favorites are faked by route-view tests.

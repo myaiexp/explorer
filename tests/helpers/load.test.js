@@ -113,6 +113,9 @@ describe('SCRIPT_DEPS', () => {
         expect(SCRIPT_DEPS.sync).toEqual(
             expect.arrayContaining(['sync-flush', 'sync-sections']),
         );
+        expect(SCRIPT_DEPS.overpass).toEqual(
+            expect.arrayContaining(['net', 'geometry']),
+        );
     });
 });
 

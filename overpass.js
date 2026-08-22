@@ -26,11 +26,20 @@ async function queryOverpass(query, onProgress) {
                 await sleep(15000);
             }
         }
-        const response = await fetchWithTimeout('https://overpass-api.de/api/interpreter', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'data=' + encodeURIComponent(query)
-        }, OVERPASS_QUERY_TIMEOUT_MS);
+        let response;
+        try {
+            response = await fetchWithTimeout('https://overpass-api.de/api/interpreter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'data=' + encodeURIComponent(query)
+            }, OVERPASS_QUERY_TIMEOUT_MS);
+        } catch {
+            // Timeout / AbortError / network — retry like the junctions-cache twin
+            // (it retries any non-4xx). HTTP 429/504 continue below; other HTTP
+            // statuses fail immediately. An uncaught throw used to skip the rest
+            // of the budget and surface as "empty Overpass → random fallback".
+            continue;
+        }
         if (response.ok) return response.json();
         if (response.status === 429 || response.status === 504) continue;
         throw new Error('Failed to fetch POI data. Please try again.');
