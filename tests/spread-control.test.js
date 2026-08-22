@@ -1,0 +1,209 @@
+// @vitest-environment jsdom
+/**
+ * Tests for spread-control.js — slider/stepper debounce, re-arm while a build
+ * owns the app, cachedJunctions reuse, and the session rewrite that must keep
+ * visitId so the mark-visited button stays honest (finding #7067).
+ *
+ * spread-control.js binds the slider listener at load time, so the DOM has to
+ * exist before loadScripts. Collaborators other than loading.js / session-state.js
+ * / session.js are faked on globalThis; withLoading + isBuilding stay real so
+ * the retry path is the production mutex, not a stub of it.
+ */
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { loadScripts } from './helpers/load.js';
+
+const SPREAD = { offsetMult: 0.5, viaTs: [0.25, 0.5, 0.75] };
+const JUNCTIONS = [{ lat: 62.15, lng: 25.75 }];
+const NEW_JUNCTIONS = [{ lat: 62.16, lng: 25.76 }];
+const OUTBOUND = { coords: [[62.1, 25.7], [62.2, 25.8]], distance: 1200, duration: 700, steps: [] };
+const RETURN = { coords: [[62.2, 25.8], [62.1, 25.7]], distance: 1100, duration: 650, steps: [] };
+
+const FORM_HTML = `
+  <input type="range" id="spreadSlider" min="0" max="100" value="50" step="5">
+  <input type="checkbox" id="smartRouting">
+  <input type="checkbox" id="winterMode">
+  <input id="maxDistance" value="5">
+  <div id="loading"><p>Finding your random destination…</p></div>
+  <button id="generateBtn"></button>
+`;
+
+function deferred() {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+}
+
+function baseSession(extra = {}) {
+    return {
+        visitId: 'visit-1',
+        startLat: 62.1,
+        startLng: 25.7,
+        destLat: 62.2,
+        destLng: 25.8,
+        destName: 'Park',
+        tripMode: 'round',
+        junctions: JUNCTIONS,
+        distance: 2.0,
+        ...extra,
+    };
+}
+
+let errors;
+let warnings;
+let clearRouteLines;
+let buildRouteForMode;
+let renderRouteTail;
+
+beforeEach(() => {
+    errors = [];
+    warnings = [];
+    document.body.innerHTML = FORM_HTML;
+
+    globalThis.showError = (msg) => { errors.push(msg); };
+    globalThis.showWarning = (msg) => { warnings.push(msg); };
+    globalThis.getRouteColor = () => '#ff0000';
+    globalThis.getSpreadParams = () => SPREAD;
+    clearRouteLines = vi.fn();
+    globalThis.clearRouteLines = clearRouteLines;
+    renderRouteTail = vi.fn(() => ({ totalWalkKm: 2.4 }));
+    globalThis.renderRouteTail = renderRouteTail;
+    buildRouteForMode = vi.fn(async () => ({
+        outbound: OUTBOUND,
+        return: RETURN,
+        junctions: NEW_JUNCTIONS,
+    }));
+    globalThis.buildRouteForMode = buildRouteForMode;
+
+    vi.useFakeTimers();
+    loadScripts('session-state', 'session', 'loading', 'spread-control');
+});
+
+afterEach(() => {
+    vi.useRealTimers();
+});
+
+function fireSlider() {
+    document.getElementById('spreadSlider').dispatchEvent(new Event('input'));
+}
+
+describe('slider input', () => {
+    test('no session → no schedule', async () => {
+        fireSlider();
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+        expect(clearRouteLines).not.toHaveBeenCalled();
+    });
+
+    test('coalesces rapid input into one reroute after the 400ms debounce', async () => {
+        setCurrentSession(baseSession());
+        fireSlider();
+        fireSlider();
+        fireSlider();
+        await vi.advanceTimersByTimeAsync(399);
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(buildRouteForMode).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('runSpreadReroute retry while building', () => {
+    test('input while a build owns the app re-arms after 400ms and runs once the mutex clears', async () => {
+        setCurrentSession(baseSession());
+        const held = deferred();
+        const build = withLoading(async () => { await held.promise; });
+
+        fireSlider();
+        await vi.advanceTimersByTimeAsync(400); // debounce → sees isBuilding, re-arms
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(400); // retry, still building, re-arms again
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+
+        held.resolve();
+        await build;
+        expect(isBuilding()).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(400);
+        expect(buildRouteForMode).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('rerouteWithCurrentSpread', () => {
+    test('preserves visitId, reuses cachedJunctions, and writes the new junctions', async () => {
+        const session = baseSession();
+        setCurrentSession(session);
+        document.getElementById('smartRouting').checked = true;
+        document.getElementById('winterMode').checked = true;
+
+        await rerouteWithCurrentSpread();
+
+        expect(buildRouteForMode).toHaveBeenCalledTimes(1);
+        const [lat, lng, dLat, dLng, opts] = buildRouteForMode.mock.calls[0];
+        expect([lat, lng, dLat, dLng]).toEqual([62.1, 25.7, 62.2, 25.8]);
+        expect(opts.cachedJunctions).toBe(JUNCTIONS);
+        expect(opts.tripMode).toBe('round');
+        expect(opts.smartRouting).toBe(true);
+        expect(opts.winterMode).toBe(true);
+        expect(opts.spread).toBe(SPREAD);
+        expect(opts.maxKm).toBe(5);
+        expect(clearRouteLines).toHaveBeenCalledTimes(1);
+
+        const next = getCurrentSession();
+        expect(next).not.toBe(session);
+        expect(next.visitId).toBe('visit-1');
+        expect(next.destName).toBe('Park');
+        expect(next.junctions).toBe(NEW_JUNCTIONS);
+        expect(next.distance).toBe(2.4);
+        expect(next.routeCoords).toBe(OUTBOUND.coords);
+        expect(next.returnRouteCoords).toBe(RETURN.coords);
+    });
+
+    test('one-way keeps the previous junctions (OSRM does not return a loop set)', async () => {
+        setCurrentSession(baseSession({ tripMode: 'one-way' }));
+        await rerouteWithCurrentSpread();
+        expect(getCurrentSession().junctions).toBe(JUNCTIONS);
+        expect(getCurrentSession().visitId).toBe('visit-1');
+        expect(buildRouteForMode.mock.calls[0][4].smartRouting).toBe(false);
+    });
+
+    test('buildRouteForMode throw shows the error without wiping the previous session', async () => {
+        const session = baseSession();
+        setCurrentSession(session);
+        buildRouteForMode.mockRejectedValue(new Error('OSRM unreachable'));
+
+        await rerouteWithCurrentSpread();
+
+        expect(errors).toEqual(['OSRM unreachable']);
+        expect(getCurrentSession()).toBe(session);
+        expect(getCurrentSession().visitId).toBe('visit-1');
+        expect(renderRouteTail).not.toHaveBeenCalled();
+    });
+
+    test('no session is a no-op', async () => {
+        await rerouteWithCurrentSpread();
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+    });
+});
+
+describe('adjustSpread', () => {
+    test('clamps to 0–100 and still moves the slider with no session (no reroute)', async () => {
+        const slider = document.getElementById('spreadSlider');
+        slider.value = '5';
+        adjustSpread(-10);
+        expect(slider.value).toBe('0');
+        slider.value = '95';
+        adjustSpread(10);
+        expect(slider.value).toBe('100');
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+    });
+
+    test('with a session, reroutes after the 200ms stepper debounce', async () => {
+        setCurrentSession(baseSession());
+        adjustSpread(5);
+        expect(document.getElementById('spreadSlider').value).toBe('55');
+        await vi.advanceTimersByTimeAsync(199);
+        expect(buildRouteForMode).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(buildRouteForMode).toHaveBeenCalledTimes(1);
+    });
+});

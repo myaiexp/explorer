@@ -31,7 +31,7 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 | Source | Tests |
 | --- | --- |
 | `bbox.js` | `in-finland.test.js` |
-| `export.js` | `export-download.test.js` |
+| `export.js` | `export-download.test.js`, `export.test.js` |
 | `visited.js` | `mark-visited.test.js`, `visited-sync.test.js` |
 | `visits-io.js` | `visits-import.test.js` |
 | `osrm.js` | `loop-vias.test.js`, `corridor-junctions.test.js` |
