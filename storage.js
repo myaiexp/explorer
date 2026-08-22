@@ -1,8 +1,9 @@
 // localStorage accessors — the array-backed collections (visits, saved
 // locations, favorites, history), their storage keys, and a quota-aware writer.
 // Writes funnel through safeSetItem: on a full-quota QuotaExceededError it frees
-// space by trimming route geometry from old visits (the cloud backup keeps the
-// full rows) and retries, surfacing a toast instead of silently dropping a walk.
+// space by trimming route geometry from old visits (the cloud still stores full
+// rows; GET /:username returns them only for the newest GET_GEOMETRY_KEEP) and
+// retries, surfacing a toast instead of silently dropping a walk.
 // Otherwise DOM-free and network-free; the toast is a guarded globalThis lookup
 // so unit tests (and pre-toast load order) simply skip it.
 
@@ -12,10 +13,11 @@ const FAVORITES_KEY = 'walk_favorites';
 const HISTORY_KEY = 'walk_history';
 
 // Newest N visits keep their full outbound/return polylines; older ones are
-// trimmed to metadata-only when localStorage runs out of room (the cloud backup,
-// if enabled, still holds the full rows). 50 keeps recent routes drawable while
-// freeing the bulk of the geometry — the routeCoords/returnRouteCoords arrays are
-// the only large fields on a visit.
+// trimmed to metadata-only when localStorage runs out of room. Twin of server
+// GET_GEOMETRY_KEEP: the cloud still STORES full rows (the archive), but GET
+// /:username returns geometry only for the newest N so the init-path merge
+// stays bounded (`?geometry=full` returns them). 50 keeps recent routes
+// drawable — the routeCoords/returnRouteCoords arrays are the only large fields.
 const VISIT_GEOMETRY_KEEP = 50;
 const QUOTA_TRIMMED_MSG = 'Storage was full — trimmed old route details to make room. Turn on cloud backup to keep full history.';
 const QUOTA_FULL_MSG = 'Storage is full. Export & delete old walks, or turn on cloud backup.';
@@ -91,7 +93,8 @@ function compactVisitsBlob(value) {
 // Free quota for an unrelated write (e.g. the sync outbox) by shrinking the
 // separately-persisted visits collection. Writes the slimmed array back directly
 // — NOT via the synced path — so the local trim never propagates to the cloud
-// backup, which must retain full geometry. Returns true if it freed anything.
+// backup, which stores full geometry (GET /:username returns it only for the
+// newest GET_GEOMETRY_KEEP). Returns true if it freed anything.
 function reclaimVisitGeometry() {
     const visits = readStoredArray(VISITS_KEY);
     if (!stripOldVisitGeometry(visits)) return false;

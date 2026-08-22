@@ -9,7 +9,7 @@ import { schema } from '../db.js';
 import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';
 import { accountAuth } from '../middleware/auth.js';
 import { isObject, type AnyRecord } from '../lib/type-guards.js';
-import { MAX_WRITE_BODY_BYTES } from '../lib/validate-fields.js';
+import { MAX_ROWS_PER_SECTION, MAX_WRITE_BODY_BYTES } from '../lib/validate-fields.js';
 import {
   validateTripRow,
   validateVisitRow,
@@ -86,13 +86,37 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
     // boundary, hence the localized casts.)
     const { id: _id, username: _username, ...cols } = built.row as AnyRecord;
     const set = { ...cols, updatedAt: sql`now()` };
-    await db
-      .insert(table)
-      .values(built.row)
-      .onConflictDoUpdate({
-        target: [table.username, table.id],
-        set: set as PgUpdateSetSource<T>,
-      });
+
+    // Row-count gate on INSERT (finding #7278). Updates of an existing id are
+    // always allowed so a full account can still edit. Lock the account row so
+    // two concurrent new-id PUTs cannot both observe count < cap and both insert.
+    const capError = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT 1 FROM accounts WHERE username = ${username} FOR UPDATE`);
+      // `from(table)` can't see through the generic Section table — same
+      // opacity as the insert/values cast below.
+      const existing = await tx
+        .select({ id: table.id })
+        .from(table as unknown as typeof schema.visits)
+        .where(and(eq(table.username, username), eq(table.id, id)));
+      if (existing.length === 0) {
+        const [counted] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(table as unknown as typeof schema.visits)
+          .where(eq(table.username, username));
+        if ((counted?.n ?? 0) >= MAX_ROWS_PER_SECTION) {
+          return `section exceeds maximum of ${MAX_ROWS_PER_SECTION} rows`;
+        }
+      }
+      await tx
+        .insert(table)
+        .values(built.row)
+        .onConflictDoUpdate({
+          target: [table.username, table.id],
+          set: set as PgUpdateSetSource<T>,
+        });
+      return null;
+    });
+    if (capError) return c.json({ error: capError }, 409);
 
     return new Response(null, { status: 204 });
   });

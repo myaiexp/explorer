@@ -35,9 +35,18 @@ export const MAX_WRITE_BODY_BYTES = 1_048_576;
 // Aligns roughly with typical browser localStorage ceilings the client backs up.
 export const MAX_IMPORT_BODY_BYTES = 5 * 1_048_576;
 
-// Per-section row cap on bulk import — independent of body bytes, so a million
-// tiny rows still get rejected before the validate/collect loop allocates them.
-export const MAX_IMPORT_ROWS_PER_SECTION = 10_000;
+// Per-section row cap — PUT insert and bulk import. Independent of body bytes,
+// so a million tiny rows (or years of per-walk PUTs) still get rejected.
+// Updates of an existing id are always allowed so a full account can still
+// edit. Finding #7278: the per-row PUT used to have no count bound at all.
+export const MAX_ROWS_PER_SECTION = 10_000;
+export const MAX_IMPORT_ROWS_PER_SECTION = MAX_ROWS_PER_SECTION;
+
+// Newest N visit/history rows on GET /:username keep full polylines; older ones
+// are returned metadata-only so the init-path merge stays bounded. Twin of
+// storage.js VISIT_GEOMETRY_KEEP. The DB still stores full rows (cloud is the
+// archive); `?geometry=full` returns them.
+export const GET_GEOMETRY_KEEP = 50;
 
 // ISO-8601 date/datetime: requires the YYYY-MM-DD prefix AND a Date.parse-able
 // value, length-capped so Date.parse is never handed a huge blob. Rejects

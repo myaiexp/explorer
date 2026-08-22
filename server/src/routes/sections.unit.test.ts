@@ -4,6 +4,7 @@ import { schema } from '../db.js';
 import { sectionsRoutes } from './sections.js';
 import { resetRateLimiter } from '../middleware/rate-limit.js';
 import { hashToken } from '../lib/token-hash.js';
+import { MAX_ROWS_PER_SECTION } from '../lib/validate-fields.js';
 
 // Captures the single insert/delete op a handler issues against the fake Db.
 interface RecordedOp {
@@ -20,17 +21,25 @@ interface RecordedOp {
 // `userExists` models whether the account row exists: true → the select returns
 // the account (auth finds a matching token), false → [] (auth 401s). The handlers
 // no longer re-check existence themselves — accountAuth is the sole gate.
-function makeFakeDb(opts: { userExists: boolean }) {
+function makeFakeDb(opts: { userExists: boolean; rowCount?: number; hasExistingRow?: boolean }) {
   const ops: RecordedOp[] = [];
   const db = {
-    select() {
+    select(shape?: Record<string, unknown>) {
       return {
-        from() {
+        from(table: unknown) {
           return {
             where() {
               // Auth middleware hashes the presented bearer and compares to
               // `.token` (a SHA-256 digest) on row 0.
-              return Promise.resolve(opts.userExists ? [{ username: 'alice', token: hashToken('sekret') }] : []);
+              if (table === schema.accounts) {
+                return Promise.resolve(
+                  opts.userExists ? [{ username: 'alice', token: hashToken('sekret') }] : []
+                );
+              }
+              if (shape && 'n' in shape) {
+                return Promise.resolve([{ n: opts.rowCount ?? 0 }]);
+              }
+              return Promise.resolve(opts.hasExistingRow ? [{ id: 'existing' }] : []);
             },
           };
         },
@@ -55,6 +64,12 @@ function makeFakeDb(opts: { userExists: boolean }) {
           return Promise.resolve();
         },
       };
+    },
+    execute() {
+      return Promise.resolve();
+    },
+    transaction(fn: (tx: unknown) => Promise<unknown>) {
+      return fn(db);
     },
   };
   return { db: db as unknown as Db, ops };
@@ -240,6 +255,28 @@ describe('visits PUT', () => {
     ];
     await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ routeCoords: coords })));
     expect(ops[0].row?.routeCoords).toEqual(coords);
+  });
+
+  it('returns 409 when a new id would exceed the section row cap', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true, rowCount: MAX_ROWS_PER_SECTION });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v-new', jsonReq('PUT', validTrip()));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(String(MAX_ROWS_PER_SECTION));
+    expect(ops).toHaveLength(0);
+  });
+
+  it('still upserts an existing id when the section is at the cap', async () => {
+    const { db, ops } = makeFakeDb({
+      userExists: true,
+      rowCount: MAX_ROWS_PER_SECTION,
+      hasExistingRow: true,
+    });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ distance: 99 })));
+    expect(res.status).toBe(204);
+    expect(ops).toHaveLength(1);
+    expect(ops[0].row).toMatchObject({ id: 'v1', distance: 99 });
   });
 });
 

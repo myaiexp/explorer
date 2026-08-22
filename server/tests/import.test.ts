@@ -4,7 +4,7 @@ import { app, db, truncateAll, createTestAccount, authHeaders, insertTestVisit, 
 import { schema } from '../src/db.js';
 import {
   MAX_IMPORT_BODY_BYTES,
-  MAX_IMPORT_ROWS_PER_SECTION,
+  MAX_ROWS_PER_SECTION,
 } from '../src/lib/validate-fields.js';
 
 beforeEach(async () => {
@@ -405,11 +405,11 @@ describe('POST /api/:username/import', () => {
       expect(rows.map((r) => r.id)).toEqual(['survivor']);
     });
 
-    test('rejects a section with more than MAX_IMPORT_ROWS_PER_SECTION rows', async () => {
+    test('rejects a section with more than MAX_ROWS_PER_SECTION rows', async () => {
       const { username: u, token } = await createTestAccount();
       await insertTestVisit(u, 'survivor');
 
-      const visits = Array.from({ length: MAX_IMPORT_ROWS_PER_SECTION + 1 }, (_, i) =>
+      const visits = Array.from({ length: MAX_ROWS_PER_SECTION + 1 }, (_, i) =>
         makeVisit(`v-too-many-${i}`)
       );
       const res = await app.request(`/api/${u}/import`, {
@@ -420,7 +420,7 @@ describe('POST /api/:username/import', () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
       expect(body.error).toMatch(/exceeds maximum/);
-      expect(body.error).toMatch(String(MAX_IMPORT_ROWS_PER_SECTION));
+      expect(body.error).toMatch(String(MAX_ROWS_PER_SECTION));
 
       // Pre-check failure — no replace transaction, seeded visit intact.
       const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));

@@ -8,7 +8,7 @@ import { schema } from '../db.js';
 import { isObject, isArray, type AnyRecord } from '../lib/type-guards.js';
 import {
   MAX_IMPORT_BODY_BYTES,
-  MAX_IMPORT_ROWS_PER_SECTION,
+  MAX_ROWS_PER_SECTION,
 } from '../lib/validate-fields.js';
 import { accountAuth } from '../middleware/auth.js';
 import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';
@@ -118,14 +118,15 @@ export function importRoutes(db: Db): Hono {
     // Validate every row up front — a single bad row 400s before any write.
     // Also reject duplicate ids within a section: the composite PK (username, id)
     // would abort the insert with an opaque 500 otherwise (idea #2485).
-    // Per-section row cap (audit #1343) rejects huge arrays before we allocate
+    // Per-section row cap (audit #1343 / finding #7278) — same MAX_ROWS_PER_SECTION
+    // as the per-row PUT insert gate — rejects huge arrays before we allocate
     // the validated-row buffers; routeCoords length is already capped inside
     // validateTripRow → assertRouteCoords.
     const collected: Array<{ table: UserTable; rows: object[] }> = [];
     for (const { key, table, raw, validate } of sections) {
-      if (raw.length > MAX_IMPORT_ROWS_PER_SECTION) {
+      if (raw.length > MAX_ROWS_PER_SECTION) {
         return c.json(
-          { error: `${key} section exceeds maximum of ${MAX_IMPORT_ROWS_PER_SECTION} rows` },
+          { error: `${key} section exceeds maximum of ${MAX_ROWS_PER_SECTION} rows` },
           400
         );
       }

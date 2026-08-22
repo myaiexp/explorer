@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, authHeaders, VISIT_BODY, resetRateLimiter } from './helpers.js';
 import { schema } from '../src/db.js';
+import { MAX_ROWS_PER_SECTION } from '../src/lib/validate-fields.js';
 
 beforeEach(async () => {
   await truncateAll();
@@ -566,5 +567,62 @@ describe('PUT body-shape validation (generic across sections)', () => {
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'Body must be an object' });
+  });
+});
+
+describe('PUT per-section row cap (finding #7278)', () => {
+  async function fillVisits(username: string, n: number): Promise<void> {
+    await db.execute(sql`
+      INSERT INTO visits (id, username, date, start_lat, start_lng, dest_lat, dest_lng, distance)
+      SELECT 'cap-' || g::text, ${username}, ${VISIT_BODY.date}::timestamptz, 60, 25, 60.1, 25.1, 5
+      FROM generate_series(1, ${n}) AS g
+    `);
+  }
+
+  test('rejects a new visit once the section is at MAX_ROWS_PER_SECTION', async () => {
+    const { username: u, token } = await createTestAccount();
+    await fillVisits(u, MAX_ROWS_PER_SECTION);
+
+    const res = await app.request(`/api/${u}/visits/cap-new`, {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload('cap-new')),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error: string };
+    expect(body.error).toMatch(String(MAX_ROWS_PER_SECTION));
+
+    const rows = await db.select({ id: schema.visits.id }).from(schema.visits)
+      .where(eq(schema.visits.username, u));
+    expect(rows).toHaveLength(MAX_ROWS_PER_SECTION);
+  });
+
+  test('still updates an existing row when the section is at the cap', async () => {
+    const { username: u, token } = await createTestAccount();
+    await fillVisits(u, MAX_ROWS_PER_SECTION);
+
+    const res = await app.request(`/api/${u}/visits/cap-1`, {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload('cap-1', 99)),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+
+    const [row] = await db.select().from(schema.visits)
+      .where(and(eq(schema.visits.username, u), eq(schema.visits.id, 'cap-1')));
+    expect(row.distance).toBe(99);
+  });
+
+  test("one account at the cap does not block another account's insert", async () => {
+    const a = await createTestAccount();
+    const b = await createTestAccount();
+    await fillVisits(a.username, MAX_ROWS_PER_SECTION);
+
+    const res = await app.request(`/api/${b.username}/visits/b-1`, {
+      method: 'PUT',
+      body: JSON.stringify(visitPayload('b-1')),
+      headers: { 'content-type': 'application/json', ...authHeaders(b.token) },
+    });
+    expect(res.status).toBe(204);
   });
 });

@@ -65,6 +65,75 @@ describe('#1566 mergeSection last-write-wins', () => {
         expect(merged[0].name).toBe('local');
     });
 
+    test('geometry-omitted server row does not wipe local polylines (finding #7278)', async () => {
+        // GET /:username returns metadata-only for old walks. Last-write-wins
+        // on the whole row would replace local coords with null on every load.
+        const coords = [[60, 25], [60.1, 25.1]];
+        const ret = [[60.1, 25.1], [60, 25]];
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_visits: JSON.stringify([{
+                id: '1',
+                updatedAt: '2024-06-01T00:00:00Z',
+                destName: 'local',
+                routeCoords: coords,
+                returnRouteCoords: ret,
+            }]),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [{
+                    id: '1',
+                    updatedAt: '2024-06-01T00:00:00Z',
+                    destName: 'server',
+                    routeCoords: null,
+                    returnRouteCoords: null,
+                }],
+                favorites: [], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        const merged = JSON.parse(localStorage.getItem('walk_visits'));
+        expect(merged[0].destName).toBe('server');
+        expect(merged[0].routeCoords).toEqual(coords);
+        expect(merged[0].returnRouteCoords).toEqual(ret);
+    });
+
+    test('server polylines restore a locally-trimmed visit (cloud archive)', async () => {
+        const coords = [[60, 25], [60.1, 25.1]];
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_visits: JSON.stringify([{
+                id: '1',
+                updatedAt: '2024-06-01T00:00:00Z',
+                destName: 'local',
+                routeCoords: null,
+                returnRouteCoords: null,
+            }]),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [{
+                    id: '1',
+                    updatedAt: '2024-06-01T00:00:00Z',
+                    destName: 'server',
+                    routeCoords: coords,
+                    returnRouteCoords: coords,
+                }],
+                favorites: [], savedLocations: [], history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        const merged = JSON.parse(localStorage.getItem('walk_visits'));
+        expect(merged[0].destName).toBe('server');
+        expect(merged[0].routeCoords).toEqual(coords);
+        expect(merged[0].returnRouteCoords).toEqual(coords);
+    });
+
     test('account switch: different stored username wipes local sections before load', async () => {
         setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({

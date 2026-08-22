@@ -72,6 +72,31 @@
         });
     }
 
+    // GET /:username omits polylines on old visit/history rows. Last-write-wins
+    // on the whole row would replace local coords with null on every page load
+    // of a bound account. Geometry is keep-if-present: a stripped snapshot must
+    // not wipe coords this device still has; server coords still restore a
+    // locally-trimmed row (the cloud archive).
+    function keepLocalGeometry(server, local) {
+        if (!local) return server;
+        var out = server;
+        if (local.routeCoords && !server.routeCoords) {
+            if (out === server) out = Object.assign({}, server);
+            out.routeCoords = local.routeCoords;
+            if (local.routeDuration != null && (out.routeDuration == null)) {
+                out.routeDuration = local.routeDuration;
+            }
+        }
+        if (local.returnRouteCoords && !server.returnRouteCoords) {
+            if (out === server) out = Object.assign({}, server);
+            out.returnRouteCoords = local.returnRouteCoords;
+            if (local.returnRouteDuration != null && (out.returnRouteDuration == null)) {
+                out.returnRouteDuration = local.returnRouteDuration;
+            }
+        }
+        return out;
+    }
+
     function mergeSection(section, serverRows) {
         serverRows = normalizeServerRows(section, serverRows);
         // Last-write-wins by updatedAt per id
@@ -86,7 +111,7 @@
             } else {
                 var existingTs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
                 var rowTs = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
-                if (rowTs >= existingTs) { byId[row.id] = row; }
+                if (rowTs >= existingTs) { byId[row.id] = keepLocalGeometry(row, existing); }
             }
         });
         var merged = Object.keys(byId).map(function (id) { return byId[id]; });

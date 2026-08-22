@@ -177,6 +177,16 @@ describe('rerouteWithCurrentSpread', () => {
         expect(buildRouteForMode.mock.calls[0][4].smartRouting).toBe(false);
     });
 
+    test('one-way with outbound and no return is a usable replacement', async () => {
+        setCurrentSession(baseSession({ tripMode: 'one-way', routeCoords: OUTBOUND.coords }));
+        buildRouteForMode.mockResolvedValue({ outbound: OUTBOUND, return: null, junctions: null });
+        await rerouteWithCurrentSpread();
+        expect(errors).toEqual([]);
+        expect(clearRouteLines).toHaveBeenCalledTimes(1);
+        expect(renderRouteTail).toHaveBeenCalled();
+        expect(getCurrentSession().routeCoords).toBe(OUTBOUND.coords);
+    });
+
     test('buildRouteForMode throw shows the error without wiping the previous session', async () => {
         const session = baseSession({
             routeCoords: OUTBOUND.coords,
@@ -218,6 +228,44 @@ describe('rerouteWithCurrentSpread', () => {
         expect(getCurrentSession().routeCoords).toBe(OUTBOUND.coords);
         expect(getCurrentSession().returnRouteCoords).toBe(RETURN.coords);
         expect(getCurrentSession().distance).toBe(2.0);
+        expect(clearRouteLines).not.toHaveBeenCalled();
+        expect(renderRouteTail).not.toHaveBeenCalled();
+        expect(errors).toEqual(['Failed to adjust route.']);
+    });
+
+    test('loop with outbound but no return keeps the previous route', async () => {
+        // A usable replacement for a loop is BOTH legs. Outbound-only used to
+        // clear the map and rewrite the session (finding #7301).
+        const session = baseSession({
+            routeCoords: OUTBOUND.coords,
+            returnRouteCoords: RETURN.coords,
+            distance: 2.0,
+        });
+        setCurrentSession(session);
+        buildRouteForMode.mockResolvedValue({ outbound: OUTBOUND, return: null, junctions: null });
+
+        await rerouteWithCurrentSpread();
+
+        expect(getCurrentSession()).toBe(session);
+        expect(getCurrentSession().returnRouteCoords).toBe(RETURN.coords);
+        expect(clearRouteLines).not.toHaveBeenCalled();
+        expect(renderRouteTail).not.toHaveBeenCalled();
+        expect(errors).toEqual(['Failed to adjust route.']);
+    });
+
+    test('one-way with no outbound keeps the previous route even if a return is present', async () => {
+        const session = baseSession({
+            tripMode: 'one-way',
+            routeCoords: OUTBOUND.coords,
+            distance: 2.0,
+        });
+        setCurrentSession(session);
+        buildRouteForMode.mockResolvedValue({ outbound: null, return: RETURN, junctions: null });
+
+        await rerouteWithCurrentSpread();
+
+        expect(getCurrentSession()).toBe(session);
+        expect(getCurrentSession().routeCoords).toBe(OUTBOUND.coords);
         expect(clearRouteLines).not.toHaveBeenCalled();
         expect(renderRouteTail).not.toHaveBeenCalled();
         expect(errors).toEqual(['Failed to adjust route.']);

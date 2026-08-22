@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders, VISIT_BODY } from './helpers.js';
 import { schema } from '../src/db.js';
+import { GET_GEOMETRY_KEEP } from '../src/lib/validate-fields.js';
 
 beforeEach(async () => {
   await truncateAll();
@@ -140,6 +141,99 @@ describe('GET /api/:username', () => {
     expect(body.favorites).toHaveLength(1);
     expect(body.savedLocations).toHaveLength(1);
     expect(body.history).toHaveLength(1);
+  });
+});
+
+const COORDS = [[60.0, 25.0], [60.1, 25.1]] as [number, number][];
+const RETURN_COORDS = [[60.1, 25.1], [60.0, 25.0]] as [number, number][];
+
+function dayStamp(i: number): string {
+  // UTC day i of 2026 — not a calendar YYYY-MM-DD that overflows January/February.
+  return new Date(Date.UTC(2026, 0, i + 1)).toISOString();
+}
+
+async function insertTripWithGeometry(
+  table: typeof schema.visits | typeof schema.history,
+  username: string,
+  id: string,
+  date: string,
+): Promise<void> {
+  await db.insert(table).values({
+    id,
+    username,
+    date,
+    startLat: 60,
+    startLng: 25,
+    destLat: 60.1,
+    destLng: 25.1,
+    distance: 5,
+    routeCoords: COORDS,
+    returnRouteCoords: RETURN_COORDS,
+  });
+}
+
+describe('GET /api/:username geometry-light snapshot (finding #7278)', () => {
+  test('omits polylines on visits older than GET_GEOMETRY_KEEP, keeps them on the newest', async () => {
+    const { username: u, token } = await createTestAccount();
+    const total = GET_GEOMETRY_KEEP + 2;
+    for (let i = 0; i < total; i++) {
+      await insertTripWithGeometry(schema.visits, u, `v-geo-${i}`, dayStamp(i));
+    }
+
+    const res = await app.request(`/api/${u}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { visits: Array<{ id: string; routeCoords: unknown; returnRouteCoords: unknown }> };
+    expect(body.visits).toHaveLength(total);
+
+    const byId = Object.fromEntries(body.visits.map((v) => [v.id, v]));
+    // Newest GET_GEOMETRY_KEEP by date (v-geo-50, v-geo-51 for keep=50, total=52)
+    expect(byId[`v-geo-${total - 1}`].routeCoords).toEqual(COORDS);
+    expect(byId[`v-geo-${total - 1}`].returnRouteCoords).toEqual(RETURN_COORDS);
+    expect(byId[`v-geo-${total - GET_GEOMETRY_KEEP}`].routeCoords).toEqual(COORDS);
+    // Older than the keep window — metadata only, jsonb never sent.
+    expect(byId['v-geo-0'].routeCoords).toBeNull();
+    expect(byId['v-geo-0'].returnRouteCoords).toBeNull();
+    expect(byId['v-geo-1'].routeCoords).toBeNull();
+  });
+
+  test('history uses the same keep window as visits', async () => {
+    const { username: u, token } = await createTestAccount();
+    const total = GET_GEOMETRY_KEEP + 1;
+    for (let i = 0; i < total; i++) {
+      await insertTripWithGeometry(schema.history, u, `h-geo-${i}`, dayStamp(i));
+    }
+
+    const res = await app.request(`/api/${u}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { history: Array<{ id: string; routeCoords: unknown }> };
+    const byId = Object.fromEntries(body.history.map((v) => [v.id, v]));
+    expect(byId[`h-geo-${total - 1}`].routeCoords).toEqual(COORDS);
+    expect(byId['h-geo-0'].routeCoords).toBeNull();
+  });
+
+  test('?geometry=full returns polylines on every visit (cloud archive)', async () => {
+    const { username: u, token } = await createTestAccount();
+    const total = GET_GEOMETRY_KEEP + 1;
+    for (let i = 0; i < total; i++) {
+      await insertTripWithGeometry(schema.visits, u, `v-full-${i}`, dayStamp(i));
+    }
+
+    const res = await app.request(`/api/${u}?geometry=full`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { visits: Array<{ id: string; routeCoords: unknown }> };
+    expect(body.visits).toHaveLength(total);
+    expect(body.visits.every((v) => JSON.stringify(v.routeCoords) === JSON.stringify(COORDS))).toBe(true);
+  });
+
+  test('a section at or under GET_GEOMETRY_KEEP keeps every polyline', async () => {
+    const { username: u, token } = await createTestAccount();
+    await insertTripWithGeometry(schema.visits, u, 'v-few-1', '2026-04-01T10:00:00.000Z');
+    await insertTripWithGeometry(schema.visits, u, 'v-few-2', '2026-04-02T10:00:00.000Z');
+
+    const res = await app.request(`/api/${u}`, { headers: authHeaders(token) });
+    const body = await res.json() as { visits: Array<{ routeCoords: unknown }> };
+    expect(body.visits).toHaveLength(2);
+    expect(body.visits.every((v) => v.routeCoords !== null)).toBe(true);
   });
 });
 
