@@ -12,8 +12,8 @@ pnpm build             # tsc → dist/
 ```
 
 `src/app.ts` is the factory (`createApp(db)`). `src/index.ts` opens Postgres
-and `serve()`s. Layout, DB safety, and the unit vs integration split: repo-root
-`CLAUDE.md` and `tests/README.md`.
+and `serve()`s. pnpm layout, DB safety, and the unit vs integration split:
+`tests/README.md`. Deploy/systemd: `deploy/README.md`.
 
 ## Auth model
 

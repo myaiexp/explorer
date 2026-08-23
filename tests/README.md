@@ -7,7 +7,17 @@ pnpm test              # frontend: vitest run over tests/**/*.test.js
 cd server && pnpm test # backend: vitest against explorer_test, never prod
 ```
 
-Backend DB safety (`*_test` hard-throw, `fileParallelism: false`) lives in CLAUDE.md Development.
+## pnpm layout
+
+The repo is four independent pnpm projects — root (frontend test devDeps), `server/`, `junctions-cache/`, `tools/` — each with its own lockfile. They are not a workspace (`packages: []` at root). Every one carries a `pnpm-workspace.yaml`, and every new sub-project must too: pnpm resolves its root by walking up to the nearest such file, so a sub-project without one is silently absorbed into the root install (`pnpm install` there installs the *root's* deps and skips the sub-project — no error, no lockfile, no `node_modules`).
+
+Only two are `pnpm install`ed by the deploy chain: forgejo-deploy does `pnpm install --frozen-lockfile && pnpm build` in `server/`; the shelly post-receive hook does the same in `junctions-cache/`. Root is frontend test devDeps (frontend is copied as static files, no install). `tools/` is not part of the deployed site.
+
+Overrides live in those `pnpm-workspace.yaml` files rather than a `pnpm` key in package.json because pnpm 11 no longer reads that key; both pins are security floors, so losing them is silent. `tests/pnpm-workspace-settings.test.js` guards both halves.
+
+## Test DB safety
+
+The server suite calls `truncateAll()` in `beforeEach`, so it must never touch the prod `explorer` DB. `server/tests/test-db.ts` resolves the connection: it derives the DB name from `.env`'s `DATABASE_URL` (or an explicit `TEST_DATABASE_URL`), forces the name to `*_test`, and **hard-throws** unless it ends in `_test` — so a prod-pointing `.env` (Helm copies it into worktrees) can never be truncated. `server/vitest.config.ts` sets `fileParallelism: false` because every DB-backed file shares the one `explorer_test` DB and would otherwise race on truncate. To recreate the test DB on a fresh box: `createdb explorer_test` (owner `explorer`), then apply migrations against it (`DATABASE_URL=postgresql://explorer:…@localhost:5432/explorer_test pnpm db:migrate`).
 
 ## Frontend loader
 

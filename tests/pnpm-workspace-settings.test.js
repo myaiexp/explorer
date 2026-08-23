@@ -12,11 +12,12 @@
  * by 10 and 11 alike, which is why the settings live there. Idea #3194.
  *
  * The second half is the trap that comes WITH that move. This repo is four independent
- * pnpm projects, not a workspace (four package.json files, four lockfiles, three of them
- * installed separately by the deploy chain). pnpm resolves its root by walking UP for the
- * nearest pnpm-workspace.yaml, so once the repo root has one, a sub-project without its
- * own gets swallowed: `cd server && pnpm install` then installs the ROOT project's deps
- * and skips server entirely — no error, no server lockfile, no server node_modules.
+ * pnpm projects, not a workspace (four package.json files, four lockfiles; only
+ * server/ and junctions-cache/ are `pnpm install`ed by deploy). pnpm resolves its
+ * root by walking UP for the nearest pnpm-workspace.yaml, so once the repo root
+ * has one, a sub-project without its own gets swallowed: `cd server && pnpm install`
+ * then installs the ROOT project's deps and skips server entirely — no error, no
+ * server lockfile, no server node_modules.
  * Verified on both 10.33.0 and 11.22.0. Hence: a package.json without a sibling
  * pnpm-workspace.yaml is a bug, and this test fails on it.
  */
