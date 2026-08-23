@@ -15,7 +15,7 @@ const envFile = config({ path: resolve(__dirname, '../.env'), override: true }).
 // Database name of a postgres URL: strip scheme://authority and any ?query/#frag,
 // leaving the last path segment. String-based so it can't throw on socket-style
 // URLs (e.g. postgresql://user@/db?host=/var/run/postgresql) the way `new URL` does.
-function dbNameOf(url: string): string {
+export function dbNameOf(url: string): string {
   const path = url
     .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '') // drop scheme://authority
     .replace(/[?#].*$/, ''); // drop query/fragment
@@ -23,7 +23,7 @@ function dbNameOf(url: string): string {
 }
 
 // Swap a postgres URL's database name to `<name>_test` (idempotent).
-function toTestUrl(url: string): string {
+export function toTestUrl(url: string): string {
   const name = dbNameOf(url);
   if (!name || name.endsWith('_test')) return url;
   const cut = url.search(/[?#]/); // preserve any ?query when re-appending
@@ -32,13 +32,12 @@ function toTestUrl(url: string): string {
   return `${path}_test${query}`;
 }
 
-// The URL the test suite connects to. An explicit TEST_DATABASE_URL (e.g. CI) is
-// used verbatim; otherwise the explorer db name from .env is suffixed with _test.
-// Either way a hard `_test`-suffix guard makes it impossible to run the destructive
-// suite (truncateAll) against a production db, even with a misconfigured / copied .env.
-export function resolveTestDatabaseUrl(): string {
-  const explicit = process.env.TEST_DATABASE_URL;
-  const base = explicit ?? envFile.DATABASE_URL;
+// Core of resolveTestDatabaseUrl, parameterized so tests don't mutate process.env.
+export function guardedTestUrl(
+  explicit: string | undefined,
+  fallback: string | undefined,
+): string {
+  const base = explicit ?? fallback;
   if (!base) throw new Error('Neither TEST_DATABASE_URL nor .env DATABASE_URL is set');
   const url = explicit ?? toTestUrl(base);
   const dbName = dbNameOf(url);
@@ -50,4 +49,12 @@ export function resolveTestDatabaseUrl(): string {
     );
   }
   return url;
+}
+
+// The URL the test suite connects to. An explicit TEST_DATABASE_URL (e.g. CI) is
+// used verbatim; otherwise the explorer db name from .env is suffixed with _test.
+// Either way a hard `_test`-suffix guard makes it impossible to run the destructive
+// suite (truncateAll) against a production db, even with a misconfigured / copied .env.
+export function resolveTestDatabaseUrl(): string {
+  return guardedTestUrl(process.env.TEST_DATABASE_URL, envFile.DATABASE_URL);
 }

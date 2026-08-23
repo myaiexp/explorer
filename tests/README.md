@@ -67,4 +67,4 @@ Dominant convention, not a hard rule:
 
 The `.unit.` marker keeps same-named unit/integration pairs distinct at a glance (`sections.unit.test.ts` vs `sections.test.ts`). Import's unit file is `src/routes/import-validators.unit.test.ts`, not `import.unit.test.ts` — it covers the extracted validators, while `server/tests/import.test.ts` is the real-DB route.
 
-A few files under `server/tests/` are DB-free: `username.test.ts` stubs db; `rate-limit-buckets.test.ts` mounts middleware with no Postgres.
+A few files under `server/tests/` are DB-free: `username.test.ts` stubs db; `rate-limit-buckets.test.ts` mounts middleware with no Postgres; `test-db.test.ts` pins the `*_test` URL guard (finding #7777). Wordlists vs the client `USERNAME_RE` live in `src/username.unit.test.ts` (finding #7778).

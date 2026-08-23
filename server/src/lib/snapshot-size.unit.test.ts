@@ -1,4 +1,4 @@
-// Unit tests for the per-account stored-jsonb budget helpers (finding #7756).
+// Unit tests for stored-jsonb budget helpers and snapshot-size fallbacks.
 import { describe, it, expect } from 'vitest';
 import { schema } from '../db.js';
 import {
@@ -7,10 +7,15 @@ import {
   MAX_STORED_BYTES,
 } from './validate-fields.js';
 import {
+  estimateStoredSnapshotBytes,
   incomingJsonbBytes,
   storedJsonbBytes,
   wouldExceedStoredBudget,
 } from './snapshot-size.js';
+
+function fakeDb(result: unknown) {
+  return { execute: async () => result };
+}
 
 describe('MAX_STORED_BYTES', () => {
   it('is 32 MiB — larger than the GET dump cap and the import body cap', () => {
@@ -89,3 +94,53 @@ describe('wouldExceedStoredBudget', () => {
     expect(wouldExceedStoredBudget(0, MAX_STORED_BYTES + 1, 0)).toBe(false);
   });
 });
+
+// firstRow accepts drizzle array results and node-postgres `{ rows }`. If the
+// adapter shape is missed, bytesFrom returns 0 and GET ?geometry=full skips
+// the 413 (finding #7776). Fake-db is enough — the integration 413 case stays
+// in account-data-budget.test.ts.
+describe('estimateStoredSnapshotBytes result-shape fallbacks (finding #7776)', () => {
+  it('reads bytes from an array result', async () => {
+    expect(await estimateStoredSnapshotBytes(fakeDb([{ bytes: 4096 }]), 'u')).toBe(4096);
+  });
+
+  it('reads bytes from a { rows } result', async () => {
+    expect(
+      await estimateStoredSnapshotBytes(fakeDb({ rows: [{ bytes: 4096 }] }), 'u'),
+    ).toBe(4096);
+  });
+
+  it('coerces a numeric string (pg SUM often comes back as text)', async () => {
+    expect(await estimateStoredSnapshotBytes(fakeDb([{ bytes: '4096' }]), 'u')).toBe(4096);
+    expect(
+      await estimateStoredSnapshotBytes(fakeDb({ rows: [{ bytes: '4096' }] }), 'u'),
+    ).toBe(4096);
+  });
+
+  it('returns 0 for empty, malformed, and non-numeric results', async () => {
+    const emptyish = [
+      [],
+      {},
+      { rows: [] },
+      { rows: 'nope' },
+      null,
+      undefined,
+      [{ bytes: 'not-a-number' }],
+      [{ bytes: undefined }],
+      [{ bytes: NaN }],
+      [{ bytes: Infinity }],
+      { rows: [{ bytes: 'nope' }] },
+    ];
+    for (const result of emptyish) {
+      expect(await estimateStoredSnapshotBytes(fakeDb(result), 'u')).toBe(0);
+    }
+  });
+
+  it('a 0-byte estimate cannot trip the GET 413 gate', async () => {
+    const bytes = await estimateStoredSnapshotBytes(fakeDb([{ bytes: 'nope' }]), 'u');
+    expect(bytes).toBe(0);
+    // account-data.ts: if (bytes > GET_SNAPSHOT_MAX_BYTES) return 413
+    expect(bytes > GET_SNAPSHOT_MAX_BYTES).toBe(false);
+  });
+});
+
