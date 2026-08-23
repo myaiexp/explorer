@@ -1,15 +1,44 @@
 [Unit]
 Description=Explorer API (Wander cloud backup)
 After=network.target postgresql.service
+Wants=postgresql.service
 
 [Service]
 Type=simple
-User=mase
+User=explorer
+Group=explorer
 WorkingDirectory=/home/mase/Projects/explorer/server
 EnvironmentFile=/home/mase/Projects/explorer/server/.env
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=5
+
+# Dedicated explorer uid so an RCE/OOM cannot read /home/mase or share the
+# interactive user's cgroup (finding #7560). ProtectHome=tmpfs (not yes):
+# yes overmounts /home and hides a BindReadOnlyPaths target underneath it.
+# tmpfs + the bind keeps only the server tree reachable. EnvironmentFile is
+# read by PID 1 as root, not by the service. MemoryMax sits above a
+# legitimate keep-window GET and kills this unit rather than uid mase on a
+# fat dump (finding #7558). Do not add MemoryDenyWriteExecute — V8 JIT needs
+# W^X pages.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/mase/Projects/explorer/server
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

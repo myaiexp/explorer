@@ -9,7 +9,8 @@ type TripTable = typeof schema.visits | typeof schema.history;
 // Newest GET_GEOMETRY_KEEP rows (by date, id tie-break) keep their polylines;
 // older rows are selected without the jsonb columns so Node never buffers
 // historical geometry on the init-path GET. `fullGeometry` is `?geometry=full`
-// — the cloud archive, not the default.
+// — the cloud archive, gated by GET_SNAPSHOT_MAX_BYTES at the route so this
+// helper is not reached for an oversized dump.
 export async function selectTripSection(
   db: Db,
   table: TripTable,

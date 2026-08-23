@@ -1,6 +1,6 @@
 // Scalar field validators + length/size bounds for cloud-backup row validation.
-// Shared by the per-row PUT routes (sections.ts) and the bulk import (import.ts)
-// so both endpoints reject the same malformed dates and oversized strings.
+// Shared by the per-row PUT routes (sections.ts), bulk import (import.ts), and
+// GET snapshot shaping so write caps and the read budget cannot drift.
 
 // TWIN: visit-shape.js (idOrNull / isoDateOrNull / stringOrNull caps).
 // tests/visit-shape-parity.test.js fails RED if these drift.
@@ -44,9 +44,37 @@ export const MAX_IMPORT_ROWS_PER_SECTION = MAX_ROWS_PER_SECTION;
 
 // Newest N visit/history rows on GET /:username keep full polylines; older ones
 // are returned metadata-only so the init-path merge stays bounded. Twin of
-// storage.js VISIT_GEOMETRY_KEEP. The DB still stores full rows (cloud is the
-// archive); `?geometry=full` returns them.
+// storage.js VISIT_GEOMETRY_KEEP. The same window applies to favorite payloads:
+// newest N keep the stored JSONB, older ones are rebuilt from FAVORITE_LIGHT_KEYS
+// so a 10k × 512 KB fill cannot be serialized on the default GET. The DB still
+// stores full rows (cloud is the archive). `?geometry=full` returns them only
+// when the stored jsonb is under GET_SNAPSHOT_MAX_BYTES; otherwise 413.
 export const GET_GEOMETRY_KEEP = 50;
+
+// Uncompressed JSON-text budget for `?geometry=full`. Above this, GET 413s
+// rather than JSON-encoding the archive (finding #7558). Default GET never
+// consults this — it uses the keep window. 8 MiB is well under MemoryMax and
+// still covers a small account's archive dump; the client never sends the flag.
+export const GET_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
+
+// Scalar bookmark fields copied into an older favorite's GET payload. Route
+// geometry and any attacker-supplied blob keys stay in the DB and out of the
+// default response. Generated SQL uses this list; do not add array/object keys.
+export const FAVORITE_LIGHT_KEYS = [
+  'date',
+  'startLat',
+  'startLng',
+  'startLabel',
+  'destLat',
+  'destLng',
+  'destName',
+  'tripMode',
+  'distance',
+  'routeDistance',
+  'routeDuration',
+  'returnRouteDistance',
+  'returnRouteDuration',
+] as const;
 
 // ISO-8601 date/datetime: requires the YYYY-MM-DD prefix AND a Date.parse-able
 // value, length-capped so Date.parse is never handed a huge blob. Rejects

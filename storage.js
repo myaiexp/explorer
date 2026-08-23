@@ -16,8 +16,9 @@ const HISTORY_KEY = 'walk_history';
 // trimmed to metadata-only when localStorage runs out of room. Twin of server
 // GET_GEOMETRY_KEEP: the cloud still STORES full rows (the archive), but GET
 // /:username returns geometry only for the newest N so the init-path merge
-// stays bounded (`?geometry=full` returns them). 50 keeps recent routes
-// drawable — the routeCoords/returnRouteCoords arrays are the only large fields.
+// stays bounded (`?geometry=full` returns them under the server's 8 MiB
+// snapshot cap, otherwise 413). 50 keeps recent routes drawable — the
+// routeCoords/returnRouteCoords arrays are the only large fields.
 const VISIT_GEOMETRY_KEEP = 50;
 const QUOTA_TRIMMED_MSG = 'Storage was full — trimmed old route details to make room. Turn on cloud backup to keep full history.';
 const QUOTA_FULL_MSG = 'Storage is full. Export & delete old walks, or turn on cloud backup.';

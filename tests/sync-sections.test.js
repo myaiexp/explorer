@@ -101,6 +101,42 @@ describe('#1566 mergeSection last-write-wins', () => {
         expect(merged[0].returnRouteCoords).toEqual(ret);
     });
 
+    test('light favorite payload does not wipe local polylines (finding #7558)', async () => {
+        // GET /:username returns bookmark-sized payloads for old favorites
+        // (dest coords, no routeCoords). Last-write-wins on the whole row
+        // would drop the route this device still has.
+        const coords = [[60, 25], [60.1, 25.1]];
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+            walk_favorites: JSON.stringify([{
+                id: '1',
+                updatedAt: '2024-06-01T00:00:00Z',
+                destName: 'local',
+                destLat: 60,
+                destLng: 25,
+                routeCoords: coords,
+            }]),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [],
+                favorites: [{
+                    id: '1',
+                    updatedAt: '2024-06-01T00:00:00Z',
+                    payload: { destName: 'server', destLat: 60, destLng: 25 },
+                }],
+                savedLocations: [],
+                history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        const merged = JSON.parse(localStorage.getItem('walk_favorites'));
+        expect(merged[0].destName).toBe('server');
+        expect(merged[0].routeCoords).toEqual(coords);
+    });
+
     test('server polylines restore a locally-trimmed visit (cloud archive)', async () => {
         const coords = [[60, 25], [60.1, 25.1]];
         setLocation('/explorer/rugged-pine-42');
