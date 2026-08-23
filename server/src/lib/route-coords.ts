@@ -7,6 +7,14 @@
 // client cannot persist arbitrarily-large arrays that pressure memory on GET /:username.
 export const MAX_ROUTE_COORDS = 5000;
 
+// Inclusive WGS-84 bounds. Scalar trip fields (startLat/…) use the same
+// numbers via validate-rows.ts so a PUT cannot persist a coord the polyline
+// validator would reject. TWIN of visit-shape.js latOrNull / lngOrNull.
+export const LAT_MIN = -90;
+export const LAT_MAX = 90;
+export const LNG_MIN = -180;
+export const LNG_MAX = 180;
+
 export class RouteCoordsError extends Error {
   constructor(message: string) {
     super(message);
@@ -37,11 +45,11 @@ export function assertRouteCoords(
     if (typeof lat !== 'number' || !Number.isFinite(lat) || typeof lng !== 'number' || !Number.isFinite(lng)) {
       throw new RouteCoordsError(`${fieldName} entries must be pairs of finite numbers`);
     }
-    if (lat < -90 || lat > 90) {
-      throw new RouteCoordsError(`${fieldName} latitude out of range [-90, 90]`);
+    if (lat < LAT_MIN || lat > LAT_MAX) {
+      throw new RouteCoordsError(`${fieldName} latitude out of range [${LAT_MIN}, ${LAT_MAX}]`);
     }
-    if (lng < -180 || lng > 180) {
-      throw new RouteCoordsError(`${fieldName} longitude out of range [-180, 180]`);
+    if (lng < LNG_MIN || lng > LNG_MAX) {
+      throw new RouteCoordsError(`${fieldName} longitude out of range [${LNG_MIN}, ${LNG_MAX}]`);
     }
   }
 }

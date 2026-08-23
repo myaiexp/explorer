@@ -135,6 +135,16 @@ const rejectCases: Array<[string, unknown]> = [
   ['destLat non-number', { ...validRow(), destLat: undefined }],
   ['destLng non-number', { ...validRow(), destLng: '25' }],
   ['distance non-number', { ...validRow(), distance: '4.2' }],
+  ['destLat 91 (out of range)', { ...validRow(), destLat: 91 }],
+  ['startLat -91 (out of range)', { ...validRow(), startLat: -91 }],
+  ['startLng 200 (out of range)', { ...validRow(), startLng: 200 }],
+  ['destLng -181 (out of range)', { ...validRow(), destLng: -181 }],
+  ['startLat NaN', { ...validRow(), startLat: NaN }],
+  ['destLng Infinity', { ...validRow(), destLng: Infinity }],
+  ['startLng -Infinity', { ...validRow(), startLng: -Infinity }],
+  ['distance NaN', { ...validRow(), distance: NaN }],
+  ['distance Infinity', { ...validRow(), distance: Infinity }],
+  ['distance negative', { ...validRow(), distance: -1 }],
   ['date malformed (not ISO)', { ...validRow(), date: 'last tuesday' }],
   ['date SQL-ish string', { ...validRow(), date: 'DROP TABLE visits' }],
   ['startLabel over 500 chars', { ...validRow(), startLabel: 'x'.repeat(501) }],
@@ -150,14 +160,22 @@ describe('reject-path parity across trip and visit adapters', () => {
     });
   }
 
-  it('accepts a number-typed distance even if non-finite (no finiteness guard, as before)', () => {
-    // Pre-refactor only checked typeof === 'number'; NaN/Infinity passed. Lock that in.
-    expect(importTripRow({ ...validRow(), distance: NaN }, USER)).not.toBeNull();
-    expect(importVisitRow({ ...validRow(), startLat: Infinity }, USER)).not.toBeNull();
+  it('rejects non-finite and out-of-range scalar coords (finding #7775)', () => {
+    // JSON cannot carry NaN/Infinity (stringify → null → already a 400), but the
+    // validator is also the in-process import adapter. Mirror latOrNull/lngOrNull.
+    expect(importTripRow({ ...validRow(), destLat: 91 }, USER)).toBeNull();
+    expect(importTripRow({ ...validRow(), startLng: 200 }, USER)).toBeNull();
+    expect(importVisitRow({ ...validRow(), startLat: Infinity }, USER)).toBeNull();
+    expect(importTripRow({ ...validRow(), distance: NaN }, USER)).toBeNull();
   });
 });
 
 describe('field bounds (date + length caps)', () => {
+  it('accepts latitude/longitude on the inclusive bounds', () => {
+    expect(importTripRow({ ...validRow(), startLat: -90, destLat: 90 }, USER)).not.toBeNull();
+    expect(importTripRow({ ...validRow(), startLng: -180, destLng: 180 }, USER)).not.toBeNull();
+  });
+
   it('accepts a bare ISO date (YYYY-MM-DD) and a full timestamp', () => {
     expect(importTripRow({ ...validRow(), date: '2026-04-27' }, USER)).not.toBeNull();
     expect(importTripRow({ ...validRow(), date: '2026-04-27T10:00:00.123Z' }, USER)).not.toBeNull();

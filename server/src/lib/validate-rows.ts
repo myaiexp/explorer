@@ -4,7 +4,14 @@
 // error to a generic 'Invalid <section> row' 400. Any new column or validation
 // rule is added here once, instead of drifting across the two route modules.
 import { schema } from '../db.js';
-import { assertRouteCoords, RouteCoordsError } from './route-coords.js';
+import {
+  assertRouteCoords,
+  RouteCoordsError,
+  LAT_MIN,
+  LAT_MAX,
+  LNG_MIN,
+  LNG_MAX,
+} from './route-coords.js';
 import type { AnyRecord } from './type-guards.js';
 import {
   MAX_LABEL_LEN,
@@ -19,6 +26,22 @@ import {
 // A validated + normalized row ready to upsert, or a human-readable 400 reason.
 export type RowResult<T> = { error: string } | { row: T };
 
+// Scalar lat/lng: same finite + WGS-84 bounds as assertRouteCoords, so a PUT
+// cannot persist a start/dest the client latOrNull/lngOrNull would drop
+// (finding #7775). Non-number keeps the historical "Missing required field"
+// wording; non-finite and out-of-range get their own reasons.
+function parseCoord(
+  name: string,
+  value: unknown,
+  lo: number,
+  hi: number
+): { error: string } | { value: number } {
+  if (typeof value !== 'number') return { error: `Missing required field: ${name}` };
+  if (!Number.isFinite(value)) return { error: `${name} must be a finite number` };
+  if (value < lo || value > hi) return { error: `${name} out of range [${lo}, ${hi}]` };
+  return { value };
+}
+
 // visits and history share this trip shape (history IS the trip shape; visits
 // grafts poiCategory on top). `id`/`username` are supplied by the caller — path
 // params for the per-row PUT, the row's own id for bulk import — never read from
@@ -31,14 +54,20 @@ export function validateTripRow(
 ): RowResult<typeof schema.history.$inferInsert> {
   const parsedId = parseRowId(id);
   if ('error' in parsedId) return parsedId;
-  const { date, startLat, startLng, destLat, destLng, distance } = body;
+  const { date, distance } = body;
   if (typeof date !== 'string' || !date) return { error: 'Missing required field: date' };
   if (!isIsoDate(date)) return { error: 'date must be an ISO-8601 timestamp' };
-  if (typeof startLat !== 'number') return { error: 'Missing required field: startLat' };
-  if (typeof startLng !== 'number') return { error: 'Missing required field: startLng' };
-  if (typeof destLat !== 'number') return { error: 'Missing required field: destLat' };
-  if (typeof destLng !== 'number') return { error: 'Missing required field: destLng' };
+  const startLat = parseCoord('startLat', body.startLat, LAT_MIN, LAT_MAX);
+  if ('error' in startLat) return startLat;
+  const startLng = parseCoord('startLng', body.startLng, LNG_MIN, LNG_MAX);
+  if ('error' in startLng) return startLng;
+  const destLat = parseCoord('destLat', body.destLat, LAT_MIN, LAT_MAX);
+  if ('error' in destLat) return destLat;
+  const destLng = parseCoord('destLng', body.destLng, LNG_MIN, LNG_MAX);
+  if ('error' in destLng) return destLng;
   if (typeof distance !== 'number') return { error: 'Missing required field: distance' };
+  if (!Number.isFinite(distance)) return { error: 'distance must be a finite number' };
+  if (distance < 0) return { error: 'distance cannot be negative' };
   if (tooLong(body.startLabel, MAX_LABEL_LEN))
     return { error: `startLabel exceeds maximum length of ${MAX_LABEL_LEN}` };
   if (tooLong(body.destName, MAX_NAME_LEN))
@@ -59,11 +88,11 @@ export function validateTripRow(
       id: parsedId.id,
       username,
       date,
-      startLat,
-      startLng,
+      startLat: startLat.value,
+      startLng: startLng.value,
       startLabel: typeof body.startLabel === 'string' ? body.startLabel : null,
-      destLat,
-      destLng,
+      destLat: destLat.value,
+      destLng: destLng.value,
       destName: typeof body.destName === 'string' ? body.destName : null,
       tripMode: typeof body.tripMode === 'string' ? body.tripMode : null,
       distance,

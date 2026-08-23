@@ -18,7 +18,8 @@
  *   1. Named constants + the ISO-date prefix regex match across the sources.
  *   2. A shared vector of ids / dates / coord blobs is accepted or rejected
  *      identically at the field-validator layer (idOrNull ↔ parseRowId,
- *      isoDateOrNull ↔ isIsoDate, coordPairsOrNull ↔ assertRouteCoords).
+ *      isoDateOrNull ↔ isIsoDate, coordPairsOrNull ↔ assertRouteCoords,
+ *      latOrNull/lngOrNull ↔ validateTripRow scalar coords).
  *
  * Repair policy is deliberately NOT identical — the client truncates over-long
  * labels, stringifies legacy numeric ids, and nulls a bad polyline rather than
@@ -44,6 +45,7 @@ import {
     tooLong,
 } from '../server/src/lib/validate-fields.ts';
 import { MAX_ROUTE_COORDS, assertRouteCoords } from '../server/src/lib/route-coords.ts';
+import { validateTripRow } from '../server/src/lib/validate-rows.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NOW = '1999-01-01T00:00:00.000Z';
@@ -253,6 +255,31 @@ describe('outbox contract: a normalized row is one the API will accept', () => {
             expect(tooLong(row.poiCategory, MAX_LABEL_LEN)).toBe(false);
             expect(() => assertRouteCoords(row.routeCoords, 'routeCoords')).not.toThrow();
             expect(() => assertRouteCoords(row.returnRouteCoords, 'returnRouteCoords')).not.toThrow();
+            // Full trip-row gate — scalar coords + distance, not just the blob.
+            const result = validateTripRow(id, 'alice', row);
+            expect(result, 'error' in result ? result.error : '').toHaveProperty('row');
         }
+    });
+});
+
+describe('cloud contract: a client-rejected coord row cannot land (finding #7775)', () => {
+    // Inverse of the outbox contract: a row normalizeVisit drops must also 400
+    // at validateTripRow, so an authenticated PUT/import cannot persist coords
+    // the client would never render.
+    const rejected = [
+        ['destLat 91', { destLat: 91 }],
+        ['startLat -91', { startLat: -91 }],
+        ['startLng 200', { startLng: 200 }],
+        ['destLng -181', { destLng: -181 }],
+        ['NaN destLat', { destLat: NaN }],
+        ['Infinity startLng', { startLng: Infinity }],
+        ['NaN distance', { distance: NaN }],
+        ['negative distance', { distance: -1 }],
+    ];
+
+    test.each(rejected)('%s', (_label, over) => {
+        const input = baseRow(over);
+        expect(globalThis.normalizeVisit(input, NOW)).toBeNull();
+        expect(validateTripRow(input.id, 'alice', input)).toHaveProperty('error');
     });
 });

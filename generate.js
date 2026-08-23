@@ -16,6 +16,9 @@ async function generateDestination() {
     // and the history store (see loading.js).
     if (rejectIfBuilding()) return;
 
+    // Empty / non-numeric min is "no floor" (HTML default is 0). parseFloat of
+    // '' or 'abc' is NaN, and || 0 is the coerce — not a missing-budget error.
+    // Invalid max still rejects below; a search cannot start without a ceiling.
     const minKm = parseFloat(document.getElementById('minDistance').value) || 0;
     const maxKm = parseFloat(document.getElementById('maxDistance').value);
 

@@ -246,6 +246,24 @@ describe('visits PUT', () => {
     expect(await res.json()).toEqual({ error: 'Missing required field: startLat' });
   });
 
+  it('rejects destLat 91 with 400 (scalar range, finding #7775)', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ destLat: 91 })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/destLat/);
+    expect(ops).toHaveLength(0);
+  });
+
+  it('rejects startLng 200 with 400 (scalar range, finding #7775)', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request('/alice/visits/v1', jsonReq('PUT', validTrip({ startLng: 200 })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/startLng/);
+    expect(ops).toHaveLength(0);
+  });
+
   it('rejects malformed routeCoords with 400 (RouteCoordsError message)', async () => {
     const { db } = makeFakeDb({ userExists: true });
     const app = sectionsRoutes(db);

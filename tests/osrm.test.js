@@ -142,6 +142,20 @@ describe('tryOsrm', () => {
         globalThis.fetch = vi.fn(async () => jsonResponse({ routes: [] }));
         await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
     });
+
+    test('returns null on a 200 whose route has no geometry (finding #7785)', async () => {
+        globalThis.fetch = vi.fn(async () => jsonResponse({
+            routes: [{ duration: 1, distance: 1 }],
+        }));
+        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+    });
+
+    test('returns null when geometry.coordinates is not an array', async () => {
+        globalThis.fetch = vi.fn(async () => jsonResponse({
+            routes: [{ duration: 1, distance: 1, geometry: { coordinates: null } }],
+        }));
+        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+    });
 });
 
 // ── snapToRoad ───────────────────────────────────────────────────────────────

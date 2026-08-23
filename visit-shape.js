@@ -13,12 +13,13 @@
 // it only has to be loaded before its consumers (map-view.js, favorites.js,
 // history.js, then visits-io.js).
 
-// TWIN: server/src/lib/route-coords.ts (MAX_ROUTE_COORDS) and
+// TWIN: server/src/lib/route-coords.ts (MAX_ROUTE_COORDS, LAT_*/LNG_* bounds) and
 // server/src/lib/validate-fields.ts (MAX_LABEL_LEN / MAX_NAME_LEN / MAX_DATE_LEN /
-// MAX_ID_LEN / SAFE_ID / isIsoDate). Separate deployables — static frontend, no
-// shared build — so tests/visit-shape-parity.test.js is the enforcement. A
-// normalized row is one the API will accept: an imported row that reaches the
-// cloud outbox must not come back a silent 400.
+// MAX_ID_LEN / SAFE_ID / isIsoDate). Scalar start/dest coords are validated in
+// validate-rows.ts with those same bounds. Separate deployables — static
+// frontend, no shared build — so tests/visit-shape-parity.test.js is the
+// enforcement. A normalized row is one the API will accept: an imported row
+// that reaches the cloud outbox must not come back a silent 400.
 const MAX_ROUTE_COORDS = 5000;
 const MAX_LABEL_LEN = 500;   // startLabel, tripMode, poiCategory
 const MAX_NAME_LEN = 2000;   // destName

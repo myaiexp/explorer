@@ -18,13 +18,15 @@ async function tryOsrm(url) {
         const data = await res.json();
         if (!data.routes || data.routes.length === 0) return null;
         const r = data.routes[0];
+        const coords = r.geometry && r.geometry.coordinates;
+        if (!Array.isArray(coords)) return null; // missing geometry → null, not a throw (#7785)
         const steps = r.legs ? r.legs.flatMap(leg => leg.steps || []) : null;
         // UNITS: `distance` is METRES and `duration` seconds, straight off OSRM.
         // Every route object this module returns keeps those units; session.js is
         // the boundary that converts distance to km for the session/persisted
         // fields, and route-restore.js converts back.
         return {
-            coords: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+            coords: coords.map(([lng, lat]) => [lat, lng]),
             duration: r.duration,
             distance: r.distance,
             steps: steps

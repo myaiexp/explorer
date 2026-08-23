@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { assertRouteCoords, RouteCoordsError, MAX_ROUTE_COORDS } from './route-coords.js';
+import {
+  assertRouteCoords,
+  RouteCoordsError,
+  MAX_ROUTE_COORDS,
+  LAT_MIN,
+  LAT_MAX,
+  LNG_MIN,
+  LNG_MAX,
+} from './route-coords.js';
 
 // Mutation-proof (audit #1344): each isolated source mutation turns ≥1 test RED.
 //   cap 5000 → 4999      : "accepts exactly MAX_ROUTE_COORDS (5000) pairs at the cap" fails
@@ -31,6 +39,13 @@ describe('assertRouteCoords — happy paths', () => {
   it('accepts exactly MAX_ROUTE_COORDS (5000) pairs at the cap', () => {
     expect(MAX_ROUTE_COORDS).toBe(5000);
     expect(() => assertRouteCoords(validPairs(5000), 'routeCoords')).not.toThrow();
+  });
+
+  it('exports the inclusive WGS-84 bounds (shared with validateTripRow scalars)', () => {
+    expect(LAT_MIN).toBe(-90);
+    expect(LAT_MAX).toBe(90);
+    expect(LNG_MIN).toBe(-180);
+    expect(LNG_MAX).toBe(180);
   });
 
   it('accepts latitude boundaries -90 and 90', () => {

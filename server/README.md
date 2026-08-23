@@ -57,7 +57,10 @@ failed-auth probing is throttled before the Postgres lookup.
   fill above the dump cap.
 
 Caps and validators live in `src/lib/validate-fields.ts` /
-`src/lib/validate-rows.ts`.
+`src/lib/validate-rows.ts`. Trip-row scalar coords (`startLat` / `startLng` /
+`destLat` / `destLng`) must be finite and inside the same WGS-84 bounds as
+`routeCoords` (`[-90, 90]` / `[-180, 180]`); `distance` must be finite and
+≥ 0. Finding #7775: `typeof === 'number'` used to accept lat 999 and Infinity.
 
 ## Client contract
 

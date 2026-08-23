@@ -160,6 +160,23 @@ describe('min/max distance guards', () => {
     expect(displayRouteCalls).toHaveLength(0);
     expect(saveToHistoryCalls).toHaveLength(0);
   });
+
+  // Empty / non-numeric min is "no floor" — parseFloat → NaN → 0. Invalid max
+  // still errors above; a missing budget cannot start a search. Finding #7786.
+  test.each([
+    ['', '5'],
+    ['abc', '5'],
+  ])('min=%s max=%s coerces minKm to 0 and starts the pipeline', async (min, max) => {
+    document.getElementById('minDistance').value = min;
+    document.getElementById('maxDistance').value = max;
+
+    await generate();
+
+    expect(errors).toHaveLength(0);
+    expect(resolveStart).toHaveBeenCalledOnce();
+    expect(resolveOpts().straightMin).toBe(0);
+    expect(resolveOpts().straightMax).toBeCloseTo(Number(max) / 2.6);
+  });
 });
 
 describe('routingStrategy mapping', () => {
