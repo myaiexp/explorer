@@ -54,27 +54,47 @@ describe('isTrustedProxy', () => {
 });
 
 describe('clientIp', () => {
-  it('uses the first XFF hop when the peer is a trusted proxy', async () => {
+  it('uses the last XFF hop when the peer is a trusted proxy (finding #7895)', async () => {
     const app = appWith((c) => new Response(clientIp(c)));
     const res = await app.request(
       '/',
       { headers: { 'x-forwarded-for': '  198.51.100.7 , 10.0.0.1' } },
       LOOPBACK_ENV
     );
-    expect(await res.text()).toBe('198.51.100.7');
+    expect(await res.text()).toBe('10.0.0.1');
   });
 
-  it('falls back to the peer when trusted proxy sends no XFF', async () => {
+  it('prefers X-Real-IP over a spoofable XFF chain (finding #7895)', async () => {
+    const app = appWith((c) => new Response(clientIp(c)));
+    const res = await app.request(
+      '/',
+      {
+        headers: {
+          'x-real-ip': '203.0.113.9',
+          'x-forwarded-for': '198.51.100.7, 10.0.0.1',
+        },
+      },
+      LOOPBACK_ENV
+    );
+    expect(await res.text()).toBe('203.0.113.9');
+  });
+
+  it('falls back to the peer when trusted proxy sends no forwarding headers', async () => {
     const app = appWith((c) => new Response(clientIp(c)));
     const res = await app.request('/', {}, LOOPBACK_ENV);
     expect(await res.text()).toBe('127.0.0.1');
   });
 
-  it('ignores XFF from an untrusted peer (spoof bypass)', async () => {
+  it('ignores XFF and X-Real-IP from an untrusted peer (spoof bypass)', async () => {
     const app = appWith((c) => new Response(clientIp(c)));
     const res = await app.request(
       '/',
-      { headers: { 'x-forwarded-for': '1.2.3.4' } },
+      {
+        headers: {
+          'x-real-ip': '1.2.3.4',
+          'x-forwarded-for': '1.2.3.4',
+        },
+      },
       PUBLIC_ENV
     );
     expect(await res.text()).toBe('203.0.113.9');
@@ -96,10 +116,20 @@ describe('clientIp', () => {
     );
     expect(await res.text()).toBe('127.0.0.1');
   });
+
+  it('ignores an implausible last XFF hop rather than walking left into a spoof', async () => {
+    const app = appWith((c) => new Response(clientIp(c)));
+    const res = await app.request(
+      '/',
+      { headers: { 'x-forwarded-for': '198.51.100.7, not-an-ip' } },
+      LOOPBACK_ENV
+    );
+    expect(await res.text()).toBe('127.0.0.1');
+  });
 });
 
 describe('clientIpForStorage', () => {
-  it('records the trusted-proxy XFF hop', async () => {
+  it('records the trusted-proxy last XFF hop', async () => {
     const app = appWith((c) => new Response(String(clientIpForStorage(c))));
     const res = await app.request(
       '/',
@@ -109,7 +139,22 @@ describe('clientIpForStorage', () => {
     expect(await res.text()).toBe('203.0.113.5');
   });
 
-  it('returns null without XFF even behind a trusted proxy', async () => {
+  it('records X-Real-IP over a spoofed XFF first hop (finding #7895)', async () => {
+    const app = appWith((c) => new Response(String(clientIpForStorage(c))));
+    const res = await app.request(
+      '/',
+      {
+        headers: {
+          'x-real-ip': '203.0.113.9',
+          'x-forwarded-for': '198.51.100.7, 10.0.0.1',
+        },
+      },
+      LOOPBACK_ENV
+    );
+    expect(await res.text()).toBe('203.0.113.9');
+  });
+
+  it('returns null without forwarding headers even behind a trusted proxy', async () => {
     const app = appWith((c) => new Response(String(clientIpForStorage(c))));
     const res = await app.request('/', {}, LOOPBACK_ENV);
     expect(await res.text()).toBe('null');

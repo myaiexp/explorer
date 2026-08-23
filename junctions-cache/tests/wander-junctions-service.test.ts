@@ -38,7 +38,7 @@ describe('deploy/wander-junctions.service sandbox (finding #7755)', () => {
 });
 
 describe('deploy/wander-junctions.service TRUSTED_PROXIES (finding #7754)', () => {
-    test('trusts the VPS Tailscale IPv4 so nginx X-Forwarded-For is the client key', () => {
+    test('trusts the VPS Tailscale IPv4 so nginx X-Real-IP / last XFF hop is the client key', () => {
         expect(unit).toMatch(/^Environment=TRUSTED_PROXIES=100\.117\.202\.73$/m);
     });
 

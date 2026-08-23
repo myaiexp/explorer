@@ -44,15 +44,37 @@ describe('ipRateLimit', () => {
         expect((await reqFrom(app, '10.0.0.2')).status).toBe(200); // 10.0.0.2 untouched
     });
 
-    test('reads only the first X-Forwarded-For hop (the client) as the key', async () => {
+    test('reads only the last X-Forwarded-For hop as the key (finding #7895)', async () => {
         const app = appWith(1);
-        // "client, proxy1, proxy2" — the client is the first entry.
+        // nginx appends $remote_addr as the last hop; leftmost hops are client-supplied.
         const h = { 'x-forwarded-for': '203.0.113.7, 10.0.0.1, 10.0.0.2' };
         expect((await app.request('/x', { headers: h }, PROXY_ENV)).status).toBe(200);
         expect((await app.request('/x', { headers: h }, PROXY_ENV)).status).toBe(429);
-        // A different client hop behind the same proxies is independent.
-        const h2 = { 'x-forwarded-for': '203.0.113.8, 10.0.0.1, 10.0.0.2' };
+        // Same last hop, different spoofed first hop — still the exhausted bucket.
+        const sameLast = { 'x-forwarded-for': '198.51.100.7, 10.0.0.2' };
+        expect((await app.request('/x', { headers: sameLast }, PROXY_ENV)).status).toBe(429);
+        // A different last hop is a distinct client.
+        const h2 = { 'x-forwarded-for': '203.0.113.7, 10.0.0.1, 10.0.0.3' };
         expect((await app.request('/x', { headers: h2 }, PROXY_ENV)).status).toBe(200);
+    });
+
+    test('prefers X-Real-IP over a spoofable XFF first hop (finding #7895)', async () => {
+        const app = appWith(1);
+        const h = {
+            'x-real-ip': '203.0.113.9',
+            'x-forwarded-for': '198.51.100.7, 10.0.0.1',
+        };
+        expect((await app.request('/x', { headers: h }, PROXY_ENV)).status).toBe(200);
+        expect((await app.request('/x', { headers: h }, PROXY_ENV)).status).toBe(429);
+        // Same X-Real-IP, different XFF — still the exhausted bucket.
+        const sameReal = {
+            'x-real-ip': '203.0.113.9',
+            'x-forwarded-for': '1.1.1.1, 2.2.2.2',
+        };
+        expect((await app.request('/x', { headers: sameReal }, PROXY_ENV)).status).toBe(429);
+        expect(
+            (await app.request('/x', { headers: { 'x-real-ip': '203.0.113.10' } }, PROXY_ENV)).status
+        ).toBe(200);
     });
 
     test('ignores X-Forwarded-For from an untrusted peer', async () => {

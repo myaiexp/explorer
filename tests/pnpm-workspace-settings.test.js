@@ -111,4 +111,16 @@ describe('pnpm settings location', () => {
         const overrides = readWorkspace(join(REPO_ROOT, 'server')).overrides;
         expect(overrides['@esbuild-kit/core-utils>esbuild']).toBe('0.25.12');
     });
+
+    test.each(['server', 'junctions-cache'])(
+        '%s pins hono at the CORS ReDoS floor (CVE-2026-69207 / finding #7896)',
+        (dir) => {
+            const pkg = JSON.parse(readFileSync(join(REPO_ROOT, dir, 'package.json'), 'utf8'));
+            const spec = pkg.dependencies.hono;
+            expect(spec).toEqual(expect.stringMatching(/\d+\.\d+\.\d+/));
+            const [maj, min, pat] = spec.match(/(\d+)\.(\d+)\.(\d+)/).slice(1).map(Number);
+            const atFloor = maj > 4 || (maj === 4 && min > 12) || (maj === 4 && min === 12 && pat >= 34);
+            expect(atFloor, `${dir} hono spec ${spec} is below 4.12.34`).toBe(true);
+        },
+    );
 });

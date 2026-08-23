@@ -3,9 +3,9 @@
 // Defense-in-depth behind the nginx edge limiter: the public path is already
 // `limit_req`'d, but this also covers direct tailnet access (which bypasses
 // nginx) and bounds a single client's request rate per endpoint. The client IP
-// is the TCP socket address; X-Forwarded-For is honoured only when that peer is
-// in TRUSTED_PROXIES (loopback by default — nginx). Direct tailnet access is
-// therefore keyed on the real peer, not a spoofable XFF.
+// is the TCP socket address; forwarding headers are honoured only when that
+// peer is in TRUSTED_PROXIES (loopback by default — nginx). Direct tailnet
+// access is therefore keyed on the real peer, not a spoofable XFF / X-Real-IP.
 //
 // TWIN: server/src/middleware/rate-limit.ts carries the same token-bucket core.
 // The two are deliberately kept independent — separate deployables on separate
@@ -49,21 +49,31 @@ function isPlausibleIp(value: string): boolean {
 }
 
 /**
- * Client IP for the rate-limit key. Trust X-Forwarded-For only when the TCP
+ * Client IP for the rate-limit key. Trust forwarding headers only when the TCP
  * peer is a known reverse proxy — otherwise a caller who reaches this service
- * directly (tailnet, misconfigured firewall) can cycle XFF values to bypass
- * the per-IP bucket (audit #1342; mirrored from explorer-api lib/client-ip.ts).
+ * directly (tailnet, misconfigured firewall) can cycle XFF / X-Real-IP values
+ * to bypass the per-IP bucket (audit #1342; mirrored from explorer-api
+ * lib/client-ip.ts). Behind a trusted proxy prefer X-Real-IP (nginx overwrites
+ * it with $remote_addr), then the last X-Forwarded-For hop — never the
+ * client-supplied first hop (finding #7895).
  */
+function forwardedClientIp(c: Context): string | undefined {
+    const real = c.req.header('x-real-ip')?.trim();
+    if (real && isPlausibleIp(real)) return real;
+    const xff = c.req.header('x-forwarded-for');
+    if (xff) {
+        const hops = xff.split(',');
+        const last = hops[hops.length - 1]?.trim();
+        if (last && isPlausibleIp(last)) return last;
+    }
+    return undefined;
+}
+
 export function clientIp(c: Context): string {
     const env = c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined;
     const peer = env?.incoming?.socket?.remoteAddress;
     if (peer && trustedProxies().has(peer)) {
-        const xff = c.req.header('x-forwarded-for');
-        if (xff) {
-            const first = xff.split(',')[0]?.trim();
-            if (first && isPlausibleIp(first)) return first;
-        }
-        return peer;
+        return forwardedClientIp(c) ?? peer;
     }
     if (peer) return peer;
     return 'unknown';

@@ -33,6 +33,27 @@ describe('CORS origin allowlist (production gate)', () => {
     });
     expect(res.headers.get('access-control-allow-origin')).not.toBe('http://localhost:8080');
   });
+
+  test('preflight Allow-Headers is the explicit list, not the request header (finding #7896)', async () => {
+    // Empty/default allowHeaders used to parse Access-Control-Request-Headers
+    // with a quadratic regex (CVE-2026-69207). An explicit list skips that path
+    // and must never echo attacker-supplied names.
+    const res = await app.request('/api/health', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://mase.fi',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': `authorization,content-type,${' '.repeat(2000)}x-evil`,
+      },
+    });
+    expect(res.status).toBeGreaterThanOrEqual(200);
+    expect(res.status).toBeLessThan(300);
+    const allowed = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+    const names = allowed.split(',').map((s) => s.trim()).filter(Boolean);
+    expect(names).toEqual(expect.arrayContaining(['authorization', 'content-type', 'x-account-token']));
+    expect(names).not.toContain('x-evil');
+    expect(allowed).not.toMatch(/ {8}/);
+  });
 });
 
 describe('CORS origin allowlist (non-production, finding #7928)', () => {

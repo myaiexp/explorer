@@ -91,6 +91,15 @@ describe('deploy/nginx-junctions.conf (finding #7559)', () => {
     test('caps POST bodies so the proxy cannot be used as a large-body dump', () => {
         expect(conf).toMatch(/client_max_body_size\s+16k;/);
     });
+
+    test('overwrites X-Forwarded-For with $remote_addr so client hops cannot key rate limits (finding #7895)', () => {
+        const locMatch = conf.match(/location \/api\/junctions\/\s*\{([^}]+)\}/);
+        const block = locMatch ? locMatch[1] : '';
+        expect(locMatch).not.toBeNull();
+        expect(block).toMatch(/^\s*proxy_set_header\s+X-Real-IP\s+\$remote_addr;/m);
+        expect(block).toMatch(/^\s*proxy_set_header\s+X-Forwarded-For\s+\$remote_addr;/m);
+        expect(block).not.toMatch(/^\s*proxy_set_header\s+X-Forwarded-For\s+\$proxy_add_x_forwarded_for;/m);
+    });
 });
 
 describe('deploy/nginx-explorer.conf API proxy (finding #7582)', () => {
@@ -102,7 +111,11 @@ describe('deploy/nginx-explorer.conf API proxy (finding #7582)', () => {
         expect(apiMatch).not.toBeNull();
         expect(apiBlock).toMatch(/^\s*limit_req\s+zone=api\b/m);
         expect(apiBlock).toMatch(/^\s*proxy_pass\s+http:\/\/127\.0\.0\.1:3700\/api\/;/m);
-        expect(apiBlock).toMatch(/^\s*proxy_set_header\s+X-Forwarded-For\s+\$proxy_add_x_forwarded_for;/m);
+        expect(apiBlock).toMatch(/^\s*proxy_set_header\s+X-Real-IP\s+\$remote_addr;/m);
+        // Overwrite, do not append — client-supplied XFF hops must not become
+        // the rate-limit key (finding #7895).
+        expect(apiBlock).toMatch(/^\s*proxy_set_header\s+X-Forwarded-For\s+\$remote_addr;/m);
+        expect(apiBlock).not.toMatch(/^\s*proxy_set_header\s+X-Forwarded-For\s+\$proxy_add_x_forwarded_for;/m);
     });
 });
 

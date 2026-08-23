@@ -39,8 +39,9 @@ export function authHeaders(token: string): Record<string, string> {
 }
 
 // Hono `app.request` Env that simulates nginx on loopback — required for
-// X-Forwarded-For to be trusted by lib/client-ip.ts (audit #1342). Without this
-// peer, client-supplied XFF is ignored and the rate-limit key is 'unknown'.
+// forwarding headers to be trusted by lib/client-ip.ts (audit #1342). Without
+// this peer, client-supplied XFF / X-Real-IP is ignored and the rate-limit key
+// is 'unknown'.
 export const TRUSTED_PROXY_ENV = {
   incoming: { socket: { remoteAddress: '127.0.0.1' } },
 } as const;

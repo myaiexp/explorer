@@ -1,9 +1,14 @@
 // Client IP extraction for rate limits + account ipFirstSeen.
 //
-// Trust X-Forwarded-For only when the TCP peer is a known reverse proxy
+// Trust forwarding headers only when the TCP peer is a known reverse proxy
 // (nginx on loopback). Untrusted peers — direct access, misconfigured
-// firewall, SSRF — can set XFF arbitrarily; ignoring it there keeps the
-// IP rate-limit buckets and ipFirstSeen column honest.
+// firewall, SSRF — can set XFF / X-Real-IP arbitrarily; ignoring them there
+// keeps the IP rate-limit buckets and ipFirstSeen column honest.
+//
+// Behind a trusted proxy, prefer X-Real-IP (nginx overwrites it with
+// $remote_addr) then the *last* X-Forwarded-For hop (the address nginx
+// appended). The leftmost XFF hops are client-supplied and must not key
+// buckets or ipFirstSeen (finding #7895).
 
 import type { Context } from 'hono';
 
@@ -46,24 +51,34 @@ export function peerAddress(c: Context): string | undefined {
   return typeof peer === 'string' && peer.length > 0 ? peer : undefined;
 }
 
-function firstXffHop(c: Context): string | undefined {
+function lastXffHop(c: Context): string | undefined {
   const raw = c.req.header('x-forwarded-for');
   if (!raw) return undefined;
-  const first = raw.split(',')[0]?.trim();
-  if (!first || !isPlausibleIp(first)) return undefined;
-  return first;
+  const hops = raw.split(',');
+  const last = hops[hops.length - 1]?.trim();
+  if (!last || !isPlausibleIp(last)) return undefined;
+  return last;
+}
+
+// nginx sets X-Real-IP to $remote_addr (the connecting client). Fall back to
+// the last XFF hop when a proxy only forwards X-Forwarded-For. Never walk
+// left into a spoofed first hop if the last hop is garbage.
+function forwardedClientIp(c: Context): string | undefined {
+  const real = c.req.header('x-real-ip')?.trim();
+  if (real && isPlausibleIp(real)) return real;
+  return lastXffHop(c);
 }
 
 /**
- * Rate-limit / bucket key. Prefer the client hop from XFF when the peer is a
- * trusted proxy; otherwise use the peer itself and never honor client XFF.
- * Falls back to 'unknown' when neither is available (e.g. app.request() harness
- * without an injected env).
+ * Rate-limit / bucket key. Prefer the nginx-overwritten client address when
+ * the peer is a trusted proxy; otherwise use the peer itself and never honor
+ * client forwarding headers. Falls back to 'unknown' when neither is available
+ * (e.g. app.request() harness without an injected env).
  */
 export function clientIp(c: Context): string {
   const peer = peerAddress(c);
   if (peer && isTrustedProxy(peer)) {
-    return firstXffHop(c) ?? peer;
+    return forwardedClientIp(c) ?? peer;
   }
   if (peer) return peer;
   return 'unknown';
@@ -71,14 +86,14 @@ export function clientIp(c: Context): string {
 
 /**
  * Value for accounts.ipFirstSeen. Only records a client IP when it comes from
- * a trusted-proxy XFF hop (the real visitor behind nginx). Direct/untrusted
- * peers are not written — ipFirstSeen is abuse-forensics for the public edge,
- * not a dump of every local socket address. Missing/untrusted → null.
+ * a trusted-proxy forwarding header (the real visitor behind nginx). Direct/
+ * untrusted peers are not written — ipFirstSeen is abuse-forensics for the
+ * public edge, not a dump of every local socket address. Missing/untrusted → null.
  */
 export function clientIpForStorage(c: Context): string | null {
   const peer = peerAddress(c);
   if (peer && isTrustedProxy(peer)) {
-    return firstXffHop(c) ?? null;
+    return forwardedClientIp(c) ?? null;
   }
   return null;
 }

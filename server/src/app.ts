@@ -32,7 +32,17 @@ export function createApp(db: Db): Hono {
     allowedOrigins.push('http://localhost:8080', 'http://localhost:9755');
   }
 
-  app.use('*', cors({ origin: allowedOrigins }));
+  // Explicit allowHeaders so preflight never parses attacker-controlled
+  // Access-Control-Request-Headers (CVE-2026-69207 / finding #7896). The
+  // client sends Authorization + Content-Type; X-Account-Token is the
+  // auth fallback header.
+  app.use(
+    '*',
+    cors({
+      origin: allowedOrigins,
+      allowHeaders: ['Authorization', 'Content-Type', 'X-Account-Token'],
+    })
+  );
 
   app.get('/api/health', (c) => c.json({ status: 'ok' }));
 
