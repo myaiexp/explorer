@@ -128,11 +128,21 @@ let sweepTimer: ReturnType<typeof setInterval> | undefined;
 
 // Start periodic eviction of stale rate-limit buckets. Idempotent; the timer is
 // unref'd so it never keeps the process alive. Called once from the server entry
-// point — tests drive sweepStaleBuckets() directly instead.
+// point (pinned by tests/bucket-sweeper.test.ts). Tests drive sweepStaleBuckets()
+// directly; if a test starts the interval it must call stopBucketSweeper() so
+// the timer is not left running.
 export function startBucketSweeper(intervalMs = 5 * MINUTE): void {
   if (sweepTimer) return;
   sweepTimer = setInterval(() => sweepStaleBuckets(), intervalMs);
   sweepTimer.unref?.();
+}
+
+// Test-facing counterpart of startBucketSweeper — clears the interval and
+// resets the idempotency latch so a later start can arm a new timer.
+export function stopBucketSweeper(): void {
+  if (!sweepTimer) return;
+  clearInterval(sweepTimer);
+  sweepTimer = undefined;
 }
 
 function limited(

@@ -31,9 +31,10 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         poiCategory: poiCategory ?? null,
     });
     session.junctions = r.junctions;
-    // Same gate as generateDestination: a dest with no outbound leg is a
-    // dashed straight-line fallback, not a walkable route worth persisting.
-    if (r.outbound) saveToHistory(session);
+    // Same gate as generateDestination: a dest with no outbound leg (or an
+    // empty-coords stub) is a dashed straight-line fallback, not a walkable
+    // route worth persisting (finding #7926).
+    if (r.outbound?.coords?.length) saveToHistory(session);
 }
 
 // Re-display a stored history/favorite entry. Lives here rather than in

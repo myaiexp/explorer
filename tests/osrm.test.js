@@ -156,6 +156,13 @@ describe('tryOsrm', () => {
         }));
         await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
     });
+
+    test('returns null when geometry.coordinates is an empty array (finding #7926)', async () => {
+        globalThis.fetch = vi.fn(async () => jsonResponse({
+            routes: [{ duration: 1, distance: 1, geometry: { coordinates: [] } }],
+        }));
+        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+    });
 });
 
 // ── snapToRoad ───────────────────────────────────────────────────────────────

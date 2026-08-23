@@ -379,6 +379,19 @@ describe('undefined-legs path (smart routing built nothing)', () => {
     expect(saveToHistoryCalls).toHaveLength(0);
   });
 
+  test('does not persist a truthy outbound with empty coords (finding #7926)', async () => {
+    buildRouteForDestination.mockResolvedValue({
+      dest: DEST, destName: 'Park',
+      outbound: { coords: [], duration: 1, distance: 1 }, return: null,
+      junctions: null, overlap: null,
+    });
+
+    await generate();
+
+    expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(0);
+  });
+
   test('one-way with an outbound leg still persists (return is always absent)', async () => {
     buildRouteForDestination.mockResolvedValue({
       dest: DEST, destName: 'Park',

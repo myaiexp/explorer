@@ -80,8 +80,10 @@ async function generateDestination() {
             session.junctions = junctions;
             // Missing outbound means routing built nothing. displayRoute still
             // draws the dest (dashed straight-line fallback), but persisting
-            // would store a fake walk in history and the cloud backup.
-            if (outboundRoute) saveToHistory(session);
+            // would store a fake walk in history and the cloud backup. Empty
+            // coords is the same failure (tryOsrm used to return a truthy
+            // {coords:[]} for a malformed OSRM 200 — finding #7926).
+            if (outboundRoute?.coords?.length) saveToHistory(session);
 
             if (waterLocked) {
                 showWarning('This area is mostly water — try a different start or larger radius.');

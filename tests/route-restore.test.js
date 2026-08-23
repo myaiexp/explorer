@@ -246,4 +246,20 @@ describe('buildAndDisplay — successful build persists', () => {
     expect(displayRouteCalls).toHaveLength(1);
     expect(saveToHistoryCalls).toHaveLength(0);
   });
+
+  test('does not persist a truthy outbound with empty coords (finding #7926)', async () => {
+    globalThis.buildRouteForMode = async () => ({
+      outbound: { coords: [], duration: 1, distance: 1 }, return: null, junctions: null,
+    });
+
+    await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'x',
+      destName: 'y',
+      onProgress: () => {},
+    });
+
+    expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(0);
+  });
 });
