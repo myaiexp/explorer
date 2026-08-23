@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Wander** — a Finland-only static web app for generating random walking/exploration destinations. Pick a starting location and radius, get a random POI or point, see a routed round-trip or one-way path on a Leaflet map. Starts outside `bbox.js` `FINLAND_BBOX` are rejected after geocode (`resolveStart` in `location-input.js`); walking routes go to self-hosted OSRM-foot (`https://mase.fi/api/osrm-fi`, `deploy/shelly-osrm/`), not public OSRM.
+**Wander** — a Finland-only static web app for generating random walking/exploration destinations. Pick a starting location and radius, get a random POI or point, see a routed round-trip or one-way path on a Leaflet map. Starts outside `bbox.js` `FINLAND_BBOX` are rejected after geocode (`resolveStart` in `location-input.js`) and when restoring a shared link (`restoreFromHash` in `share-link.js`, start and dest); walking routes go to self-hosted OSRM-foot (`https://mase.fi/api/osrm-fi`, `deploy/shelly-osrm/`), not public OSRM.
 
 UI design system (colors, typography, components, layout) is documented in `DESIGN.md`.
 

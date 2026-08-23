@@ -1,6 +1,7 @@
 // Route sharing via the URL hash — encode the current route into a link, copy it,
 // and restore one on load. Loaded after route-restore.js (buildAndDisplay),
-// loading.js, session-state.js and toast.js; resolved as globals at call time.
+// loading.js, session-state.js, toast.js and bbox.js (inFinland); resolved as
+// globals at call time.
 
 function encodeRouteHash() {
     const session = getCurrentSession();
@@ -42,9 +43,11 @@ async function restoreFromHash() {
     // A malformed shared link silently no-ops: the early returns below are the
     // whole handling. Nothing in the parse throws — URLSearchParams, split and
     // Number all coerce rather than fail — so a link with missing or garbage
-    // coordinates falls out at one of the two guards. Routing/display failures
-    // further down are NOT swallowed: they surface via showError so a shared link
-    // that resolves but can't be routed is visible to the user.
+    // coordinates falls out at one of the two guards. Out-of-Finland coords are
+    // well-formed but rejected with the same user-facing error as resolveStart
+    // (OSRM-foot only covers FI). Routing/display failures further down are NOT
+    // swallowed: they surface via showError so a shared link that resolves but
+    // can't be routed is visible to the user.
     const params = new URLSearchParams(hash);
     const s = params.get('s');
     const d = params.get('d');
@@ -57,6 +60,13 @@ async function restoreFromHash() {
     if (!start || !dest) return;
     const [startLat, startLng] = start;
     const [destLat, destLng] = dest;
+
+    // Same Finland gate as resolveStart: OSRM-foot only covers FI, so a
+    // Stockholm (or otherwise out-of-bbox) shared link must not reach it.
+    if (!inFinland(startLat, startLng) || !inFinland(destLat, destLng)) {
+        showError('Wander only routes within Finland — pick a starting location inside the country.');
+        return;
+    }
 
     // Set UI state
     document.getElementById('location').value = s;

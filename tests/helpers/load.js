@@ -70,6 +70,10 @@ export const SCRIPT_DEPS = {
     'route-view':   ['session-state', 'geometry', 'result-panel'],
     'visits-io':    ['visit-shape'],
     'sync':         ['sync-flush', 'sync-sections'],
+    // restoreFromHash gates on inFinland so a shared Stockholm link never
+    // hits OSRM-foot. Tests load share-link for real; bbox is the one
+    // collaborator that is not faked.
+    'share-link':   ['bbox'],
 };
 
 /** Raw source text of a repo-root script, by bare name ('osrm', not 'osrm.js'). */

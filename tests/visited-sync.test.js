@@ -1,6 +1,7 @@
 /**
- * Tests for visited.js — markAsVisited's create/undo state machine and
- * updateVisitedCounter. visited.js is a non-module script that assigns
+ * Tests for visited.js — markAsVisited's create/undo state machine,
+ * updateVisitedCounter, and toggleVisitedLayer (finding #7784). visited.js is a
+ * non-module script that assigns
  * globalThis.markAsVisited/toggleVisitedLayer/updateVisitedCounter; its free
  * identifiers (getVisits, syncedPut, syncedDelete, getCurrentSession,
  * syncMarkVisitedBtn, renderVisitedLayer, maybeRequestConsent, …) resolve to
@@ -15,7 +16,7 @@
  * and keeps localStorage and the cloud outbox in lockstep (audit finding #5400).
  */
 
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 import { installSyncedMirrorStubs } from './helpers/synced-mirror.js';
 
@@ -55,8 +56,8 @@ beforeEach(() => {
   globalThis.maybeRequestConsent = () => { consentCalls++; };
   globalThis.syncMarkVisitedBtn = () => { syncBtnCalls++; };
   globalThis.renderVisitedLayer = () => { renderLayerCalls++; };
-  globalThis.map = { removeLayer: () => {}, addLayer: () => {} };
-  globalThis.visitedLayerGroup = { addTo: () => {} };
+  globalThis.map = { removeLayer: vi.fn(), addLayer: vi.fn() };
+  globalThis.visitedLayerGroup = { addTo: vi.fn() };
 
   // Real snapshotSession (session.js) — visited needs minting, not a shallow
   // fixture copy. Other collaborators stay faked above.
@@ -245,5 +246,22 @@ describe('updateVisitedCounter', () => {
     updateVisitedCounter();
     expect(counterText()).toBe('0 visited');
     expect(exploredEl().style.display).toBe('none');
+  });
+});
+
+describe('toggleVisitedLayer', () => {
+  const btn = () => document.getElementById('toggleVisitedBtn');
+
+  test('first click hides the layer; second shows it again', () => {
+    toggleVisitedLayer();
+    expect(map.removeLayer).toHaveBeenCalledOnce();
+    expect(map.removeLayer).toHaveBeenCalledWith(visitedLayerGroup);
+    expect(visitedLayerGroup.addTo).not.toHaveBeenCalled();
+    expect(btn().textContent).toBe('Show visited routes');
+
+    toggleVisitedLayer();
+    expect(visitedLayerGroup.addTo).toHaveBeenCalledOnce();
+    expect(visitedLayerGroup.addTo).toHaveBeenCalledWith(map);
+    expect(btn().textContent).toBe('Hide visited routes');
   });
 });
