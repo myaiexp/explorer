@@ -14,6 +14,10 @@
 (function () {
     'use strict';
 
+    // Origin-scoped on https://mase.fi, not path-scoped. XSS anywhere on this
+    // origin can read the bearer — accepted same-origin trust: the client must
+    // hold plaintext so share-links can put it in the fragment (the API stores
+    // only a hash). See server/README.md "Client contract".
     var BACKUP_KEY = 'walk_cloud_backup';
     var USERNAME_RE = /^[a-z]+-[a-z]+-\d{1,2}$/;
     var API_BASE = '/explorer/api';

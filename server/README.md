@@ -63,6 +63,19 @@ private link works cross-device while keeping the secret out of server
 logs/Referer. The overflow menu's "Copy backup link" button
 (`copyBackupLink` in `cloud-backup-ui.js`) copies that full link.
 
+`localStorage` is origin-scoped (`https://mase.fi`), not path-scoped, so any
+script running on this origin (`/games`, `/porssi`, the site root, …) can
+read `walk_cloud_backup`. `/explorer`'s CSP does not apply to those
+responses. That is the browser same-origin trust boundary, not a gap in the
+token design: the client must hold the plaintext so "Copy backup link" can
+put it in the fragment, and the API stores only a SHA-256 digest so it
+cannot re-issue. A `Path=/explorer` cookie would keep sibling tabs from
+*reading* the token but would send it on every `/explorer/*` request (access
+logs) and is still writable from the rest of the origin (cookie tossing). A
+dedicated origin (`explorer.mase.fi`) would isolate storage, but personal
+apps stay on `mase.fi/<name>/` by policy. Treat XSS anywhere on
+`https://mase.fi` as full cloud-backup takeover.
+
 Opening a link-sourced account on a device that isn't already bound to it (no
 stored consent record for that username) always prompts a `window.confirm`
 before adopting it — even on a fresh/empty browser — so a shared link can't
