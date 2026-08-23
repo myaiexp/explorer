@@ -1,7 +1,7 @@
 // OSRM routing + loop building — self-hosted OSRM-foot wrappers (route / nearest
 // / table), road/junction snapping, and the envelope/junction loop builders.
 // No DOM: callers pass a precomputed `spread`. Loaded after net.js (for
-// fetchWithTimeout), geometry.js (for envelopeOffsetPoint / computeSpreadParams),
+// fetchWithTimeout), geometry.js (for envelopeOffsetPoint),
 // geo-utils.js (haversineKm / kmToDegLat) and loop-quality.js (loopOverlapFraction),
 // before route-dispatch.js + app.js.
 
