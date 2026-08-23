@@ -4,7 +4,7 @@ import { schema } from '../db.js';
 import { sectionsRoutes } from './sections.js';
 import { resetRateLimiter } from '../middleware/rate-limit.js';
 import { hashToken } from '../lib/token-hash.js';
-import { MAX_ROWS_PER_SECTION } from '../lib/validate-fields.js';
+import { MAX_LABEL_LEN, MAX_NAME_LEN, MAX_ROWS_PER_SECTION } from '../lib/validate-fields.js';
 
 // Captures the single insert/delete op a handler issues against the fake Db.
 interface RecordedOp {
@@ -537,6 +537,32 @@ describe('string-length caps', () => {
     const res = await app.request('/alice/saved-locations/s1', jsonReq('PUT', { label: 'x'.repeat(501), value: 'ok' }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/label exceeds maximum length/);
+  });
+
+  it('rejects an over-length tripMode with 400', async () => {
+    // Finding #7590 — startLabel/poiCategory/destName were pinned; tripMode
+    // shares tooLong(MAX_LABEL_LEN) and would 400 in production with no pin.
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request(
+      '/alice/visits/v1',
+      jsonReq('PUT', validTrip({ tripMode: 'x'.repeat(MAX_LABEL_LEN + 1) }))
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toEqual(`tripMode exceeds maximum length of ${MAX_LABEL_LEN}`);
+    expect(ops).toHaveLength(0);
+  });
+
+  it('rejects an over-length destName with 400', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request(
+      '/alice/visits/v1',
+      jsonReq('PUT', validTrip({ destName: 'x'.repeat(MAX_NAME_LEN + 1) }))
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toEqual(`destName exceeds maximum length of ${MAX_NAME_LEN}`);
+    expect(ops).toHaveLength(0);
   });
 
   it('accepts a destName up to the 2000-char name cap', async () => {
