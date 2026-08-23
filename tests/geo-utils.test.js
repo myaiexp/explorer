@@ -1,6 +1,10 @@
 // @vitest-environment node
 /**
- * Tests for geo-utils.js — haversineKm + haversineM.
+ * Tests for geo-utils.js — haversineKm / haversineM plus the km→degree
+ * projection (kmToDegLat / kmToDegLng / bboxAround). Finding #7589: the
+ * projection helpers are the single source for Overpass radius bboxes and
+ * osrm.js corridor padding; overpass-parse.test.js only asserted the query
+ * contains bboxAround(...) — a tautology if the 111 km/deg formula drifted.
  *
  * Loading: geo-utils.js is a non-module browser script, loaded via
  * helpers/load.js's loadScripts('geo-utils'); the script's explicit
@@ -68,5 +72,41 @@ describe('haversineM', () => {
     test('symmetric in argument order', () => {
         expect(hM(60.17, 24.94, 61.50, 23.76))
             .toBeCloseTo(hM(61.50, 23.76, 60.17, 24.94), 6);
+    });
+});
+
+describe('kmToDegLat', () => {
+    test('111 km = 1 degree — the 111 km/deg convention', () => {
+        // Exact: 111/111. A copied 110.5 (mean-earth) would miss this.
+        expect(globalThis.kmToDegLat(111)).toBe(1);
+    });
+});
+
+describe('kmToDegLng', () => {
+    test('at 60°N the lng pad is 2× the lat pad (cos(60°)=0.5)', () => {
+        // Same convention as junctions-cache wideBboxFromStart.
+        expect(globalThis.kmToDegLng(111, 60)).toBeCloseTo(2, 10);
+        expect(globalThis.kmToDegLng(10, 60)).toBeCloseTo(10 / 55.5, 10);
+        expect(globalThis.kmToDegLng(10, 60) / globalThis.kmToDegLat(10))
+            .toBeCloseTo(2, 10);
+    });
+
+    test('at the equator lng pad equals lat pad (cos(0°)=1)', () => {
+        expect(globalThis.kmToDegLng(10, 0)).toBe(globalThis.kmToDegLat(10));
+    });
+});
+
+describe('bboxAround', () => {
+    test('10 km box at 60°N, 24°E matches the 111 km/deg cache convention', () => {
+        // Overpass string "minLat,minLng,maxLat,maxLng", no spaces.
+        // latPad = 10/111; lngPad = 10/(111·cos60°) = 10/55.5.
+        const s = globalThis.bboxAround(60, 24, 10);
+        expect(s.includes(' ')).toBe(false);
+        const parts = s.split(',');
+        expect(parts).toHaveLength(4);
+        expect(Number(parts[0])).toBeCloseTo(60 - 10 / 111, 10);
+        expect(Number(parts[1])).toBeCloseTo(24 - 10 / 55.5, 10);
+        expect(Number(parts[2])).toBeCloseTo(60 + 10 / 111, 10);
+        expect(Number(parts[3])).toBeCloseTo(24 + 10 / 55.5, 10);
     });
 });

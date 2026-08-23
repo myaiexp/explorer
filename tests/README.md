@@ -17,7 +17,7 @@ Backend DB safety (`*_test` hard-throw, `fileParallelism: false`) lives in CLAUD
 
 Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, geometry, loop-quality]`, `elevation → [net, geo-utils]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
 
-`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check. `elevation` is a key (its tests load it for real, with net + geo-utils); route-view's Loaded-after sentence lists only the real-load collaborators so the same check does not pull elevation.js into those fakes.
+`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check. `app.js` is the same shape in `app.test.js` (faked render*/ExplorerSync collaborators; poi-types + settings loaded explicitly for the restore-order pin) — adding it as a key would pull the composition root into any suite that named it. `elevation` is a key (its tests load it for real, with net + geo-utils); route-view's Loaded-after sentence lists only the real-load collaborators so the same check does not pull elevation.js into those fakes.
 
 ### Transform-before-eval
 
@@ -32,6 +32,7 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 
 | Source | Tests |
 | --- | --- |
+| `app.js` | `app.test.js` (composition-root wiring; not a SCRIPT_DEPS key) |
 | `bbox.js` | `in-finland.test.js` |
 | `export.js` | `export-download.test.js`, `export.test.js` |
 | `visited.js` | `mark-visited.test.js`, `visited-sync.test.js` |
