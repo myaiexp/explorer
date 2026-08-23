@@ -4,7 +4,12 @@ import { schema } from '../db.js';
 import { sectionsRoutes } from './sections.js';
 import { resetRateLimiter } from '../middleware/rate-limit.js';
 import { hashToken } from '../lib/token-hash.js';
-import { MAX_LABEL_LEN, MAX_NAME_LEN, MAX_ROWS_PER_SECTION } from '../lib/validate-fields.js';
+import {
+  MAX_LABEL_LEN,
+  MAX_NAME_LEN,
+  MAX_ROWS_PER_SECTION,
+  MAX_STORED_BYTES,
+} from '../lib/validate-fields.js';
 
 // Captures the single insert/delete op a handler issues against the fake Db.
 interface RecordedOp {
@@ -21,7 +26,12 @@ interface RecordedOp {
 // `userExists` models whether the account row exists: true → the select returns
 // the account (auth finds a matching token), false → [] (auth 401s). The handlers
 // no longer re-check existence themselves — accountAuth is the sole gate.
-function makeFakeDb(opts: { userExists: boolean; rowCount?: number; hasExistingRow?: boolean }) {
+function makeFakeDb(opts: {
+  userExists: boolean;
+  rowCount?: number;
+  hasExistingRow?: boolean;
+  storedBytes?: number;
+}) {
   const ops: RecordedOp[] = [];
   const db = {
     select(shape?: Record<string, unknown>) {
@@ -66,7 +76,8 @@ function makeFakeDb(opts: { userExists: boolean; rowCount?: number; hasExistingR
       };
     },
     execute() {
-      return Promise.resolve();
+      // FOR UPDATE ignores the result; stored-bytes helpers read `.bytes`.
+      return Promise.resolve([{ bytes: opts.storedBytes ?? 0 }]);
     },
     transaction(fn: (tx: unknown) => Promise<unknown>) {
       return fn(db);
@@ -278,6 +289,18 @@ describe('visits PUT', () => {
     expect(ops).toHaveLength(1);
     expect(ops[0].row).toMatchObject({ id: 'v1', distance: 99 });
   });
+
+  it('returns 409 when a new visit would exceed the per-account stored-bytes budget', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true, storedBytes: MAX_STORED_BYTES });
+    const app = sectionsRoutes(db);
+    const res = await app.request(
+      '/alice/visits/v-fat',
+      jsonReq('PUT', validTrip({ routeCoords: [[60.1, 24.9], [60.2, 25.0]] })),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(String(MAX_STORED_BYTES));
+    expect(ops).toHaveLength(0);
+  });
 });
 
 describe('visits DELETE', () => {
@@ -402,6 +425,17 @@ describe('saved-locations PUT', () => {
     const res = await app.request('/alice/saved-locations/s1', jsonReq('PUT', { label: 'x' }));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'Missing required field: value' });
+  });
+
+  it('still inserts at the stored-bytes budget (saved-locations add no jsonb)', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true, storedBytes: MAX_STORED_BYTES });
+    const app = sectionsRoutes(db);
+    const res = await app.request(
+      '/alice/saved-locations/s-at-cap',
+      jsonReq('PUT', { label: 'Home', value: '60.1,24.9' }),
+    );
+    expect(res.status).toBe(204);
+    expect(ops).toHaveLength(1);
   });
 });
 

@@ -9,7 +9,9 @@ import { isObject, isArray, type AnyRecord } from '../lib/type-guards.js';
 import {
   MAX_IMPORT_BODY_BYTES,
   MAX_ROWS_PER_SECTION,
+  MAX_STORED_BYTES,
 } from '../lib/validate-fields.js';
+import { incomingJsonbBytes, wouldExceedStoredBudget } from '../lib/snapshot-size.js';
 import { accountAuth } from '../middleware/auth.js';
 import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';
 import {
@@ -145,6 +147,21 @@ export function importRoutes(db: Db): Hono {
         rows.push(validated);
       }
       collected.push({ table, rows });
+    }
+
+    // Per-account stored-jsonb budget (finding #7756). Import is a replace, so
+    // charge the incoming jsonb only — not current + incoming. Today's
+    // MAX_IMPORT_BODY_BYTES sits below MAX_STORED_BYTES; this check is the
+    // quota itself so a later body-cap raise cannot skip it.
+    let incomingBytes = 0;
+    for (const { table, rows } of collected) {
+      for (const row of rows) incomingBytes += incomingJsonbBytes(table, row);
+    }
+    if (wouldExceedStoredBudget(incomingBytes)) {
+      return c.json(
+        { error: `import exceeds maximum stored size of ${MAX_STORED_BYTES} bytes` },
+        400,
+      );
     }
 
     // Atomic replace: wipe all four sections, then re-insert (same table order).

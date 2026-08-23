@@ -45,12 +45,16 @@ failed-auth probing is throttled before the Postgres lookup.
 
 - Per-section PUT inserts and bulk import are capped at 10,000 rows
   (`MAX_ROWS_PER_SECTION`). Updates of an existing id are always allowed.
+- Per-account stored jsonb is capped at 32 MiB (`MAX_STORED_BYTES`, same
+  `octet_length` estimator as GET). Growing PUTs 409, growing imports 400;
+  shrinks and saved-location writes still go through. Finding #7756: row ×
+  per-row caps alone allowed ~5 GiB of favorites JSONB.
 - Default `GET /:username` omits visit/history polylines and favorite route
   geometry older than the newest 50 (`GET_GEOMETRY_KEEP`). The DB still stores
-  full rows — cloud is the archive.
+  full rows up to `MAX_STORED_BYTES` — cloud is the archive.
 - `?geometry=full` returns the archive only when stored jsonb is under 8 MiB
   (`GET_SNAPSHOT_MAX_BYTES`); otherwise 413, so Node never JSON-encodes a
-  multi-GB fill.
+  fill above the dump cap.
 
 Caps and validators live in `src/lib/validate-fields.ts` /
 `src/lib/validate-rows.ts`.

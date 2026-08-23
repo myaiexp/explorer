@@ -47,9 +47,10 @@ export const MAX_IMPORT_ROWS_PER_SECTION = MAX_ROWS_PER_SECTION;
 // storage.js VISIT_GEOMETRY_KEEP. tests/geometry-keep-parity.test.js fails RED
 // if these drift. The same window applies to favorite payloads:
 // newest N keep the stored JSONB, older ones are rebuilt from FAVORITE_LIGHT_KEYS
-// so a 10k × 512 KB fill cannot be serialized on the default GET. The DB still
-// stores full rows (cloud is the archive). `?geometry=full` returns them only
-// when the stored jsonb is under GET_SNAPSHOT_MAX_BYTES; otherwise 413.
+// so a 10k × 512 KB fill cannot be serialized on the default GET. Writes are
+// also bounded by MAX_STORED_BYTES (cloud is still the archive, not a multi-GB
+// one). `?geometry=full` returns stored rows only when the jsonb is under
+// GET_SNAPSHOT_MAX_BYTES; otherwise 413.
 export const GET_GEOMETRY_KEEP = 50;
 
 // Uncompressed JSON-text budget for `?geometry=full`. Above this, GET 413s
@@ -57,6 +58,15 @@ export const GET_GEOMETRY_KEEP = 50;
 // consults this — it uses the keep window. 8 MiB is well under MemoryMax and
 // still covers a small account's archive dump; the client never sends the flag.
 export const GET_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
+
+// Per-account stored-jsonb budget (finding #7756). Same estimator GET uses
+// (sum of octet_length(::text) on visits/history polylines + favorite payloads).
+// Row × per-row caps still allow ~5 GiB of favorites JSONB; this is the disk
+// bound. 32 MiB is larger than GET_SNAPSHOT_MAX_BYTES (cloud is the archive;
+// default GET strips old geometry) and MAX_IMPORT_BODY_BYTES (a legitimate
+// backup always fits). Growing PUTs/imports that would exceed it 409/400;
+// shrinks and saved-location writes (no jsonb) still go through.
+export const MAX_STORED_BYTES = 32 * 1024 * 1024;
 
 // Scalar bookmark fields copied into an older favorite's GET payload. Route
 // geometry and any attacker-supplied blob keys stay in the DB and out of the

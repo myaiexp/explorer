@@ -9,7 +9,17 @@ import { schema } from '../db.js';
 import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';
 import { accountAuth } from '../middleware/auth.js';
 import { isObject, type AnyRecord } from '../lib/type-guards.js';
-import { MAX_ROWS_PER_SECTION, MAX_WRITE_BODY_BYTES } from '../lib/validate-fields.js';
+import {
+  MAX_ROWS_PER_SECTION,
+  MAX_STORED_BYTES,
+  MAX_WRITE_BODY_BYTES,
+} from '../lib/validate-fields.js';
+import {
+  estimateRowStoredBytes,
+  estimateStoredSnapshotBytes,
+  incomingJsonbBytes,
+  wouldExceedStoredBudget,
+} from '../lib/snapshot-size.js';
 import {
   validateTripRow,
   validateVisitRow,
@@ -105,6 +115,19 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
           .where(eq(table.username, username));
         if ((counted?.n ?? 0) >= MAX_ROWS_PER_SECTION) {
           return `section exceeds maximum of ${MAX_ROWS_PER_SECTION} rows`;
+        }
+      }
+      // Per-account stored-jsonb budget (finding #7756). Same estimator GET
+      // uses; charged as a delta so an update is not double-counted. Shrinks
+      // skip the SUM entirely. The account-row lock above serializes concurrent
+      // growth so two PUTs cannot both observe current < cap and both insert.
+      const newBytes = incomingJsonbBytes(table, built.row);
+      const oldBytes =
+        existing.length === 0 ? 0 : await estimateRowStoredBytes(tx, table, username, id);
+      if (newBytes > oldBytes) {
+        const current = await estimateStoredSnapshotBytes(tx, username);
+        if (wouldExceedStoredBudget(newBytes, current, oldBytes)) {
+          return `account exceeds maximum stored size of ${MAX_STORED_BYTES} bytes`;
         }
       }
       await tx
