@@ -1,12 +1,12 @@
 // @vitest-environment node
 // Unit tests for junctions-cache/src/lib/parse-request.ts — /junctions query
-// validation (bbox parsing/range/area caps, exclude, all-or-nothing anchors,
-// start coord/maxKm caps). These used to live inline in the route handler;
-// the HTTP suite in server.test.ts still proves they are wired, this file
-// pins the parser in isolation.
+// and JSON-body validation (bbox parsing/range/area caps, exclude,
+// all-or-nothing anchors, start coord/maxKm caps, fieldsFromUnknown
+// coercion). The HTTP suite in server.test.ts / post-junctions.test.ts
+// still proves they are wired; this file pins the parser in isolation.
 
 import { describe, test, expect } from 'vitest';
-import { parseJunctionsQuery, MAX_AREA_DEG2, MAX_RADIUS_KM } from '../src/lib/parse-request.js';
+import { parseJunctionsQuery, fieldsFromUnknown, MAX_AREA_DEG2, MAX_RADIUS_KM } from '../src/lib/parse-request.js';
 
 const OK_BBOX = '60,24,60.5,24.5';
 
@@ -204,5 +204,54 @@ describe('partial start params → incomplete anchor', () => {
         expect(r.ok).toBe(true);
         if (!r.ok) return;
         expect(r.anchor).toBeNull();
+    });
+});
+
+describe('fieldsFromUnknown — JSON body → JunctionsQuery', () => {
+    test('non-object body → body must be a JSON object', () => {
+        for (const body of [null, 'bbox', 12, true, [1, 2]]) {
+            expect(fieldsFromUnknown(body)).toEqual({ ok: false, error: 'body must be a JSON object' });
+        }
+    });
+
+    test('coerces JSON numbers to the string fields parseJunctionsQuery expects', () => {
+        const r = fieldsFromUnknown({
+            bbox: OK_BBOX,
+            exclude: 'winter',
+            startLat: 60.2,
+            startLng: 24.2,
+            maxKm: 10,
+        });
+        expect(r).toEqual({
+            ok: true,
+            fields: {
+                bbox: OK_BBOX,
+                exclude: 'winter',
+                startLat: '60.2',
+                startLng: '24.2',
+                maxKm: '10',
+            },
+        });
+    });
+
+    test('string fields pass through; empty string and null become absent', () => {
+        const r = fieldsFromUnknown({ bbox: OK_BBOX, exclude: '', startLat: null });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.fields).toEqual({
+            bbox: OK_BBOX,
+            exclude: undefined,
+            startLat: undefined,
+            startLng: undefined,
+            maxKm: undefined,
+        });
+    });
+
+    test('nested objects on a field are treated as absent, not stringified', () => {
+        const r = fieldsFromUnknown({ bbox: { min: 60 }, startLat: 60.2 });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.fields.bbox).toBeUndefined();
+        expect(r.fields.startLat).toBe('60.2');
     });
 });

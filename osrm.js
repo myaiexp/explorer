@@ -150,16 +150,11 @@ async function buildLoop(startLat, startLng, destLat, destLng, spread) {
     return { outbound, return: ret };
 }
 
-// Fetch OSM nodes referenced by ≥2 highway ways inside the corridor between
-// start/dest, expanded by offsetKm on each side. Goes through the
-// junctions-cache service on shelly (mase.fi/api/junctions) which handles
-// Overpass calls + persistent caching.
-//
-// startLat/startLng + maxKm are sent so the server can cache once per
-// (start, radius) instead of per destination bbox; it fetches a wide
-// start ± maxKm bbox once and filters to the requested corridor. maxKm is
-// the caller's max-distance budget (passed in, never read from the DOM here)
-// so this stays pure and the cache key matches the radius the caller works in.
+// Fetch OSM junctions in the start/dest corridor via the shelly cache
+// (mase.fi/api/junctions). Start/radius go in the POST body — never the
+// query string — so nginx access logs cannot persist home coords (#7559).
+// maxKm is the caller's budget (passed in, never read from the DOM) so
+// the cache key matches the radius the caller works in.
 async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode = false) {
     const minLat = Math.min(startLat, destLat);
     const maxLat = Math.max(startLat, destLat);
@@ -170,15 +165,18 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
     const lngPad = kmToDegLng(offsetKm, midLat);
     const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
     const exclude = winterMode ? 'winter' : 'default';
-    const params = new URLSearchParams({ bbox, exclude });
+    const body = { bbox, exclude };
     if (Number.isFinite(maxKm) && maxKm > 0) {
-        params.set('startLat', String(startLat));
-        params.set('startLng', String(startLng));
-        params.set('maxKm', String(maxKm));
+        body.startLat = startLat;
+        body.startLng = startLng;
+        body.maxKm = maxKm;
     }
-    const url = `/api/junctions/junctions?${params.toString()}`;
     if (onProgress) onProgress('Searching for junctions…');
-    const response = await fetchWithTimeout(url);
+    const response = await fetchWithTimeout('/api/junctions/junctions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+    });
     if (!response.ok) {
         throw new Error('POI search is busy. Please try again.');
     }

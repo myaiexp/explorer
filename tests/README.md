@@ -24,7 +24,7 @@ Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm �
 `readScript(name)` returns source text. Two tests must transform it before evaluating:
 
 - **fit-encoder** — string-inject an `_internals` export, then `evalScript` the patched source (side-effect load; return value unused).
-- **corridor-junctions** — extract `fetchCorridorJunctions` from osrm.js, then a returning `new Function(...)()` wrapper. `evalScript` does not fit: it discards its return value, and the test needs the extracted function back.
+- **corridor-junctions** — extract `fetchCorridorJunctions` from osrm.js, then a returning `new Function(...)()` wrapper. `evalScript` does not fit: it discards its return value, and the test needs the extracted function back. Pins finding #7559: start/radius travel in the POST body, never the query string.
 
 ### File naming
 

@@ -6,7 +6,11 @@ import { timingSafeEqual } from 'node:crypto';
 import { getJunctions, getJunctionsAnchored, cacheSize, type LookupResult } from './cache.js';
 import { ipRateLimit } from './rate-limit.js';
 import { log, getRecentLogs } from './log.js';
-import { parseJunctionsQuery } from './lib/parse-request.js';
+import {
+    parseJunctionsQuery,
+    fieldsFromUnknown,
+    type ParsedJunctionsQuery,
+} from './lib/parse-request.js';
 
 // /logs serves recent request events back to a remote caller (debugging). Those
 // events include the walker's anchored `start` at ~110 m precision (≈ home) and
@@ -30,6 +34,67 @@ function overpassMsOf(result: LookupResult): number | undefined {
     return result.cache === 'hit' ? undefined : result.overpassMs;
 }
 
+// startLat/startLng on the request line land in nginx access logs at full JS
+// precision (often home). GET is bbox-only; anchored lookups go through POST
+// (finding #7559). A leftover query-string start on POST is refused the same way.
+const QUERY_ANCHOR_ERROR = 'startLat, startLng, maxKm must be sent in the POST body';
+
+function queryHasAnchor(c: Context): boolean {
+    return c.req.query('startLat') != null
+        || c.req.query('startLng') != null
+        || c.req.query('maxKm') != null;
+}
+
+async function lookupJunctions(c: Context, parsed: ParsedJunctionsQuery) {
+    const { bbox, exclude, bboxLog, anchor } = parsed;
+    const mode = anchor ? 'anchored' : 'bbox';
+    try {
+        if (anchor) {
+            const result = await getJunctionsAnchored(anchor, exclude, bbox);
+            log('INFO', {
+                event: 'lookup',
+                mode,
+                cache: result.cache,
+                start: `${anchor.startLat.toFixed(3)},${anchor.startLng.toFixed(3)}`,
+                maxKm: Math.ceil(anchor.maxKm),
+                bbox: bboxLog,
+                exclude,
+                count: result.junctions.length,
+                total: result.total,
+                overpass_ms: overpassMsOf(result),
+            });
+            return c.json({
+                cache: result.cache,
+                count: result.junctions.length,
+                total: result.total,
+                overpassMs: overpassMsOf(result),
+                junctions: result.junctions,
+            });
+        }
+
+        const result = await getJunctions(bbox, exclude);
+        log('INFO', {
+            event: 'lookup',
+            mode,
+            cache: result.cache,
+            bbox: bboxLog,
+            exclude,
+            count: result.junctions.length,
+            overpass_ms: overpassMsOf(result),
+        });
+        return c.json({
+            cache: result.cache,
+            count: result.junctions.length,
+            overpassMs: overpassMsOf(result),
+            junctions: result.junctions,
+        });
+    } catch (e) {
+        const err = e as Error;
+        log('ERROR', { event: 'lookup_failed', mode, bbox: bboxLog, exclude, err: err.message });
+        return c.json({ error: 'POI search is busy. Please try again.' }, 502);
+    }
+}
+
 export function createApp(): Hono {
     const app = new Hono();
 
@@ -51,62 +116,28 @@ export function createApp(): Hono {
     });
 
     app.get('/junctions', junctionsRateLimit, async c => {
+        if (queryHasAnchor(c)) return c.json({ error: QUERY_ANCHOR_ERROR }, 400);
         const parsed = parseJunctionsQuery({
             bbox: c.req.query('bbox'),
             exclude: c.req.query('exclude'),
-            startLat: c.req.query('startLat'),
-            startLng: c.req.query('startLng'),
-            maxKm: c.req.query('maxKm'),
         });
         if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+        return lookupJunctions(c, parsed);
+    });
 
-        const { bbox, exclude, bboxLog, anchor } = parsed;
-        const mode = anchor ? 'anchored' : 'bbox';
+    app.post('/junctions', junctionsRateLimit, async c => {
+        if (queryHasAnchor(c)) return c.json({ error: QUERY_ANCHOR_ERROR }, 400);
+        let body: unknown;
         try {
-            if (anchor) {
-                const result = await getJunctionsAnchored(anchor, exclude, bbox);
-                log('INFO', {
-                    event: 'lookup',
-                    mode,
-                    cache: result.cache,
-                    start: `${anchor.startLat.toFixed(3)},${anchor.startLng.toFixed(3)}`,
-                    maxKm: Math.ceil(anchor.maxKm),
-                    bbox: bboxLog,
-                    exclude,
-                    count: result.junctions.length,
-                    total: result.total,
-                    overpass_ms: overpassMsOf(result),
-                });
-                return c.json({
-                    cache: result.cache,
-                    count: result.junctions.length,
-                    total: result.total,
-                    overpassMs: overpassMsOf(result),
-                    junctions: result.junctions,
-                });
-            }
-
-            const result = await getJunctions(bbox, exclude);
-            log('INFO', {
-                event: 'lookup',
-                mode,
-                cache: result.cache,
-                bbox: bboxLog,
-                exclude,
-                count: result.junctions.length,
-                overpass_ms: overpassMsOf(result),
-            });
-            return c.json({
-                cache: result.cache,
-                count: result.junctions.length,
-                overpassMs: overpassMsOf(result),
-                junctions: result.junctions,
-            });
-        } catch (e) {
-            const err = e as Error;
-            log('ERROR', { event: 'lookup_failed', mode, bbox: bboxLog, exclude, err: err.message });
-            return c.json({ error: 'POI search is busy. Please try again.' }, 502);
+            body = await c.req.json();
+        } catch {
+            return c.json({ error: 'invalid JSON' }, 400);
         }
+        const fields = fieldsFromUnknown(body);
+        if (!fields.ok) return c.json({ error: fields.error }, 400);
+        const parsed = parseJunctionsQuery(fields.fields);
+        if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+        return lookupJunctions(c, parsed);
     });
 
     return app;

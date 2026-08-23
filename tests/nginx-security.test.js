@@ -66,6 +66,33 @@ describe('deploy/nginx-explorer.conf (finding #7059)', () => {
     });
 });
 
+describe('deploy/nginx-junctions.conf (finding #7559)', () => {
+    const conf = readDeploy('nginx-junctions.conf');
+    const logFmt = readDeploy('nginx-junctions-log-format.conf');
+
+    test('proxies /api/junctions/ to the shelly cache with the api limit_req zone', () => {
+        expect(conf).toMatch(/location \/api\/junctions\//);
+        expect(conf).toMatch(/limit_req\s+zone=api\b/);
+        expect(conf).toMatch(/proxy_pass\s+http:\/\/100\.69\.160\.113:5001\//);
+        expect(conf).toMatch(/proxy_read_timeout\s+60s;/);
+    });
+
+    test('access_log uses the path-only format so query strings cannot persist coords', () => {
+        expect(conf).toMatch(/access_log\s+\S+\s+junctions_no_qs;/);
+        expect(logFmt).toMatch(/log_format\s+junctions_no_qs/);
+        // Only the format string is the log line — comments may name $request
+        // as the thing we are *not* logging.
+        const formatLines = logFmt.split('\n').filter((l) => /^\s*log_format|^\s+'/.test(l)).join('\n');
+        expect(formatLines).toMatch(/\$request_method \$uri \$server_protocol/);
+        expect(formatLines).not.toMatch(/\$request_uri/);
+        expect(formatLines).not.toMatch(/\$request[^_m]/);
+    });
+
+    test('caps POST bodies so the proxy cannot be used as a large-body dump', () => {
+        expect(conf).toMatch(/client_max_body_size\s+16k;/);
+    });
+});
+
 describe('deploy/nginx-explorer.conf API proxy (finding #7582)', () => {
     const conf = readDeploy('nginx-explorer.conf');
     const apiMatch = conf.match(/location \/explorer\/api\/\s*\{([^}]+)\}/);

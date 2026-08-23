@@ -1,4 +1,4 @@
-// Parse and cap /junctions query parameters.
+// Parse and cap /junctions query/JSON-body parameters.
 
 import type { Bbox, ExcludePreset } from '../overpass.js';
 
@@ -24,6 +24,36 @@ export type ParsedJunctionsQuery = {
 };
 
 export type ParseFailure = { ok: false; error: string };
+
+export type FieldsResult = { ok: true; fields: JunctionsQuery } | ParseFailure;
+
+// Coerce a JSON body field into the string shape parseJunctionsQuery
+// already accepts. Numbers are the natural POST-JSON form (the frontend
+// sends them); empty string / null / nested objects are treated as absent.
+function stringifyField(v: unknown): string | undefined {
+    if (v == null) return undefined;
+    if (typeof v === 'string') return v === '' ? undefined : v;
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+    if (typeof v === 'boolean') return String(v);
+    return undefined;
+}
+
+export function fieldsFromUnknown(body: unknown): FieldsResult {
+    if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+        return { ok: false, error: 'body must be a JSON object' };
+    }
+    const o = body as Record<string, unknown>;
+    return {
+        ok: true,
+        fields: {
+            bbox: stringifyField(o.bbox),
+            exclude: stringifyField(o.exclude),
+            startLat: stringifyField(o.startLat),
+            startLng: stringifyField(o.startLng),
+            maxKm: stringifyField(o.maxKm),
+        },
+    };
+}
 
 export function parseJunctionsQuery(q: JunctionsQuery): ParsedJunctionsQuery | ParseFailure {
     const bboxStr = q.bbox;

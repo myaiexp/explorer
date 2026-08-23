@@ -4,8 +4,8 @@
 // Two key shapes coexist:
 //   bbox-keyed (legacy):  "minLat,minLng,maxLat,maxLng|exclude"
 //   start-anchored:       "s|lat,lng|maxKm|exclude"
-// The bbox path is kept for frontend rollout lag; new clients send
-// startLat/startLng/maxKm and hit the anchored path.
+// The bbox path is kept for GET / bbox-only POST; new clients POST
+// startLat/startLng/maxKm in the JSON body and hit the anchored path.
 
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';

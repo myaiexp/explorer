@@ -97,13 +97,15 @@ describe('GET /junctions — bbox guard, exclude, parsing', () => {
         expect(body.error).toBe('missing bbox');
     });
 
-    // SUT vs finding: bbox is required even in start-anchored mode (the !bboxStr
-    // guard runs before the start-param branch). Start params alone still 400.
-    test('start params present but no bbox → still 400 "missing bbox"', async () => {
-        const { fetch } = await loadServer();
+    // finding #7559: start/radius on the query string land in nginx access
+    // logs, so GET refuses them even when bbox is also missing. POST-without-
+    // bbox is the "missing bbox" case (post-junctions.test.ts).
+    test('start params on the query string → 400 pointing at the POST body', async () => {
+        const { fetch, fetchMock } = await loadServer();
         const { status, body } = await get(fetch, '/junctions?startLat=60.2&startLng=24.2&maxKm=10');
         expect(status).toBe(400);
-        expect(body.error).toBe('missing bbox');
+        expect(body.error).toMatch(/POST body/);
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     test('exclude other than default|winter → 400', async () => {
@@ -219,131 +221,30 @@ describe('GET /junctions — legacy bbox lookup', () => {
     });
 });
 
-// ── GET /junctions — start-anchored mode (startLat + startLng + maxKm) ─────────
+// ── GET /junctions — query-string anchors refused (finding #7559) ──────────────
+// startLat/startLng/maxKm on the request line land in nginx access logs at full
+// JS precision (often home). GET is bbox-only; anchored lookups go through POST.
+// Validation of the values themselves is POST-only (post-junctions.test.ts).
 
-describe('GET /junctions — start-anchored validation', () => {
-    const anchored = (q: string) => `/junctions?bbox=${OK_BBOX}&${q}`;
-
-    test('non-numeric start param → 400 "invalid startLat/startLng/maxKm"', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, anchored('startLat=abc&startLng=24.2&maxKm=10'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/invalid startLat\/startLng\/maxKm/);
-    });
-
-    test('startLat out of range (> 90) → 400 "startLat/startLng out of range"', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, anchored('startLat=91&startLng=24.2&maxKm=10'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/startLat\/startLng out of range/);
-    });
-
-    test('startLng out of range (> 180) → 400 "startLat/startLng out of range"', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, anchored('startLat=60.2&startLng=181&maxKm=10'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/startLat\/startLng out of range/);
-    });
-
-    test('maxKm = 0 → 400 (lower bound is exclusive)', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, anchored('startLat=60.2&startLng=24.2&maxKm=0'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/maxKm must be in/);
-    });
-
-    // Upper bound is inclusive: maxKm === MAX_RADIUS_KM (50) must be accepted.
-    test('maxKm = 50 (boundary) is accepted and uses anchored mode (carries total)', async () => {
+describe('GET /junctions — query-string anchors refused', () => {
+    test('bbox + start query params → 400 POST body, no Overpass call', async () => {
         const { fetch, fetchMock } = await loadServer();
         fetchMock.mockResolvedValue([{ lat: 60.2, lng: 24.2 }]);
-        const { status, body } = await get(fetch, anchored('startLat=60.2&startLng=24.2&maxKm=50'));
-        expect(status).toBe(200);
-        expect(body.cache).toBe('miss');
-        expect(typeof body.total).toBe('number'); // anchored-only field ⇒ anchored path taken
-        expect(typeof body.overpassMs).toBe('number');
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    test('maxKm = 50.001 (just over the cap) → 400', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, anchored('startLat=60.2&startLng=24.2&maxKm=50.001'));
+        const { status, body } = await get(
+            fetch,
+            `/junctions?bbox=${OK_BBOX}&startLat=60.2&startLng=24.2&maxKm=10`,
+        );
         expect(status).toBe(400);
-        expect(body.error).toMatch(/maxKm must be in/);
-    });
-
-    test('anchored Overpass failure → 502', async () => {
-        const { fetch, fetchMock } = await loadServer();
-        fetchMock.mockRejectedValue(new Error('overpass exhausted'));
-        const { status, body } = await get(fetch, anchored('startLat=60.2&startLng=24.2&maxKm=10'));
-        expect(status).toBe(502);
-        expect(body.error).toBe('POI search is busy. Please try again.');
-    });
-});
-
-// ── GET /junctions — partial start params → 400 (all-or-nothing) ───────────────
-// Anchor params are all-or-nothing: the anchored branch needs ALL of
-// startLat/startLng/maxKm. A partial subset used to silently fall through to
-// legacy bbox mode (audit #3159) — making a malformed client request look like a
-// successful no-anchor lookup. It now 400s, naming the missing param(s). Zero
-// anchor params (legacy) and a full set (anchored) are unchanged — covered above.
-
-describe('GET /junctions — partial start params → 400', () => {
-    const partial = (q: string) => `/junctions?bbox=${OK_BBOX}&${q}`;
-
-    test('only startLat → 400 naming the missing startLng and maxKm', async () => {
-        const { fetch, fetchMock } = await loadServer();
-        const { status, body } = await get(fetch, partial('startLat=60.2'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/incomplete anchor/);
-        expect(body.error).toMatch(/startLng/);
-        expect(body.error).toMatch(/maxKm/);
-        expect(body.error).not.toMatch(/missing startLat/); // startLat WAS supplied
-        expect(fetchMock).not.toHaveBeenCalled();            // no lookup happens
-    });
-
-    test('only startLng → 400 naming the missing startLat and maxKm', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, partial('startLng=24.2'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/startLat/);
-        expect(body.error).toMatch(/maxKm/);
-    });
-
-    test('only maxKm → 400 naming the missing startLat and startLng', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, partial('maxKm=10'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/startLat/);
-        expect(body.error).toMatch(/startLng/);
-    });
-
-    test('startLat + startLng but no maxKm → 400 naming the missing maxKm', async () => {
-        const { fetch } = await loadServer();
-        const { status, body } = await get(fetch, partial('startLat=60.2&startLng=24.2'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/incomplete anchor/);
-        expect(body.error).toMatch(/maxKm/);
-    });
-
-    // The completeness gate runs BEFORE the per-param range checks, so an
-    // out-of-range value in a partial set is reported as incomplete, not bogus.
-    test('partial set with an out-of-range startLat → 400 incomplete (not range error)', async () => {
-        const { fetch, fetchMock } = await loadServer();
-        const { status, body } = await get(fetch, partial('startLat=999&startLng=24.2'));
-        expect(status).toBe(400);
-        expect(body.error).toMatch(/incomplete anchor/);
-        expect(body.error).not.toMatch(/out of range/);
+        expect(body.error).toMatch(/POST body/);
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    // Zero anchor params is the legacy path, untouched by the completeness gate:
-    // a plain bbox request must still succeed (and carry no `total`).
-    test('no anchor params at all → legacy mode, not a 400', async () => {
+    test('a partial start query (only startLat) is refused the same way', async () => {
         const { fetch, fetchMock } = await loadServer();
-        fetchMock.mockResolvedValue([{ lat: 60.2, lng: 24.2 }]);
-        const { status, body } = await get(fetch, `/junctions?bbox=${OK_BBOX}`);
-        expect(status).toBe(200);
-        expect(body.total).toBeUndefined();
+        const { status, body } = await get(fetch, `/junctions?bbox=${OK_BBOX}&startLat=60.2`);
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/POST body/);
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 });
 
