@@ -169,8 +169,6 @@ function getHistory() {
     return readStoredArray(HISTORY_KEY);
 }
 
-// Explicit globalThis exports — app.js references these keys and accessors as
-// globals, and the vm-based tests read them off globalThis.
 globalThis.VISITS_KEY = VISITS_KEY;
 globalThis.SAVED_LOCATIONS_KEY = SAVED_LOCATIONS_KEY;
 globalThis.FAVORITES_KEY = FAVORITES_KEY;

@@ -307,16 +307,16 @@ describe('POST /api/:username/import', () => {
   // Per-section row validation rejects with 400 BEFORE the replace-all transaction runs,
   // so a seeded visit must survive untouched (proves no deletes/writes happened). Only the
   // invalid-visit path was covered before; these pin the favorites/savedLocations/history
-  // validators and the favorite null-payload guard (validateFavorite line `payload === null`).
+  // validators and the favorite null-payload guard (validateFavoriteRow line `payload === null`).
   describe('row validation rejections (400, no writes)', () => {
     const rowCases: Array<[string, Record<string, unknown>]> = [
-      // validateFavorite: explicit `payload === null` guard.
+      // validateFavoriteRow: explicit `payload === null` guard.
       ['favorite with payload: null', { favorites: [{ id: 'f-1', payload: null }] }],
       ['favorite with payload: []', { favorites: [{ id: 'f-1', payload: [] }] }],
       ['favorite with payload: string', { favorites: [{ id: 'f-1', payload: 'x' }] }],
-      // validateFavorite: missing/empty id.
+      // validateFavoriteRow: missing/empty id.
       ['favorite missing id', { favorites: [{ payload: { name: 'Park' } }] }],
-      // validateFavorite / validateTripRow: id charset + length (finding #7061).
+      // validateFavoriteRow / validateTripRow: id charset + length (finding #7061).
       ['favorite id with slash', { favorites: [{ id: 'a/b', payload: { name: 'Park' } }] }],
       ['visit id over 128 chars', { visits: [{ ...VISIT_BODY, id: 'a'.repeat(129) }] }],
       ['savedLocation traversal id', { savedLocations: [{ id: '..', label: 'Home', value: '60,25' }] }],

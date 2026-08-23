@@ -277,8 +277,7 @@ async function buildOneWay(startLat, startLng, destLat, destLng) {
 }
 
 // Explicit globalThis exports. route-dispatch.js resolves buildOneWay /
-// buildJunctionLoop / buildLoop from the global scope at call time, and the
-// vm-based tests read these off globalThis.
+// buildJunctionLoop / buildLoop from the global scope at call time.
 globalThis.OSRM_FI_BASE = OSRM_FI_BASE;
 globalThis.OSRM_FI_NEAREST = OSRM_FI_NEAREST;
 globalThis.OSRM_FI_TABLE = OSRM_FI_TABLE;

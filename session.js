@@ -2,7 +2,7 @@
 // results into the badge totals and the currentSession route fields, and stamp a
 // currentSession into a persisted row (visit / favorite / history). Extracted
 // from app.js so the field lists and one-way distance rules live in one place
-// (and are testable in isolation). Loaded before app.js; used there as globals.
+// (and are testable in isolation). Loaded before app.js.
 
 // UNITS — this file is the metres→kilometres boundary. An OSRM route object's
 // `distance` is METRES (osrm.js maps it straight off the OSRM response); every

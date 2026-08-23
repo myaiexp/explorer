@@ -1,5 +1,5 @@
 // Finland bbox helpers for routing endpoint selection.
-// Loaded before app.js; helpers are referenced as bare names from app.js.
+// Loaded before app.js.
 
 const FINLAND_BBOX = { minLng: 19.0, maxLng: 32.0, minLat: 59.0, maxLat: 71.0 };
 
