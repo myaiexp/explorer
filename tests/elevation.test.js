@@ -1,16 +1,19 @@
 /**
- * Tests for elevation.js — Open-Meteo sampling + per-coord interpolation.
- * Focus: the request goes through net.js's fetchWithTimeout, not bare fetch
- * (audit #5410 / #5444), and the returned array is one altitude per input
- * coord even when the request itself is downsampled (finding #7300 / #7302).
+ * Tests for elevation.js — Open-Meteo sampling + per-coord interpolation, and
+ * the user-visible profile chart (finding #7781). Focus: the request goes
+ * through net.js's fetchWithTimeout, not bare fetch (audit #5410 / #5444),
+ * and the returned array is one altitude per input coord even when the
+ * request itself is downsampled (finding #7300 / #7302).
  *
  * The timeout is load-bearing on the FIT-export path: confirmFITExport AWAITS
  * fetchElevations after the modal has already closed, so without it a stalled
  * Open-Meteo leaves the user with no file, no error, and no spinner until the
- * browser's own multi-minute socket default fires.
+ * browser's own multi-minute socket default fires. renderElevationChart is
+ * the other public surface: hide on <2 samples, flat-range fallback, and
+ * the gain/loss stats — route-view tests stub it, so this file owns it.
  */
 
-import { describe, test, expect, afterEach, vi } from 'vitest';
+import { describe, test, expect, afterEach, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 // SCRIPT_DEPS.elevation → net (fetchWithTimeout) + geo-utils (haversineM).
@@ -95,5 +98,56 @@ describe('fetchElevations', () => {
         expect(result[n - 1]).toBe(100 + nLats - 1);
         // Index 2 sits halfway (by distance, equal spacing) between samples 0 and 4.
         expect(result[2]).toBeCloseTo(100.5, 5);
+    });
+});
+
+describe('renderElevationChart', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '<div id="elevationContainer" class="active"></div>';
+    });
+
+    function container() {
+        return document.getElementById('elevationContainer');
+    }
+
+    function statsText() {
+        return [...container().querySelectorAll('.elevation-stats span')]
+            .map((el) => el.textContent);
+    }
+
+    test('<2 samples removes .active and clears the chart', () => {
+        renderElevationChart([10], '#E66100');
+        expect(container().classList.contains('active')).toBe(false);
+        expect(container().children).toHaveLength(0);
+
+        container().classList.add('active');
+        renderElevationChart(null, '#E66100');
+        expect(container().classList.contains('active')).toBe(false);
+        expect(container().children).toHaveLength(0);
+    });
+
+    test('a rising series shows rounded gain and 0 loss', () => {
+        renderElevationChart([10.4, 20.4, 30.4], '#56B4E9');
+
+        expect(container().classList.contains('active')).toBe(true);
+        expect(container().querySelector('svg.elevation-chart')).not.toBeNull();
+        expect(statsText()).toEqual(['10–30 m', '↑ 20 m', '↓ 0 m']);
+    });
+
+    test('a falling series shows 0 gain and rounded loss', () => {
+        renderElevationChart([30, 20, 10], '#56B4E9');
+        expect(statsText()).toEqual(['10–30 m', '↑ 0 m', '↓ 20 m']);
+    });
+
+    test('a flat series still renders (range fallback) with 0 gain and 0 loss', () => {
+        renderElevationChart([15, 15, 15], '#E66100');
+
+        expect(container().classList.contains('active')).toBe(true);
+        const svg = container().querySelector('svg.elevation-chart');
+        expect(svg).not.toBeNull();
+        // range = max-min || 1, so every point maps to a finite y instead of NaN.
+        const points = svg.querySelector('polyline').getAttribute('points');
+        expect(points).not.toMatch(/NaN/);
+        expect(statsText()).toEqual(['15–15 m', '↑ 0 m', '↓ 0 m']);
     });
 });

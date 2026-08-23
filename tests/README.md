@@ -53,6 +53,7 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 | `route-view.js` | `route-view.test.js` (visited-button derivation still in `mark-visited.test.js`) |
 | `visit-shape.js` | `visit-shape.test.js`, `visit-shape-parity.test.js` (client/server cap lockstep) |
 | `storage.js` | `storage.test.js`, `geometry-keep-parity.test.js` (client/server newest-N geometry window) |
+| `sync-sections.js` | `sync-sections.test.js`, `sync-restore.test.js` (restoreSections data-loss path) |
 
 ## Sync harness
 

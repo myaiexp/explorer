@@ -5,11 +5,11 @@
 
 function openPreferencesModal() {
     renderRouteColorSwatches();
-    document.getElementById('prefsModal').classList.add('active');
+    document.getElementById('prefsModal')?.classList.add('active');
 }
 
 function closePreferencesModal() {
-    document.getElementById('prefsModal').classList.remove('active');
+    document.getElementById('prefsModal')?.classList.remove('active');
 }
 
 function renderRouteColorSwatches() {
@@ -34,9 +34,12 @@ function renderRouteColorSwatches() {
 }
 
 // Each modal owns its own Escape wiring (export.js does the same for the FIT
-// modal) instead of one shared handler in the entry point.
+// modal) instead of one shared handler in the entry point. Looked up at
+// keydown time, not load time — a test (or a partial DOM) can be missing the
+// node. classList on null throws on every Escape and can abort other Escape
+// handlers; export.js uses the same `?.` on #fitModal.
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.getElementById('prefsModal').classList.contains('active')) {
+    if (e.key === 'Escape' && document.getElementById('prefsModal')?.classList.contains('active')) {
         closePreferencesModal();
     }
 });
