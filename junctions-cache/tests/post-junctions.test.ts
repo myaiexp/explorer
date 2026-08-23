@@ -66,6 +66,15 @@ describe('POST /junctions — JSON + bbox', () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    test('a body over 16k is 413 before JSON.parse (finding #7755)', async () => {
+        const { fetch, fetchMock } = await loadServer();
+        const fat = { bbox: OK_BBOX, pad: 'x'.repeat(20_000) };
+        const { status, body } = await post(fetch, fat);
+        expect(status).toBe(413);
+        expect(body.error).toMatch(/too large/);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     test('non-object JSON → 400 body must be a JSON object', async () => {
         const { fetch } = await loadServer();
         const { status, body } = await post(fetch, [OK_BBOX]);

@@ -11,6 +11,11 @@ import {
     fieldsFromUnknown,
     type ParsedJunctionsQuery,
 } from './lib/parse-request.js';
+import { BodyTooLargeError, readTextCapped } from './lib/read-capped.js';
+
+// Match nginx client_max_body_size 16k so a direct tailnet POST cannot
+// dump an unbounded JSON body that the proxy would have refused.
+const MAX_POST_BYTES = 16 * 1024;
 
 // /logs serves recent request events back to a remote caller (debugging). Those
 // events include the walker's anchored `start` at ~110 m precision (≈ home) and
@@ -129,8 +134,15 @@ export function createApp(): Hono {
         if (queryHasAnchor(c)) return c.json({ error: QUERY_ANCHOR_ERROR }, 400);
         let body: unknown;
         try {
-            body = await c.req.json();
-        } catch {
+            const text = await readTextCapped(
+                c.req.raw.body,
+                MAX_POST_BYTES,
+                'request',
+                c.req.header('content-length'),
+            );
+            body = JSON.parse(text);
+        } catch (e) {
+            if (e instanceof BodyTooLargeError) return c.json({ error: 'body too large' }, 413);
             return c.json({ error: 'invalid JSON' }, 400);
         }
         const fields = fieldsFromUnknown(body);

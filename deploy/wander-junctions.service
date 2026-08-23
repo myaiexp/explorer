@@ -4,17 +4,49 @@ After=network.target
 
 [Service]
 Type=simple
-User=shelly
+User=wander-junctions
+Group=wander-junctions
 WorkingDirectory=/home/shelly/Projects/explorer/junctions-cache
 ExecStart=/usr/bin/node dist/index.js
 Environment=PORT=5001
 Environment=HOST=100.69.160.113
-Environment=CACHE_PATH=/home/shelly/.local/state/wander-junctions/cache.json
+Environment=CACHE_PATH=/var/lib/wander-junctions/cache.json
 Environment=NODE_ENV=production
+Environment=TRUSTED_PROXIES=100.117.202.73
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+
+# Dedicated wander-junctions uid so an RCE/OOM cannot read /home/shelly
+# or share the interactive user's cgroup (finding #7755). ProtectHome=tmpfs
+# (not yes): yes overmounts /home and hides a BindReadOnlyPaths target.
+# tmpfs + the bind keeps only the junctions-cache tree reachable. Cache
+# lives in StateDirectory (/var/lib/wander-junctions), not under
+# /home/shelly. TRUSTED_PROXIES is the VPS Tailscale IPv4 so nginx's
+# X-Forwarded-For is the client key (finding #7754); loopback is not in
+# the list — nothing local proxies. MemoryMax kills this unit rather than
+# uid shelly on a fat Overpass dump. Do not add MemoryDenyWriteExecute —
+# V8 JIT needs W^X pages.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/shelly/Projects/explorer/junctions-cache
+StateDirectory=wander-junctions
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

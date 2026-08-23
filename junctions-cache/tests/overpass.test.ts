@@ -14,7 +14,7 @@
 // fetch is fully mocked (no real HTTP); fake timers skip the retry back-off sleeps.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchJunctionsFromOverpass, HIGHWAY_EXCLUDE } from '../src/overpass.js';
+import { fetchJunctionsFromOverpass, HIGHWAY_EXCLUDE, OVERPASS_MAX_BYTES } from '../src/overpass.js';
 import { log } from '../src/log.js';
 
 // Mock log so we can read the per-retry wait_sec (= getStatusWaitSec()'s return)
@@ -26,16 +26,17 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const OVERPASS_STATUS = 'https://overpass-api.de/api/status';
 const BBOX = { minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 };
 
-const okJson = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-const errStatus = (status: number) => ({ ok: false, status, json: async () => ({}) });
-
-type InterpResp = { ok: boolean; status: number; json?: () => Promise<unknown> };
+const okJson = (body: unknown) => new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+});
+const errStatus = (status: number) => new Response(null, { status });
 
 // Install a fetch mock. `interpreter` is the queued sequence of /interpreter
 // responses (the last entry repeats); /status returns `statusBody` text, or throws
 // when `statusThrows`.
 function installFetch(opts: {
-    interpreter: InterpResp[];
+    interpreter: Response[];
     statusBody?: string;
     statusThrows?: boolean;
 }) {
@@ -45,7 +46,7 @@ function installFetch(opts: {
     const fetchMock = vi.fn(async (url: string, _init: RequestInit) => {
         if (url === OVERPASS_STATUS) {
             if (opts.statusThrows) throw new Error('status endpoint down');
-            return { ok: true, status: 200, text: async () => opts.statusBody ?? '' };
+            return new Response(opts.statusBody ?? '', { status: 200 });
         }
         const r = opts.interpreter[Math.min(i, opts.interpreter.length - 1)];
         i++;
@@ -259,6 +260,23 @@ describe('fetchJunctionsFromOverpass — request + retry/timeout', () => {
         const err = await errP;
         expect((err as Error).message).toBe('overpass http 500');
         expect(urlCalls(fetchMock)).toBe(3);
+    });
+
+    test('Content-Length over the cap fails without retrying (finding #7755)', async () => {
+        const fetchMock = vi.fn(async (url: string) => {
+            if (url === OVERPASS_STATUS) return new Response('');
+            return new Response('{}', {
+                status: 200,
+                headers: { 'content-length': String(OVERPASS_MAX_BYTES + 1) },
+            });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const errP = fetchJunctionsFromOverpass(BBOX, 'default').then(() => null, (e) => e);
+        await vi.runAllTimersAsync();
+        const err = await errP;
+        expect(err).toBeInstanceOf(Error);
+        expect((err as Error).message).toMatch(/overpass body too large/);
+        expect(urlCalls(fetchMock)).toBe(1);
     });
 });
 

@@ -1,11 +1,16 @@
 // Overpass query + retry with timeout.
 
 import { log } from './log.js';
+import { BodyTooLargeError, readTextCapped } from './lib/read-capped.js';
 
 const OVERPASS_URL    = 'https://overpass-api.de/api/interpreter';
 const OVERPASS_STATUS = 'https://overpass-api.de/api/status';
 const ATTEMPT_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
+// Hard cap before JSON.parse so a runaway Overpass dump cannot OOM the
+// process (finding #7755). 32 MiB is above a typical walk-bbox response
+// and well under MemoryMax=512M.
+export const OVERPASS_MAX_BYTES = 32 * 1024 * 1024;
 
 export type LatLng = { lat: number; lng: number };
 
@@ -90,11 +95,20 @@ export async function fetchJunctionsFromOverpass(bbox: Bbox, exclude: ExcludePre
                 continue;
             }
             if (!res.ok) throw new Error(`overpass http ${res.status}`);
-            const data = await res.json() as { elements: Array<{ type: string; nodes?: number[]; id: number; lat?: number; lon?: number }> };
+            const text = await readTextCapped(
+                res.body,
+                OVERPASS_MAX_BYTES,
+                'overpass',
+                res.headers.get('content-length'),
+            );
+            const data = JSON.parse(text) as { elements: Array<{ type: string; nodes?: number[]; id: number; lat?: number; lon?: number }> };
             return parseJunctions(data.elements);
         } catch (e) {
             lastErr = e as Error;
             log('WARN', { event: 'overpass_attempt_failed', attempt, err: lastErr.message });
+            // A body already over the cap will not shrink on retry — fail now
+            // rather than burning two more Overpass slots (finding #7755).
+            if (lastErr instanceof BodyTooLargeError) throw lastErr;
             // Non-transient client errors (4xx except 429, which continues above)
             // won't change on retry — rethrow immediately so we don't burn two more
             // status-endpoint fetches + back-off sleeps (idea #1601).

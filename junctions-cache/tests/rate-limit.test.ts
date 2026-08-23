@@ -67,6 +67,28 @@ describe('ipRateLimit', () => {
         ).toBe(429);
     });
 
+    test('TRUSTED_PROXIES override honours XFF from a non-loopback proxy (finding #7754)', async () => {
+        const prev = process.env.TRUSTED_PROXIES;
+        process.env.TRUSTED_PROXIES = '100.117.202.73';
+        try {
+            const app = appWith(1);
+            const vps = { incoming: { socket: { remoteAddress: '100.117.202.73' } } };
+            expect(
+                (await app.request('/x', { headers: { 'x-forwarded-for': '203.0.113.10' } }, vps)).status
+            ).toBe(200);
+            expect(
+                (await app.request('/x', { headers: { 'x-forwarded-for': '203.0.113.10' } }, vps)).status
+            ).toBe(429);
+            // A different client hop behind the same VPS proxy is independent.
+            expect(
+                (await app.request('/x', { headers: { 'x-forwarded-for': '203.0.113.11' } }, vps)).status
+            ).toBe(200);
+        } finally {
+            if (prev === undefined) delete process.env.TRUSTED_PROXIES;
+            else process.env.TRUSTED_PROXIES = prev;
+        }
+    });
+
     test('tokens refill over the window — a blocked client recovers after one full window', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(0);
