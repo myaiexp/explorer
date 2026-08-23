@@ -12,6 +12,12 @@
  * closeOverflowMenuIfOpen are faked (toast.js / overflow-menu.js have their
  * own suites). ExplorerSync is the real one so persist + getState().link
  * are the production paths.
+ *
+ * updateSyncMenu (finding #7587) is the only place that shows/hides Enable /
+ * Copy backup link / Delete cloud data. Accept success already fires
+ * explorer-sync-state-change; these tests assert the resulting visibility so a
+ * regression cannot leave the private #t= link uncopyable or Delete visible
+ * while anonymous.
  */
 import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
@@ -31,11 +37,13 @@ const successes = [];
 beforeEach(() => {
     errors.length = 0;
     successes.length = 0;
+    // Match index.html: all three controls start hidden so a missed
+    // updateSyncMenu cannot pass as "copy already visible".
     document.body.innerHTML =
         '<div id="syncStatus" style="display:none"><span id="syncUsername"></span></div>' +
-        '<button id="enableCloudBackupBtn"></button>' +
-        '<button id="copyBackupLinkBtn"></button>' +
-        '<button id="deleteCloudDataBtn"></button>';
+        '<button id="enableCloudBackupBtn" style="display:none"></button>' +
+        '<button id="copyBackupLinkBtn" style="display:none"></button>' +
+        '<button id="deleteCloudDataBtn" style="display:none"></button>';
     globalThis.showError = (m) => errors.push(m);
     globalThis.showSuccess = (m) => successes.push(m);
     globalThis.closeOverflowMenuIfOpen = vi.fn();
@@ -62,6 +70,29 @@ function stubClipboard(writeText) {
     Object.defineProperty(navigator, 'clipboard', {
         configurable: true,
         value: { writeText },
+    });
+}
+
+function syncMenu() {
+    const display = (id) => document.getElementById(id).style.display;
+    return {
+        status: display('syncStatus'),
+        username: document.getElementById('syncUsername').textContent,
+        enable: display('enableCloudBackupBtn'),
+        copy: display('copyBackupLinkBtn'),
+        del: display('deleteCloudDataBtn'),
+    };
+}
+
+function expectAcceptedMenu(username) {
+    expect(syncMenu()).toEqual({
+        status: '', username, enable: 'none', copy: '', del: '',
+    });
+}
+
+function expectAnonymousMenu() {
+    expect(syncMenu()).toEqual({
+        status: 'none', username: '', enable: '', copy: 'none', del: 'none',
     });
 }
 
@@ -92,6 +123,7 @@ describe('showConsentToast', () => {
         expect(consentRecord()).toEqual({ state: 'declined' });
         expect(window.ExplorerSync.getState().state).toBe('declined');
         expect(toastEl()).toBeNull();
+        expectAnonymousMenu();
     });
 
     test('30s auto-timer calls decline() and persists declined', async () => {
@@ -127,11 +159,13 @@ describe('showConsentToast', () => {
         });
         expect(successes).toEqual(['Cloud backup enabled.']);
         expect(toastEl()).toBeNull();
+        expectAcceptedMenu('rugged-pine-42');
 
         // Timer must not fire decline() after a successful Accept.
         vi.advanceTimersByTime(30000);
         expect(decline).not.toHaveBeenCalled();
         expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expectAcceptedMenu('rugged-pine-42');
     });
 
     test('Accept failure settles declined without calling ExplorerSync.decline()', async () => {
@@ -146,6 +180,11 @@ describe('showConsentToast', () => {
         expect(window.ExplorerSync.getState().state).toBe('anonymous');
         expect(errors).toEqual(['Could not enable cloud backup. Try again later.']);
         expect(toastEl()).toBeNull();
+        // Accept-failure never fires a state change (state stays anonymous),
+        // so the menu stays at its initial hidden controls — copy/delete
+        // must not appear just because the toast settled.
+        expect(syncMenu().copy).toBe('none');
+        expect(syncMenu().del).toBe('none');
     });
 
     test('timer does not decline() while Accept is in flight', async () => {
@@ -229,5 +268,31 @@ describe('confirmDeleteCloudData', () => {
         expect(window.ExplorerSync.getState().state).toBe('anonymous');
         expect(consentRecord()).toBeNull();
         expect(successes).toEqual(['Cloud data deleted.']);
+        expectAnonymousMenu();
     });
+});
+
+// ── updateSyncMenu ───────────────────────────────────────────────────────────
+
+describe('updateSyncMenu', () => {
+    function stubState(state, username = null) {
+        vi.spyOn(window.ExplorerSync, 'getState').mockReturnValue({
+            state, username, token: null, link: null,
+        });
+    }
+
+    test('accepted shows copy-link and delete, hides enable, paints username', () => {
+        stubState('accepted', 'rugged-pine-42');
+        updateSyncMenu();
+        expectAcceptedMenu('rugged-pine-42');
+    });
+
+    test.each(['anonymous', 'declined'])(
+        '%s hides copy-link and delete, shows enable, clears username',
+        (state) => {
+            stubState(state, 'stale-user');
+            updateSyncMenu();
+            expectAnonymousMenu();
+        },
+    );
 });
