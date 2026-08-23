@@ -3,7 +3,7 @@
 
 // HISTORY_KEY + getHistory live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
-// buildListItem in list-item.js; restoreResult in route-view.js — all resolved
+// buildListItem in list-item.js; restoreResult in route-restore.js — all resolved
 // as globals at call time.
 
 const HISTORY_MAX = 20;
@@ -45,7 +45,7 @@ function deleteHistoryEntry(index) {
     renderHistorySection();
 }
 
-// restoreResult — re-displaying a stored entry — lives in route-view.js: it is a
+// restoreResult — re-displaying a stored entry — lives in route-restore.js: it is a
 // render, not history CRUD, and favorites.js used to depend on this module solely
 // to reach it.
 

@@ -44,7 +44,8 @@ export const MAX_IMPORT_ROWS_PER_SECTION = MAX_ROWS_PER_SECTION;
 
 // Newest N visit/history rows on GET /:username keep full polylines; older ones
 // are returned metadata-only so the init-path merge stays bounded. Twin of
-// storage.js VISIT_GEOMETRY_KEEP. The same window applies to favorite payloads:
+// storage.js VISIT_GEOMETRY_KEEP. tests/geometry-keep-parity.test.js fails RED
+// if these drift. The same window applies to favorite payloads:
 // newest N keep the stored JSONB, older ones are rebuilt from FAVORITE_LIGHT_KEYS
 // so a 10k × 512 KB fill cannot be serialized on the default GET. The DB still
 // stores full rows (cloud is the archive). `?geometry=full` returns them only

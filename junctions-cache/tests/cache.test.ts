@@ -4,7 +4,7 @@
 // which jsdom stubs out under vite7 (TypeError: tmpdir is not a function).
 // Audit finding #1564: the inflight-dedup correctness property and the helpers
 // (wideBboxFromStart pole/cos handling, loadCache ENOENT/corrupt, saveCache
-// atomic write-rename, scheduleSave debounce + re-save loop, filterToBbox) had
+// atomic write-rename, bumpAndSave debounce + re-save loop, filterToBbox) had
 // zero coverage.
 //
 // Unlike #1562 (fit-encoder hid internals behind a browser IIFE, forcing
@@ -15,9 +15,9 @@
 //   - filterToBbox   → getJunctionsAnchored returns filterToBbox(all, requested).
 //   - keyFor / startKeyFor quantization → cache-hit behaviour of near-identical
 //     bboxes / starts.
-//   - saveCache + scheduleSave → driven through a getJunctions miss.
+//   - saveCache + bumpAndSave → driven through a getJunctions miss.
 //
-// cache.ts holds module-level singleton state (store/inflight/dirty/saving) and
+// cache.ts holds module-level singleton state (store/inflight/generation/saving) and
 // reads CACHE_PATH once at import, so each test gets a fresh module via
 // loadFresh() (vi.resetModules + a per-test temp CACHE_PATH).
 
@@ -50,7 +50,7 @@ function tmpCacheFile(): string {
 
 // Fresh module instance + isolated state, with CACHE_PATH pointed at `cachePath`.
 // cache.ts holds singleton state and reads CACHE_PATH once at import, so each
-// caller gets a clean store/inflight/dirty/saving via vi.resetModules().
+// caller gets a clean store/inflight/generation/saving via vi.resetModules().
 async function loadFresh(cachePath: string) {
     vi.resetModules();
     process.env.CACHE_PATH = cachePath;
@@ -763,9 +763,9 @@ describe('loadCache pruning (TTL + cap on the snapshot)', () => {
     });
 });
 
-// ── scheduleSave — debounce + coalescing ─────────────────────────────────────
+// ── bumpAndSave — debounce + coalescing ─────────────────────────────────────
 
-describe('scheduleSave', () => {
+describe('bumpAndSave', () => {
     test('a burst of misses is debounced and coalesced into a single snapshot write', async () => {
         vi.useRealTimers();
         const file = tmpCacheFile();
@@ -783,7 +783,7 @@ describe('scheduleSave', () => {
         }).length;
 
         await cache.getJunctions({ minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 }, 'default'); // miss → schedule
-        await cache.getJunctions({ minLat: 61, minLng: 25, maxLat: 62, maxLng: 26 }, 'default'); // miss → dirty, no 2nd chain
+        await cache.getJunctions({ minLat: 61, minLng: 25, maxLat: 62, maxLng: 26 }, 'default'); // miss → generation++, no 2nd chain
 
         await new Promise((r) => setTimeout(r, 60));   // still inside the 200ms debounce window
         expect(saves()).toBe(0);                       // nothing written yet — the burst is held

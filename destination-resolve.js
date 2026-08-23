@@ -2,13 +2,12 @@
 // water-reachability, and build the best route for it. Pure orchestration of
 // pieces that live in sibling modules (overpass fetchers, screening, novelty
 // ranking, junction/route builders); reads NO DOM — mode flags (winterMode,
-// smartRouting) are passed in, matching route-dispatch.js. The four lat/lng
-// leaders stay positional; the rest is a named-options object. Every cross-file
+// smartRouting) are passed in, matching route-dispatch.js. Every cross-file
 // dependency (rankByNovelty, generateRandomPointAnnulus, capPool,
 // screenCandidates, screeningTableFn, fetchRoadsInRadius, fetchPOIsInRadius,
 // buildJunctionLoop, buildRouteForMode, OVERLAP_BAD_THRESHOLD, POI_TYPES) is
 // resolved from globalThis at call time. Loaded after route-dispatch.js +
-// osrm.js + overpass.js, before app.js; app.js's generateDestination wires it.
+// osrm.js + overpass.js, before app.js; generate.js's generateDestination wires it.
 
 // Orchestration-layer routing policy — the size of the random-annulus candidate
 // pool and the smart-routing retry budget for findBestLoop. (Don't confuse

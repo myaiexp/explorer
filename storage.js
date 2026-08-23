@@ -19,6 +19,7 @@ const HISTORY_KEY = 'walk_history';
 // stays bounded (`?geometry=full` returns them under the server's 8 MiB
 // snapshot cap, otherwise 413). 50 keeps recent routes drawable — the
 // routeCoords/returnRouteCoords arrays are the only large fields.
+// tests/geometry-keep-parity.test.js fails RED if these drift.
 const VISIT_GEOMETRY_KEEP = 50;
 const QUOTA_TRIMMED_MSG = 'Storage was full — trimmed old route details to make room. Turn on cloud backup to keep full history.';
 const QUOTA_FULL_MSG = 'Storage is full. Export & delete old walks, or turn on cloud backup.';

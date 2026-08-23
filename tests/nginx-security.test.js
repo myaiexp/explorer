@@ -56,4 +56,26 @@ describe('deploy/nginx-explorer.conf (finding #7059)', () => {
         expect(csp).toMatch(/https:\/\/nominatim\.openstreetmap\.org/);
         expect(csp).toMatch(/https:\/\/api\.open-meteo\.com/);
     });
+
+    test('static /explorer keeps the SPA try_files fallback for /explorer/<username>', () => {
+        // Cloud-backup links are /explorer/<username>#t=<token>. Dropping
+        // try_files serves a 404 instead of index.html, so the SPA never
+        // reads location.pathname. The committed snippet is the reviewable
+        // source of truth — live nginx is copied from it (finding #7582).
+        expect(staticBlock).toMatch(/^\s*try_files\s+\$uri\s+\$uri\/\s+\/explorer\/index\.html;/m);
+    });
 });
+
+describe('deploy/nginx-explorer.conf API proxy (finding #7582)', () => {
+    const conf = readDeploy('nginx-explorer.conf');
+    const apiMatch = conf.match(/location \/explorer\/api\/\s*\{([^}]+)\}/);
+    const apiBlock = apiMatch ? apiMatch[1] : '';
+
+    test('pins the /explorer/api/ location to the explorer-api upstream', () => {
+        expect(apiMatch).not.toBeNull();
+        expect(apiBlock).toMatch(/^\s*limit_req\s+zone=api\b/m);
+        expect(apiBlock).toMatch(/^\s*proxy_pass\s+http:\/\/127\.0\.0\.1:3700\/api\/;/m);
+        expect(apiBlock).toMatch(/^\s*proxy_set_header\s+X-Forwarded-For\s+\$proxy_add_x_forwarded_for;/m);
+    });
+});
+

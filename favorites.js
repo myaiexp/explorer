@@ -3,7 +3,7 @@
 
 // FAVORITES_KEY + getFavorites live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
-// buildListItem in list-item.js; restoreResult in route-view.js;
+// buildListItem in list-item.js; restoreResult in route-restore.js;
 // getCurrentSession in session-state.js — all resolved as globals at call time.
 
 // Favorite-identity predicate: does this favorite point at the same destination

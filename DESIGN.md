@@ -34,7 +34,11 @@ Load from Google Fonts:
     --accent-hover: #2563eb; /* darker blue on hover */
     --success: #22c55e;      /* green — confirmations, "visited" state */
     --error: #ef4444;        /* red — errors, destructive/active toggle */
+    --route-out: #3b82f6;    /* outbound walk polyline (same blue as --accent) */
+    --route-ret: #f59e0b;    /* return/inbound walk polyline */
     --radius: 6px;           /* default border-radius */
+    --font: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
 }
 ```
 
@@ -78,7 +82,16 @@ On desktop (`≥ 768px`): panel is a left sidebar, `360px` wide, full height.
 ### Top Bar
 
 Height `40px`, `padding: 0 12px`. Brand name on the left, actions on the right.
-Background: `--bg-deep`. Always use `flex-shrink: 0` and `z-index: 100`.
+Background: `--bg-deep`. Always use `flex-shrink: 0` and `z-index: 1100` so the bar covers Leaflet map controls.
+
+Stacking scale (must stay in this order — a restyle that drops the top bar back to 100 puts it under the toast and the map zoom buttons):
+
+| Layer          | z-index | Notes                                      |
+| -------------- | ------- | ------------------------------------------ |
+| Overflow menu  | 200     | `position: absolute` inside the top bar    |
+| Consent toast  | 1000    | fixed bottom; sits below the top bar       |
+| Top bar        | 1100    | covers map controls along the top edge     |
+| Modal overlay  | 10000   | FIT export / prefs; above everything else  |
 
 ---
 
