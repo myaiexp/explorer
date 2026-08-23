@@ -3,7 +3,8 @@
 // closeOverflowMenuIfOpen() as a global after acting on one of its items.
 
 function toggleOverflowMenu() {
-    document.getElementById('overflowMenu').classList.toggle('open');
+    const menu = document.getElementById('overflowMenu');
+    if (menu) menu.classList.toggle('open');
 }
 
 function closeOverflowMenuIfOpen() {
@@ -14,6 +15,9 @@ function closeOverflowMenuIfOpen() {
 document.addEventListener('click', (e) => {
     const menu = document.getElementById('overflowMenu');
     const btn = document.getElementById('overflowBtn');
+    // Looked up at click time, not load time — a test (or a partial DOM) can
+    // be missing either node. contains() on null throws on every document click.
+    if (!menu || !btn) return;
     if (!menu.contains(e.target) && !btn.contains(e.target)) {
         menu.classList.remove('open');
     }

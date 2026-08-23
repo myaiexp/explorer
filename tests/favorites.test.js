@@ -1,6 +1,7 @@
 /**
  * Tests for favorites.js — the star-button add/remove/list CRUD paths, which
- * had zero coverage before this file (audit finding #5400, favorites half).
+ * had zero coverage before this file (audit finding #5400, favorites half),
+ * plus name-vs-× clicks through real list-item.js (finding #7579).
  *
  * favorites.js is a non-module script that assigns globalThis.{toggleFavorite,
  * updateFavoriteBtn,deleteFavorite,renderFavoritesSection,sameFavoriteDest}. It
@@ -19,6 +20,7 @@ let putCalls;
 let deleteCalls;
 let setWriteOk;
 let currentSession;
+let restored;
 
 function storedFavs() {
   return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
@@ -53,18 +55,14 @@ beforeEach(() => {
   // fixture sessions above already carry the fields we need, so a shallow
   // copy is faithful (same simplification history.test.js makes).
   globalThis.snapshotSession = (s) => ({ ...s });
-  globalThis.buildListItem = (label, meta) => {
-    const item = document.createElement('div');
-    item.className = 'fav-item';
-    item.dataset.label = label;
-    item.dataset.meta = meta;
-    return item;
-  };
-  globalThis.restoreResult = () => {};
+  restored = [];
+  globalThis.restoreResult = (entry) => { restored.push(entry); };
   globalThis.maybeRequestConsent = () => {};
   ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs());
 
-  loadScripts('visit-shape', 'favorites');
+  // Real list-item.js so name-vs-× clicks exercise the production handlers
+  // (finding #7579). Other collaborators stay stubbed.
+  loadScripts('list-item', 'visit-shape', 'favorites');
 });
 
 describe('toggleFavorite: add/remove round trip', () => {
@@ -279,7 +277,8 @@ describe('renderFavoritesSection: visibility + rebuild', () => {
 
     expect(document.getElementById('favoritesSection').classList.contains('visible')).toBe(true);
     expect(document.getElementById('favoritesList').children).toHaveLength(1);
-    expect(document.getElementById('favoritesList').children[0].dataset.label).toBe('A');
+    expect(document.getElementById('favoritesList').children[0]
+      .querySelector('.history-item-name').textContent).toBe('A');
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/skipped 2/));
     warn.mockRestore();
   });
@@ -316,5 +315,46 @@ describe('sameFavoriteDest / updateFavoriteBtn: a bad stored row does not throw'
 
     expect(() => window.updateFavoriteBtn()).not.toThrow();
     expect(document.getElementById('favoriteBtn').classList.contains('active')).toBe(true);
+  });
+});
+
+function itemAt(i) {
+  return document.getElementById('favoritesList').children[i];
+}
+
+describe('renderFavoritesSection: name vs × clicks (real list-item.js)', () => {
+  test('clicking the name restores that row; clicking × deletes it without restoring', () => {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([
+      { id: 'a', destLat: 1, destLng: 1, destName: 'Park', distance: 1.5 },
+      { id: 'b', destLat: 2, destLng: 2, destName: 'Lake', distance: 2 },
+    ]));
+    window.renderFavoritesSection();
+
+    itemAt(0).querySelector('.history-item-name').click();
+    expect(restored.map((e) => e.id)).toEqual(['a']);
+
+    itemAt(1).querySelector('.history-delete').click();
+    expect(storedFavs().map((f) => f.id)).toEqual(['a']);
+    expect(restored.map((e) => e.id)).toEqual(['a']); // × must stopPropagation
+    expect(deleteCalls).toEqual([{ section: 'favorites', id: 'b' }]);
+  });
+
+  test('a skipped malformed row does not shift restore/delete onto the wrong favorite', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify([
+      { id: 'a', destLat: 1, destLng: 1, destName: 'A' },
+      { id: 'bad', destName: null },
+      { id: 'c', destLat: 3, destLng: 3, destName: 'C' },
+    ]));
+    window.renderFavoritesSection();
+    expect(document.getElementById('favoritesList').children).toHaveLength(2);
+
+    itemAt(1).querySelector('.history-item-name').click();
+    expect(restored.map((e) => e.id)).toEqual(['c']);
+
+    itemAt(1).querySelector('.history-delete').click();
+    expect(storedFavs().map((f) => f.id)).toEqual(['a', 'bad']);
+    expect(deleteCalls).toEqual([{ section: 'favorites', id: 'c' }]);
+    warn.mockRestore();
   });
 });

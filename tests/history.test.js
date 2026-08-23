@@ -1,5 +1,6 @@
 /**
- * Tests for history.js — saveToHistory cap + cloud-mirror behavior.
+ * Tests for history.js — saveToHistory cap + cloud-mirror behavior, plus
+ * delete/expand and name-vs-× clicks through real list-item.js (finding #7579).
  *
  * history.js is a non-module script that assigns globalThis.saveToHistory. Its
  * free identifiers (getHistory, syncedPut, syncedDelete, snapshotSession, …)
@@ -19,6 +20,7 @@ const HISTORY_KEY = 'walk_history';
 let putCalls;
 let deleteCalls;
 let setWriteOk;
+let restored;
 
 beforeEach(() => {
   localStorage.clear();
@@ -30,11 +32,14 @@ beforeEach(() => {
   // snapshotSession normally derives the stored entry; the session we pass in
   // already carries id + date (+ render fields), so a shallow copy is faithful.
   globalThis.snapshotSession = (s) => ({ ...s });
-  globalThis.buildListItem = () => document.createElement('li');
+  restored = [];
+  globalThis.restoreResult = (entry) => { restored.push(entry); };
   globalThis.maybeRequestConsent = () => {};
   ({ putCalls, deleteCalls, setWriteOk } = installSyncedMirrorStubs());
 
-  loadScripts('visit-shape', 'history');
+  // Real list-item.js so name-vs-× clicks exercise the production handlers
+  // (finding #7579). Other collaborators stay stubbed.
+  loadScripts('list-item', 'visit-shape', 'history');
 });
 
 // A session whose entry sorts by date: larger i ⇒ newer. destName/destLat keep
@@ -166,6 +171,98 @@ describe('renderHistorySection: a malformed row does not abort first paint', () 
 
     expect(document.getElementById('historySection').classList.contains('visible')).toBe(false);
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/skipped 1/));
+    warn.mockRestore();
+  });
+});
+
+function seedHistory(rows) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(rows));
+}
+
+function itemAt(i) {
+  return document.getElementById('historyList').children[i];
+}
+
+describe('deleteHistoryEntry', () => {
+  test('removes the row at that index, mirrors its id as a string, and leaves the others', () => {
+    seedHistory([
+      { id: 'a', destLat: 60, destLng: 25, destName: 'A', date: '2026-01-01T00:00:00Z', distance: 1 },
+      { id: 7, destLat: 61, destLng: 26, destName: 'B', date: '2026-01-02T00:00:00Z', distance: 2 },
+      { id: 'c', destLat: 62, destLng: 27, destName: 'C', date: '2026-01-03T00:00:00Z', distance: 3 },
+    ]);
+
+    window.deleteHistoryEntry(1);
+
+    expect(storedHistory().map((e) => e.id)).toEqual(['a', 'c']);
+    expect(deleteCalls).toEqual([{ section: 'history', id: '7' }]);
+    expect(document.getElementById('historyList').children).toHaveLength(2);
+  });
+});
+
+describe('toggleHistoryExpanded', () => {
+  test('shows the first 3 rows, then all of them, then collapses again', () => {
+    const rows = [];
+    for (let i = 0; i < 5; i++) {
+      rows.push({
+        id: 'h' + i,
+        destLat: 60,
+        destLng: 25,
+        destName: 'Dest ' + i,
+        date: '2026-01-0' + (i + 1) + 'T00:00:00Z',
+        distance: 1,
+      });
+    }
+    seedHistory(rows);
+    window.renderHistorySection();
+
+    const moreBtn = document.getElementById('historyMoreBtn');
+    expect(document.getElementById('historyList').children).toHaveLength(3);
+    expect(moreBtn.style.display).toBe('block');
+    expect(moreBtn.textContent).toBe('Show 2 more');
+
+    window.toggleHistoryExpanded();
+    expect(document.getElementById('historyList').children).toHaveLength(5);
+    expect(moreBtn.textContent).toBe('Show less');
+
+    window.toggleHistoryExpanded();
+    expect(document.getElementById('historyList').children).toHaveLength(3);
+    expect(moreBtn.textContent).toBe('Show 2 more');
+  });
+});
+
+describe('renderHistorySection: name vs × clicks (real list-item.js)', () => {
+  test('clicking the name restores that row; clicking × deletes it without restoring', () => {
+    seedHistory([
+      { id: 'a', destLat: 60, destLng: 25, destName: 'Park', date: '2026-01-01T00:00:00Z', distance: 1.5 },
+      { id: 'b', destLat: 61, destLng: 26, destName: 'Lake', date: '2026-01-02T00:00:00Z', distance: 2 },
+    ]);
+    window.renderHistorySection();
+
+    itemAt(0).querySelector('.history-item-name').click();
+    expect(restored.map((e) => e.id)).toEqual(['a']);
+
+    itemAt(1).querySelector('.history-delete').click();
+    expect(storedHistory().map((e) => e.id)).toEqual(['a']);
+    expect(restored.map((e) => e.id)).toEqual(['a']); // × must stopPropagation
+    expect(deleteCalls).toEqual([{ section: 'history', id: 'b' }]);
+  });
+
+  test('a skipped malformed row does not shift restore/delete onto the wrong walk', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    seedHistory([
+      { id: 'a', destLat: 60, destLng: 25, destName: 'A', date: '2026-01-01T00:00:00Z', distance: 1 },
+      { id: 'bad', destName: null, date: '2026-01-02T00:00:00Z' },
+      { id: 'c', destLat: 62, destLng: 27, destName: 'C', date: '2026-01-03T00:00:00Z', distance: 3 },
+    ]);
+    window.renderHistorySection();
+    expect(document.getElementById('historyList').children).toHaveLength(2);
+
+    itemAt(1).querySelector('.history-item-name').click();
+    expect(restored.map((e) => e.id)).toEqual(['c']);
+
+    itemAt(1).querySelector('.history-delete').click();
+    expect(storedHistory().map((e) => e.id)).toEqual(['a', 'bad']);
+    expect(deleteCalls).toEqual([{ section: 'history', id: 'c' }]);
     warn.mockRestore();
   });
 });
