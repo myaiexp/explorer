@@ -116,6 +116,55 @@ describe('outbox enqueue and per-status handling', () => {
         }
     });
 
+    // HTTP 204, then saveOutbox(remaining) fails: the processed head is still
+    // on disk. Back off (nextBackoff from 0 → 1000ms) rather than
+    // scheduleFlush(0) — a tight retry would re-PUT the same entry forever
+    // until the tab OOMs (finding #7924).
+    test('successful 204 then failed outbox shift backs off instead of tight-looping (finding #7924)', async () => {
+        vi.useFakeTimers();
+        await setupAccepted('rugged-pine-42');
+
+        const realWrite = globalThis.writeStoredArray;
+        globalThis.writeStoredArray = (key, arr) => {
+            if (key === 'walk_sync_outbox') {
+                const current = JSON.parse(localStorage.getItem(key) || '[]');
+                if (arr.length < current.length) return false;
+            }
+            return realWrite(key, arr);
+        };
+        try {
+            let callCount = 0;
+            global.fetch = vi.fn(() => {
+                callCount++;
+                return Promise.resolve({
+                    ok: true, status: 204,
+                    headers: new Headers(),
+                    json: () => Promise.resolve({}),
+                });
+            });
+
+            window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+            await flushMicrotasks();
+
+            expect(callCount).toBe(1);
+            expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
+
+            // scheduleFlush(0) after the failed shift would have already fired a
+            // second PUT during flushMicrotasks. The pump must wait for the
+            // first backoff step instead.
+            await vi.advanceTimersByTimeAsync(999);
+            expect(callCount).toBe(1);
+
+            await vi.advanceTimersByTimeAsync(1);
+            await flushMicrotasks();
+
+            expect(callCount).toBe(2);
+            expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
+        } finally {
+            globalThis.writeStoredArray = realWrite;
+        }
+    });
+
     test('respects Retry-After on 429', async () => {
         vi.useFakeTimers();
         await setupAccepted('rugged-pine-42');
@@ -210,6 +259,45 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
 
         // BACKOFF_STEPS[0] is exactly 1000ms — retry must NOT fire before then.
         // Mutating the first backoff step (e.g. 1000 → 500) makes this RED.
+        await vi.advanceTimersByTimeAsync(999);
+        expect(callCount).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await flushMicrotasks();
+
+        expect(callCount).toBe(2);
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toHaveLength(0);
+    });
+
+    // apiFetch rejection (network down, fetchWithTimeout AbortError) must
+    // clear _flushing and arm the 1s backoff. If .catch left _flushing true,
+    // the timer's flushHead would no-op and freeze the durable queue
+    // (finding #7923). net.js exists so a hung request becomes this reject.
+    test('fetch AbortError clears _flushing and retries after 1s backoff (finding #7923)', async () => {
+        vi.useFakeTimers();
+        await setupAccepted('rugged-pine-42');
+
+        let callCount = 0;
+        global.fetch = vi.fn(() => {
+            callCount++;
+            if (callCount === 1) {
+                return Promise.reject(
+                    Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
+                );
+            }
+            return Promise.resolve({
+                ok: true, status: 204,
+                headers: new Headers(),
+                json: () => Promise.resolve({}),
+            });
+        });
+
+        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        await flushMicrotasks();
+
+        expect(callCount).toBe(1);
+        expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
+
         await vi.advanceTimersByTimeAsync(999);
         expect(callCount).toBe(1);
 

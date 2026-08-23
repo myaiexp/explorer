@@ -1,4 +1,4 @@
-// Unit tests for accountAuth — hash-then-compare of the bearer token.
+// Unit tests for accountAuth — token extraction + hash-then-compare.
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import type { Db } from '../db.js';
@@ -60,5 +60,42 @@ describe('accountAuth hashes the presented bearer before comparing', () => {
     });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'Unauthorized' });
+  });
+});
+
+describe('accountAuth token extraction fallbacks (finding #7929)', () => {
+  it('401 with no headers', async () => {
+    const app = appWithStored(HASH);
+    const res = await app.request('/alice');
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
+  });
+
+  it('200 with only X-Account-Token', async () => {
+    const app = appWithStored(HASH);
+    const res = await app.request('/alice', {
+      headers: { 'X-Account-Token': PLAIN },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('401 for Authorization: Bearer with no token and no fallback', async () => {
+    const app = appWithStored(HASH);
+    const res = await app.request('/alice', {
+      headers: { Authorization: 'Bearer' },
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
+  });
+
+  it('200 when Authorization is non-Bearer but X-Account-Token is valid', async () => {
+    const app = appWithStored(HASH);
+    const res = await app.request('/alice', {
+      headers: {
+        Authorization: 'Basic dXNlcjpwYXNz',
+        'X-Account-Token': PLAIN,
+      },
+    });
+    expect(res.status).toBe(200);
   });
 });
