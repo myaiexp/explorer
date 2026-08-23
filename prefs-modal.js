@@ -1,7 +1,6 @@
 // Preferences modal — the route-color swatch grid and the modal's open/close.
 // Loaded after map-view.js (ROUTE_COLORS/getRouteColor/setRouteColor/
-// applyRouteColor); resolved as globals at call time. Opened from the overflow
-// menu in index.html.
+// applyRouteColor); resolved as globals at call time.
 
 function openPreferencesModal() {
     renderRouteColorSwatches();
