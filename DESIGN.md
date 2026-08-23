@@ -34,8 +34,6 @@ Load from Google Fonts:
     --accent-hover: #2563eb; /* darker blue on hover */
     --success: #22c55e;      /* green — confirmations, "visited" state */
     --error: #ef4444;        /* red — errors, destructive/active toggle */
-    --route-out: #3b82f6;    /* outbound walk polyline (same blue as --accent) */
-    --route-ret: #f59e0b;    /* return/inbound walk polyline */
     --radius: 6px;           /* default border-radius */
     --font: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --mono: 'JetBrains Mono', 'Courier New', monospace;
@@ -46,6 +44,18 @@ Tinted backgrounds for status indicators use low-opacity versions of semantic co
 
 - Error bg: `rgba(239, 68, 68, 0.15)` with `rgba(239, 68, 68, 0.3)` border
 - Badge backgrounds: `rgba(59, 130, 246, 0.15)`, `rgba(34, 197, 94, 0.15)`
+
+### Route color
+
+Walk polylines are **not** CSS custom properties. Both outbound and return legs share one user-picked color from `ROUTE_COLORS` in `map-view.js` (Wong/Tol-derived, colorblind-safe). Default is Coral. Applied via `drawRoutePair` / `drawRouteGlow`; persisted as `walk_route_color`. The prefs modal (`#prefsModal` / `#routeColorSwatches`) is the picker — see Color Swatches below.
+
+| Name    | Hex       | Notes   |
+| ------- | --------- | ------- |
+| Coral   | `#E66100` | default |
+| Sky     | `#56B4E9` |         |
+| Teal    | `#009E73` |         |
+| Magenta | `#CC79A7` |         |
+| Gold    | `#F0E442` |         |
 
 ---
 
@@ -305,6 +315,28 @@ Attached to an icon button in the top bar:
 ```
 
 Toggle with a `.open` class (or `display: none` / `display: block`).
+
+### Color Swatches (Preferences)
+
+The preferences modal (`#prefsModal`, z-index 10000 with the FIT modal) hosts a route-color picker. `#routeColorSwatches` is a `.swatch-grid` filled at open time by `renderRouteColorSwatches()` (`prefs-modal.js`). Each `.swatch` is a 36px circular button; `.active` marks the current `ROUTE_COLORS` pick.
+
+```css
+.swatch-grid {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.swatch {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer; padding: 0;
+    background-clip: content-box;
+    box-shadow: 0 0 0 2px var(--bg) inset;
+    transition: transform 0.1s, border-color 0.15s;
+}
+.swatch:hover { transform: scale(1.08); }
+.swatch.active { border-color: var(--text); }
+```
 
 ### Loading State
 

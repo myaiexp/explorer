@@ -109,6 +109,23 @@ describe('ExplorerSync.init', () => {
         expect(window.ExplorerSync.getState().token).toBeNull();
     });
 
+    test('corrupt walk_cloud_backup JSON stays anonymous without throwing or fetching', async () => {
+        // Truncated or hand-edited consent blob: JSON.parse throws, readConsentRecord
+        // returns null, and init treats the device as anonymous (finding #7927).
+        // settings.test.js / storage.test.js pin the same '{not json' shape for
+        // their keys; without this, a parse throw here would skip first paint.
+        setLocation('/explorer/');
+        setLocalStorage({ walk_cloud_backup: '{not json' });
+        const fetchSpy = vi.fn();
+        global.fetch = fetchSpy;
+        loadSync();
+        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(window.ExplorerSync.getState()).toMatchObject({
+            state: 'anonymous', username: null, token: null,
+        });
+    });
+
     test('URL segment with non-empty localStorage prompts confirm; cancel strips URL', async () => {
         setLocation('/explorer/rugged-pine-42', '#t=tok-rp42');
         setLocalStorage({ walk_visits: '[{"id":"old"}]' });
