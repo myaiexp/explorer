@@ -12,7 +12,7 @@
  * elevation / favorites / osrm (loopVias) are faked on globalThis.
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { resolve } from 'path';
 import { loadScripts } from './helpers/load.js';
 
@@ -31,7 +31,6 @@ const PANEL_HTML = `
   <span id="carBadge"></span>
   <select id="locationTypeSelect"><option value="park">park</option></select>
   <input id="spreadSlider" type="range" value="50">
-  <input type="checkbox" id="smartRouting">
   <input type="checkbox" id="winterMode">
   <input id="maxDistance" value="5">
   <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
@@ -92,15 +91,18 @@ describe('getSpreadParams', () => {
 });
 
 describe('readRouteBuildOptions', () => {
-    function setModes({ smart = false, winter = false, maxKm = '5', spread = '50' } = {}) {
-        document.getElementById('smartRouting').checked = smart;
+    function setModes({ winter = false, maxKm = '5', spread = '50' } = {}) {
         document.getElementById('winterMode').checked = winter;
         document.getElementById('maxDistance').value = maxKm;
         document.getElementById('spreadSlider').value = spread;
     }
 
-    test('round-trip + both checkboxes → smart and winter on, spread from the slider', () => {
-        setModes({ smart: true, winter: true, maxKm: '12.5', spread: '100' });
+    // Smart routing is no longer a checkbox — #smartRouting does not exist in
+    // PANEL_HTML at all (removed along with the toggle). This is the landmine-1
+    // regression test: readRouteBuildOptions must not throw `null.checked`.
+    test('round-trip + winter on, spread from the slider — no #smartRouting element in the DOM', () => {
+        expect(document.getElementById('smartRouting')).toBeNull();
+        setModes({ winter: true, maxKm: '12.5', spread: '100' });
         expect(readRouteBuildOptions('round')).toEqual({
             tripMode: 'round',
             smartRouting: true,
@@ -121,29 +123,34 @@ describe('readRouteBuildOptions', () => {
         expect(readRouteBuildOptions('round').degraded).toBe(false);
     });
 
-    test('one-way never enables smart routing, even when both checkboxes are on', () => {
-        setModes({ smart: true, winter: true });
+    // The silent-downgrade guard (finding #8xxx): smart routing is unconditional
+    // for round trips now — there is no longer any input that can turn it off
+    // for a round trip short of picking one-way or going degraded (handled
+    // separately, downstream, in destination-resolve.js).
+    test('smart routing is on for every round trip, unconditionally', () => {
+        setModes({ winter: false });
+        expect(readRouteBuildOptions('round').smartRouting).toBe(true);
+        setModes({ winter: true });
+        expect(readRouteBuildOptions('round').smartRouting).toBe(true);
+    });
+
+    test('one-way never enables smart routing', () => {
+        setModes({ winter: true });
         const opts = readRouteBuildOptions('one-way');
         expect(opts.tripMode).toBe('one-way');
         expect(opts.smartRouting).toBe(false);
         // Dest-pool winter filtering is independent of smart routing (the
-        // checkbox hint says so); dispatch already ignores winterMode unless
-        // it takes the smart-loop branch, so the helper does not re-gate it.
+        // checkbox hint said so, and still does); dispatch already ignores
+        // winterMode unless it takes the smart-loop branch, so the helper
+        // does not re-gate it.
         expect(opts.winterMode).toBe(true);
     });
 
-    test('round-trip + winter without smart still reports winterMode (dest-pool)', () => {
-        setModes({ smart: false, winter: true });
-        const opts = readRouteBuildOptions('round');
-        expect(opts.smartRouting).toBe(false);
-        expect(opts.winterMode).toBe(true);
-    });
-
-    test('round-trip + smart without winter → winterMode false', () => {
-        setModes({ smart: true, winter: false });
-        const opts = readRouteBuildOptions('round');
-        expect(opts.smartRouting).toBe(true);
-        expect(opts.winterMode).toBe(false);
+    test('winterMode is read independently of tripMode / smartRouting', () => {
+        setModes({ winter: true });
+        expect(readRouteBuildOptions('round').winterMode).toBe(true);
+        setModes({ winter: false });
+        expect(readRouteBuildOptions('round').winterMode).toBe(false);
     });
 });
 
@@ -170,6 +177,17 @@ describe('routing-mode form policy has a single owner (findings #7321 / #7316)',
             expect(src(file), file).not.toMatch(/getElementById\('smartRouting'\)/);
             expect(src(file), file).not.toMatch(/getElementById\('winterMode'\)/);
         }
+    });
+
+    // Smart routing's toggle is gone entirely — route-view.js itself must not
+    // read a #smartRouting element either (there is none left in index.html).
+    test('no repo-root .js or index.html references the deleted #smartRouting element', () => {
+        const rootScripts = readdirSync(root).filter((f) => f.endsWith('.js'));
+        for (const file of rootScripts) {
+            const text = src(file);
+            expect(text, file).not.toMatch(/getElementById\(['"]smartRouting['"]\)/);
+        }
+        expect(src('index.html')).not.toMatch(/id=["']smartRouting["']/);
     });
 
     test('distance-label strings live only in syncDistanceLabel', () => {

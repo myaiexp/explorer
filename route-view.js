@@ -22,13 +22,21 @@ function getSpreadParams() {
     return computeSpreadParams(parseInt(document.getElementById('spreadSlider').value, 10));
 }
 
-// Routing-mode form state — the one DOM read for smart / winter / maxKm / spread.
-// buildAndDisplay, rerouteWithCurrentSpread, and generateDestination used to
-// each re-read these; a new flag (or a one-way/smart interaction) could land
-// on pick-on-map and miss spread-reroute. smartRouting is off for one-way
-// (no junctions to snap). winterMode is the checkbox as-is: dest-pool road
-// filtering is independent of smart routing, and buildRouteForMode only
-// consults winterMode on the smart-loop branch. degraded mirrors osrm.js's
+// Routing-mode form state — the one DOM read for winter / maxKm / spread (and
+// the tripMode-derived smartRouting flag below). buildAndDisplay,
+// rerouteWithCurrentSpread, and generateDestination used to each re-read
+// these; a new flag (or a one-way/smart interaction) could land on
+// pick-on-map and miss spread-reroute. Smart routing is no longer a user
+// toggle — it is on for every round trip and off for one-way (no junctions to
+// snap); route-dispatch.js's buildRouteForMode still takes smartRouting as an
+// explicit dispatch flag (smart-loop vs plain-loop branch), so this is where
+// that flag is derived for its two direct callers, spread-control.js and
+// route-restore.js. generate.js's round-trip path does NOT read this field —
+// destination-resolve.js's buildRouteForDestination runs the smart-loop
+// retry loop unconditionally for any non-degraded round trip; see its header
+// comment. winterMode is the checkbox as-is: dest-pool road filtering is
+// independent of smart routing, and buildRouteForMode only consults
+// winterMode on the smart-loop branch. degraded mirrors osrm.js's
 // isSelfHostedDown() latch (resolved as a global at call time, like loopVias
 // below) — the only place in the whole degraded pipeline that touches the
 // DOM/latch; every downstream module (route-dispatch.js, destination-resolve.js)
@@ -36,7 +44,7 @@ function getSpreadParams() {
 function readRouteBuildOptions(tripMode) {
     return {
         tripMode,
-        smartRouting: tripMode !== 'one-way' && document.getElementById('smartRouting').checked,
+        smartRouting: tripMode !== 'one-way',
         winterMode: document.getElementById('winterMode').checked,
         maxKm: parseFloat(document.getElementById('maxDistance').value),
         spread: getSpreadParams(),

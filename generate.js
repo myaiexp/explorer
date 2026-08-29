@@ -58,8 +58,11 @@ async function generateDestination() {
             // down so the destination-resolve pipeline stays DOM-free. maxKm
             // was already parsed (and validated) above; keep that snapshot so
             // a field change during geocode cannot sneak an unvalidated budget
-            // into the build.
-            const { smartRouting, winterMode, spread, degraded } = readRouteBuildOptions(tripMode);
+            // into the build. smartRouting is not read here: it is no longer a
+            // toggle a caller can opt out of — buildRouteForDestination runs
+            // its junction-snap retry loop unconditionally for every
+            // non-degraded round trip (see destination-resolve.js).
+            const { winterMode, spread, degraded } = readRouteBuildOptions(tripMode);
 
             // Resolve a candidate pool, then screen it for water-reachability.
             const resolved = await resolveCandidatePool(startLat, startLng, {
@@ -73,7 +76,7 @@ async function generateDestination() {
             // read dest/destName back from the build result.
             const built = await buildRouteForDestination(startLat, startLng, {
                 candidatePool, dest: screened.dest, destName: screened.destName,
-                existingDests, maxKm, tripMode, spread, smartRouting, winterMode, degraded, onProgress });
+                existingDests, maxKm, tripMode, spread, winterMode, degraded, onProgress });
             const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
             const session = displayRoute({

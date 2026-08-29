@@ -28,7 +28,6 @@ const FORM_HTML = `
     <option value="park" selected>park</option>
   </select>
   <input type="checkbox" id="winterMode">
-  <input type="checkbox" id="smartRouting">
   <input type="range" id="spreadSlider" min="0" max="100" value="50">
   <div id="notification" class="active"></div>
   <button id="generateBtn"></button>
@@ -76,7 +75,6 @@ beforeEach(() => {
   globalThis.getVisits = () => [{ destLat: 62, destLng: 26 }];
   globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
     tripMode,
-    smartRouting: false,
     winterMode: false,
     maxKm: parseFloat(document.getElementById('maxDistance').value),
     spread: SPREAD,
@@ -229,7 +227,7 @@ describe('straight-line scale', () => {
 describe('pipeline wiring', () => {
   test('happy path displays, persists, and forwards dests / modes / spread', async () => {
     readRouteBuildOptions.mockReturnValue({
-      tripMode: 'round', smartRouting: true, winterMode: true,
+      tripMode: 'round', winterMode: true,
       maxKm: 5.2, spread: SPREAD,
     });
 
@@ -247,9 +245,15 @@ describe('pipeline wiring', () => {
     }));
     expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
       dest: DEST, destName: 'Park', maxKm: 5.2, tripMode: 'round',
-      spread: SPREAD, smartRouting: true, winterMode: true,
+      spread: SPREAD, winterMode: true,
       existingDests: [[62, 26]],
     }));
+    // Smart routing is no longer a flag generate.js threads through — it is
+    // unconditional inside destination-resolve.js's buildRouteForDestination
+    // for any non-degraded round trip. generate.js must not even forward a
+    // smartRouting key any more (the silent-downgrade guard, generate.js
+    // side: see destination-resolve.test.js for the deeper one).
+    expect(buildRouteForDestination.mock.calls[0][2]).not.toHaveProperty('smartRouting');
 
     expect(displayRouteCalls).toHaveLength(1);
     expect(displayRouteCalls[0]).toEqual(expect.objectContaining({
@@ -265,9 +269,9 @@ describe('pipeline wiring', () => {
     expect(document.getElementById('notification').classList.contains('active')).toBe(false);
   });
 
-  test('winterMode from the helper reaches dest-pool even when smartRouting is off', async () => {
+  test('winterMode from the helper reaches dest-pool and buildRouteForDestination', async () => {
     readRouteBuildOptions.mockReturnValue({
-      tripMode: 'round', smartRouting: false, winterMode: true,
+      tripMode: 'round', winterMode: true,
       maxKm: 5.2, spread: SPREAD,
     });
 
@@ -277,7 +281,7 @@ describe('pipeline wiring', () => {
       winterMode: true,
     }));
     expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
-      smartRouting: false, winterMode: true,
+      winterMode: true,
     }));
   });
 
@@ -293,6 +297,59 @@ describe('pipeline wiring', () => {
     expect(errors).toEqual(['geocode failed']);
     expect(displayRouteCalls).toHaveLength(0);
     expect(saveToHistoryCalls).toHaveLength(0);
+  });
+});
+
+// The silent-downgrade guard, at the real route-view.js ↔ generate.js seam:
+// unlike every other test in this file, these load the REAL readRouteBuildOptions
+// (route-view.js) instead of faking it, so a mistake in how route-view.js
+// derives smartRouting — or in how generate.js threads tripMode/degraded down
+// — shows up here even though buildRouteForDestination itself stays faked.
+// FORM_HTML above has no #smartRouting element (the toggle is gone); loading
+// route-view.js here proves readRouteBuildOptions works without it.
+describe('real route-view.js wiring (no #smartRouting element anywhere)', () => {
+  beforeEach(() => {
+    expect(document.getElementById('smartRouting')).toBeNull();
+    globalThis.isSelfHostedDown = vi.fn(() => false);
+    // Overwrites the faked readRouteBuildOptions installed by the outer
+    // beforeEach with the real implementation from route-view.js. route-view's
+    // SCRIPT_DEPS (session-state.js, result-panel.js) and route-view.js itself
+    // also overwrite this file's setCurrentSession / resetResultPanel /
+    // displayRoute fakes with real implementations that need DOM this suite's
+    // minimal FORM_HTML doesn't carry (markVisitedBtn, resultPanel, …) — restore
+    // them so only readRouteBuildOptions is actually real for this describe.
+    loadScripts('route-view');
+    globalThis.setCurrentSession = (v) => { if (v === null) sessionClears++; };
+    globalThis.resetResultPanel = () => { panelResets++; };
+    globalThis.displayRoute = (args) => {
+      displayRouteCalls.push(args);
+      return { id: 'sess-1', ...args };
+    };
+  });
+
+  test('a round-trip generate still takes the multi-candidate findBestLoop path (smartRouting is not lost between route-view.js and generate.js)', async () => {
+    document.getElementById('roundTrip').checked = true;
+    document.getElementById('oneWay').checked = false;
+
+    await generate();
+
+    // destination-resolve.js runs findBestLoop unconditionally for any
+    // non-degraded round trip — generate.js just needs to get tripMode and
+    // degraded down there correctly, which is what this pins.
+    expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
+      tripMode: 'round', degraded: false,
+    }));
+  });
+
+  test('one-way builds are unchanged', async () => {
+    document.getElementById('roundTrip').checked = false;
+    document.getElementById('oneWay').checked = true;
+
+    await generate();
+
+    expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
+      tripMode: 'one-way',
+    }));
   });
 });
 
@@ -450,7 +507,6 @@ describe('degraded routing (self-hosted OSRM unreachable)', () => {
   function degradedOptions() {
     globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
       tripMode,
-      smartRouting: false,
       winterMode: false,
       maxKm: parseFloat(document.getElementById('maxDistance').value),
       spread: SPREAD,

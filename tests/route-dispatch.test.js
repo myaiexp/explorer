@@ -157,3 +157,37 @@ describe('buildRouteForMode dispatch', () => {
         expect(onProgress).not.toHaveBeenCalled();
     });
 });
+
+describe('degraded round trips never reach the junctions path', () => {
+    // buildRouteForDestination short-circuits before findBestLoop while
+    // degraded, but spread-control.js and route-restore.js call
+    // buildRouteForMode DIRECTLY, spreading readRouteBuildOptions — which
+    // since the toggle removal reports smartRouting: true for every round
+    // trip. Without this gate, a spread reroute or a shared-link restore
+    // during a shelly outage still fires a junctions-cache fetch at the same
+    // dead machine, times out, and then falls back into an unreduced buildLoop.
+    test('degraded takes the plain loop and forwards the flag', async () => {
+        const r = await globalThis.buildRouteForMode(60, 24, 61, 25, {
+            tripMode: 'round', smartRouting: true, winterMode: false,
+            maxKm: 5, spread: { offsetMult: 0.5, viaTs: [0.25, 0.5, 0.75] }, degraded: true,
+        });
+
+        expect(buildJunctionLoop).not.toHaveBeenCalled();
+        expect(buildLoop).toHaveBeenCalledWith(
+            60, 24, 61, 25,
+            { offsetMult: 0.5, viaTs: [0.25, 0.5, 0.75] },
+            { degraded: true },
+        );
+        expect(r.junctions).toBeNull();
+    });
+
+    test('a healthy round trip still uses the junctions path', async () => {
+        await globalThis.buildRouteForMode(60, 24, 61, 25, {
+            tripMode: 'round', smartRouting: true, winterMode: false,
+            maxKm: 5, spread: { offsetMult: 0.5, viaTs: [0.25, 0.5, 0.75] }, degraded: false,
+        });
+
+        expect(buildJunctionLoop).toHaveBeenCalledTimes(1);
+        expect(buildLoop).not.toHaveBeenCalled();
+    });
+});

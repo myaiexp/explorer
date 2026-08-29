@@ -2,8 +2,11 @@
 // water-reachability, and build the best route for it. Pure orchestration of
 // pieces that live in sibling modules (overpass fetchers, screening, novelty
 // ranking, junction/route builders); reads NO DOM — mode flags (winterMode,
-// smartRouting, degraded) are passed in, matching route-dispatch.js. This file
+// degraded) are passed in, matching route-dispatch.js. This file
 // never touches document/DOM or osrm.js's isSelfHostedDown() latch directly.
+// Smart routing (junction-snapped loops via findBestLoop) is no longer a
+// caller-supplied flag here — buildRouteForDestination runs it unconditionally
+// for every non-degraded round trip; see its own comment below.
 // Every cross-file dependency (rankByNovelty, generateRandomPointAnnulus,
 // capPool, screenCandidates, screeningTableFn, fetchRoadsInRadius,
 // fetchPOIsInRadius, buildJunctionLoop, buildRouteForMode,
@@ -198,25 +201,31 @@ async function findBestLoop(startLat, startLng, { candidatePool, dest, existingD
     return bestSeen;
 }
 
-// Build the route for a resolved destination. Smart round-trips run the
-// novelty-retry loop (findBestLoop), which may substitute a different,
-// lower-overlap destination; one-way and plain loops dispatch straight through
-// buildRouteForMode. `smartRouting`/`winterMode`/`degraded` are passed in (read
-// from the DOM/latch by the caller). `degraded` — Layer 2 of the shelly-down
-// pipeline reduction — short-circuits BEFORE the smartRouting check: while
-// degraded, findBestLoop (and therefore buildJunctionLoop, and therefore the
-// junctions-cache fetch) is never entered at all, regardless of smartRouting —
-// no candidate retries, one chirality, one buildRouteForMode call. That's the
-// whole reduction; findBestLoop itself is untouched (retryBudget stays what it
-// is — do not add a second retry-limiting mechanism there). Returns the
-// (possibly updated) dest/destName plus the built legs, junctions, and loop
-// overlap (null when not a measured smart loop, and outbound/return are
-// undefined when a smart build produced nothing).
+// Build the route for a resolved destination. Every non-degraded round trip
+// runs the novelty-retry loop (findBestLoop) unconditionally — smart routing
+// is no longer a caller-supplied toggle, it IS round-trip routing — which may
+// substitute a different, lower-overlap destination; one-way always, and a
+// degraded round trip, dispatch straight through buildRouteForMode instead.
+// `winterMode`/`degraded` are passed in (read from the DOM/latch by the
+// caller). `degraded` — Layer 2 of the shelly-down pipeline reduction —
+// short-circuits BEFORE findBestLoop is ever reached: while degraded,
+// findBestLoop (and therefore buildJunctionLoop, and therefore the
+// junctions-cache fetch) is never entered at all — no candidate retries, one
+// chirality, one buildRouteForMode call. That's the whole reduction;
+// findBestLoop itself is untouched (retryBudget stays what it is — do not add
+// a second retry-limiting mechanism there). The buildRouteForMode fallback
+// call below hardcodes `smartRouting: false` — that is deliberate, not a
+// vestige: it tells route-dispatch.js "plain loop" for the one-way and
+// degraded cases, which both still route through buildRouteForMode and still
+// need an explicit dispatch flag. Returns the (possibly updated)
+// dest/destName plus the built legs, junctions, and loop overlap (null when
+// not a measured smart loop, and outbound/return are undefined when a smart
+// build produced nothing).
 async function buildRouteForDestination(startLat, startLng, {
-    candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, smartRouting, winterMode, onProgress,
+    candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, winterMode, onProgress,
     degraded = false,
 }) {
-    if (!degraded && tripMode !== 'one-way' && smartRouting) {
+    if (!degraded && tripMode !== 'one-way') {
         const best = await findBestLoop(startLat, startLng,
             { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress });
         if (best) {

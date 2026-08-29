@@ -23,7 +23,6 @@ const FORM_HTML = `
   <select id="locationTypeSelect"></select>
   <input id="spreadSlider" type="range" value="50">
   <input type="checkbox" id="winterMode">
-  <input type="checkbox" id="smartRouting">
   <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
   <input type="radio" name="tripMode" id="oneWay" value="one-way">
 `;
@@ -73,6 +72,21 @@ afterAll(() => {
 });
 
 describe('app.js composition root', () => {
+    // Landmine 2 regression guard: settings.js's SETTINGS_FIELDS used to carry
+    // a { id: 'smartRouting', ... } entry, and initSettingsListeners does an
+    // unconditional getElementById(f.id).addEventListener(...) for every
+    // entry — a stale entry throws `null.addEventListener` the moment the
+    // element is deleted from the DOM, which (via app.js's init → restoreSettings
+    // + initSettingsListeners) blanks the whole page at bootstrap. settings.js
+    // loads for real in this suite (not faked), and FORM_HTML above has no
+    // #smartRouting element at all, so beforeAll already exercised this path;
+    // this test just makes the guarantee explicit and independently checkable.
+    test('app bootstrap survives with no #smartRouting element in the DOM', () => {
+        expect(document.getElementById('smartRouting')).toBeNull();
+        expect(restoreSettings).toHaveBeenCalled();
+        expect(initSettingsListeners).toHaveBeenCalled();
+    });
+
     test('restoreSettings runs after poi-types filled the catalog select', () => {
         const sel = document.getElementById('locationTypeSelect');
         expect(restoreSettings).toHaveBeenCalledTimes(1);
