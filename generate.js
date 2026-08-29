@@ -11,6 +11,11 @@ function getAllExistingDestinations() {
     return getVisits().map(v => [v.destLat, v.destLng]);
 }
 
+// One "we're on the public backup" notice per page load. The condition lasts as
+// long as the self-hosted backend is down, so warning on every generate would be
+// nagging about something the user already knows and cannot fix.
+let degradedNoticeShown = false;
+
 async function generateDestination() {
     // Before any state is touched: a build in flight owns the map, the session
     // and the history store (see loading.js).
@@ -54,7 +59,7 @@ async function generateDestination() {
             // was already parsed (and validated) above; keep that snapshot so
             // a field change during geocode cannot sneak an unvalidated budget
             // into the build.
-            const { smartRouting, winterMode, spread } = readRouteBuildOptions(tripMode);
+            const { smartRouting, winterMode, spread, degraded } = readRouteBuildOptions(tripMode);
 
             // Resolve a candidate pool, then screen it for water-reachability.
             const resolved = await resolveCandidatePool(startLat, startLng, {
@@ -68,7 +73,7 @@ async function generateDestination() {
             // read dest/destName back from the build result.
             const built = await buildRouteForDestination(startLat, startLng, {
                 candidatePool, dest: screened.dest, destName: screened.destName,
-                existingDests, maxKm, tripMode, spread, smartRouting, winterMode, onProgress });
+                existingDests, maxKm, tripMode, spread, smartRouting, winterMode, degraded, onProgress });
             const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
             const session = displayRoute({
@@ -85,8 +90,20 @@ async function generateDestination() {
             // {coords:[]} for a malformed OSRM 200 — finding #7926).
             if (outboundRoute?.coords?.length) saveToHistory(session);
 
+            if (degraded && !degradedNoticeShown) {
+                degradedNoticeShown = true;
+                showWarning('Routing backend is down — using the public server. Routes are rougher and slower than usual.');
+            }
+
+            // Water-locked first: it is a diagnosed cause, so its advice ("try a
+            // different start") is worth more than describing what is on screen.
+            // The no-route branch deliberately does NOT guess why — during a
+            // backend outage, telling someone to try another destination would
+            // send them retrying something that cannot work.
             if (waterLocked) {
                 showWarning('This area is mostly water — try a different start or larger radius.');
+            } else if (!outboundRoute?.coords?.length) {
+                showWarning('No walking route could be built — the dashed line is straight-line distance, not a route.');
             } else if (overlap !== null && overlap >= OVERLAP_BAD_THRESHOLD) {
                 showWarning('This area has limited routing options — the loop overlaps significantly.');
             }

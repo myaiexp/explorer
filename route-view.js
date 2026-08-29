@@ -55,9 +55,18 @@ function syncDistanceLabel() {
 
 // ─── Duration badges ──────────────────────────────────────────────────────────
 
-function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
+// `noRoute` means routing produced nothing and the map is showing the dashed
+// straight-line placeholder. computeRouteTotals still hands us a number — it
+// substitutes the crow-flies distance for a missing leg — but presenting that
+// as a measured walk, with bike and car times derived from it, is the badge
+// asserting a walk that was never routed. Say straight-line instead, and drop
+// the derived estimates. (A *partial* result — round trip whose return leg
+// alone failed — is not this case and keeps today's estimate; idea #3807.)
+function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode, { noRoute = false } = {}) {
     const label = tripMode === 'one-way' ? 'one way' : 'round trip';
-    document.getElementById('distanceBadge').textContent = `${totalWalkKm.toFixed(1)} km ${label}`;
+    document.getElementById('distanceBadge').textContent = noRoute
+        ? `~${totalWalkKm.toFixed(1)} km straight line`
+        : `${totalWalkKm.toFixed(1)} km ${label}`;
 
     const walkEl = document.getElementById('walkBadge');
     if (walkDurationSec > 0) {
@@ -69,7 +78,7 @@ function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
 
     const bikeEl = document.getElementById('bikeBadge');
     const carEl  = document.getElementById('carBadge');
-    if (totalWalkKm > 0) {
+    if (totalWalkKm > 0 && !noRoute) {
         bikeEl.textContent = `🚲 ~${Math.round(totalWalkKm / 15 * 60)} min`;
         bikeEl.style.display = 'inline-block';
         carEl.textContent  = `🚗 ~${Math.round(totalWalkKm / 35 * 60)} min`;
@@ -117,7 +126,10 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
     // Outbound + return read as one continuous walk; direction is conveyed by
     // the start dot vs dest pin.
     const allCoords = drawRoutePair(outbound, ret, color);
-    if (allCoords.length === 0 && fallbackStraight) {
+    // Captured before the fallback push below, which fills allCoords with the
+    // two straight-line endpoints and would otherwise erase the distinction.
+    const noRoute = allCoords.length === 0;
+    if (noRoute && fallbackStraight) {
         drawRouteGlow([[startLat, startLng], [destLat, destLng]], color, { dashed: true });
         allCoords.push([startLat, startLng], [destLat, destLng]);
     }
@@ -128,7 +140,7 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
     const straightKm = haversineKm(startLat, startLng, destLat, destLng);
     const { totalWalkKm, totalDuration } =
         computeRouteTotals(outbound, ret, straightKm, tripMode);
-    updateDurationBadges(totalWalkKm, totalDuration, tripMode);
+    updateDurationBadges(totalWalkKm, totalDuration, tripMode, { noRoute });
 
     document.getElementById('directionsLink').href =
         buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);

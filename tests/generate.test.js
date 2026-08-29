@@ -445,3 +445,79 @@ describe('surpriseMe', () => {
     Math.random.mockRestore();
   });
 });
+
+describe('degraded routing (self-hosted OSRM unreachable)', () => {
+  function degradedOptions() {
+    globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
+      tripMode,
+      smartRouting: false,
+      winterMode: false,
+      maxKm: parseFloat(document.getElementById('maxDistance').value),
+      spread: SPREAD,
+      degraded: true,
+    }));
+  }
+
+  test('threads degraded into the route build', async () => {
+    degradedOptions();
+
+    await generate();
+
+    expect(buildRouteForDestination.mock.calls[0][2].degraded).toBe(true);
+  });
+
+  test('warns that routing is on the public backup', async () => {
+    degradedOptions();
+
+    await generate();
+
+    expect(warnings.some((w) => /public/i.test(w))).toBe(true);
+  });
+
+  test('warns only once per page load, not once per generate', async () => {
+    degradedOptions();
+
+    await generate();
+    await generate();
+
+    expect(warnings.filter((w) => /public/i.test(w))).toHaveLength(1);
+  });
+
+  test('says nothing about a backup while self-hosted is healthy', async () => {
+    await generate();
+
+    expect(warnings.filter((w) => /public/i.test(w))).toHaveLength(0);
+  });
+});
+
+describe('straight-line placeholder is announced', () => {
+  test('warns that the dashed line is not a walking route', async () => {
+    buildRouteForDestination.mockResolvedValue({
+      dest: DEST, destName: 'Park',
+      outbound: undefined, return: undefined,
+      junctions: null, overlap: null,
+    });
+
+    await generate();
+
+    expect(warnings.some((w) => /straight[- ]line/i.test(w))).toBe(true);
+  });
+
+  test('treats empty coords as no route, same as undefined legs', async () => {
+    buildRouteForDestination.mockResolvedValue({
+      dest: DEST, destName: 'Park',
+      outbound: { coords: [], distance: 0, duration: 0 }, return: null,
+      junctions: null, overlap: null,
+    });
+
+    await generate();
+
+    expect(warnings.some((w) => /straight[- ]line/i.test(w))).toBe(true);
+  });
+
+  test('stays quiet about straight lines when a real route was built', async () => {
+    await generate();
+
+    expect(warnings.filter((w) => /straight[- ]line/i.test(w))).toHaveLength(0);
+  });
+});

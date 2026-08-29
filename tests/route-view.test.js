@@ -227,6 +227,26 @@ describe('buildDirectionsUrl', () => {
 describe('renderRouteTail — fallbackStraight', () => {
     const args = () => [START.lat, START.lng, DEST.lat, DEST.lng, null, null, 'round', COLOR];
 
+    test('labels the distance badge as straight-line when no route was built', () => {
+        renderRouteTail(...args(), { fallbackStraight: true });
+        expect(document.getElementById('distanceBadge').textContent).toMatch(/straight line/i);
+    });
+
+    test('hides the bike and car badges when no route was built', () => {
+        renderRouteTail(...args(), { fallbackStraight: true });
+        expect(document.getElementById('bikeBadge').style.display).toBe('none');
+        expect(document.getElementById('carBadge').style.display).toBe('none');
+    });
+
+    test('a later real route restores the bike and car badges', () => {
+        renderRouteTail(...args(), { fallbackStraight: true });
+        const outbound = { coords: [[START.lat, START.lng], [DEST.lat, DEST.lng]], distance: 3200, duration: 2400 };
+        renderRouteTail(START.lat, START.lng, DEST.lat, DEST.lng, outbound, null, 'round', COLOR, { fallbackStraight: true });
+        expect(document.getElementById('bikeBadge').style.display).toBe('inline-block');
+        expect(document.getElementById('carBadge').style.display).toBe('inline-block');
+        expect(document.getElementById('distanceBadge').textContent).not.toMatch(/straight line/i);
+    });
+
     test('draws a dashed straight line when both legs are missing and fallbackStraight is true', () => {
         renderRouteTail(...args(), { fallbackStraight: true });
         expect(drawRouteGlow).toHaveBeenCalledTimes(1);
@@ -294,11 +314,13 @@ describe('displayRoute', () => {
         expect(document.getElementById('distanceBadge').textContent).toBe('3.2 km one way');
     });
 
-    test('round-trip badge copy with no legs uses the straight-line double', () => {
+    test('round-trip badge copy with no legs uses the straight-line double, labelled as such', () => {
         displayed({ tripMode: 'round' });
         const straight = haversineKm(START.lat, START.lng, DEST.lat, DEST.lng);
+        // The number is still the crow-flies double (computeRouteTotals is
+        // unchanged); what changed is that it no longer claims to be a walk.
         expect(document.getElementById('distanceBadge').textContent)
-            .toBe(`${(straight * 2).toFixed(1)} km round trip`);
+            .toBe(`~${(straight * 2).toFixed(1)} km straight line`);
     });
 
     test('displayRoute always requests the straight-line fallback (first render)', () => {
