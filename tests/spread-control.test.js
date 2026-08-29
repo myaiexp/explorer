@@ -22,7 +22,6 @@ const RETURN = { coords: [[62.2, 25.8], [62.1, 25.7]], distance: 1100, duration:
 
 const FORM_HTML = `
   <input type="range" id="spreadSlider" min="0" max="100" value="50" step="5">
-  <input type="checkbox" id="smartRouting">
   <input type="checkbox" id="winterMode">
   <input id="maxDistance" value="5">
   <div id="loading"><p>Finding your random destination…</p></div>
@@ -136,6 +135,25 @@ describe('runSpreadReroute retry while building', () => {
 });
 
 describe('rerouteWithCurrentSpread', () => {
+    // Landmine 1 regression guard, at this call site: the #smartRouting
+    // checkbox is gone from FORM_HTML above entirely (spread-control.js never
+    // reads it directly — it only forwards whatever readRouteBuildOptions
+    // returns), so a spread reroute must complete cleanly with no such
+    // element anywhere in the DOM.
+    test('a spread reroute works with no #smartRouting element in the DOM', async () => {
+        expect(document.getElementById('smartRouting')).toBeNull();
+        setCurrentSession(baseSession());
+        readRouteBuildOptions.mockReturnValue({
+            tripMode: 'round', smartRouting: true, winterMode: true,
+            maxKm: 5, spread: SPREAD,
+        });
+
+        await expect(rerouteWithCurrentSpread()).resolves.toBeUndefined();
+
+        expect(buildRouteForMode).toHaveBeenCalledTimes(1);
+        expect(getCurrentSession().junctions).toBe(NEW_JUNCTIONS);
+    });
+
     test('preserves visitId, reuses cachedJunctions, and writes the new junctions', async () => {
         const session = baseSession();
         setCurrentSession(session);

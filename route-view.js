@@ -5,9 +5,9 @@
 // collaborators tests load for real).
 //
 // map-view.js (markers/polylines/route color), session.js
-// (computeRouteTotals/routeSessionFields), elevation.js and favorites.js
-// resolve as globals at call time — tests fake them. Every path that puts a
-// route on screen ends up in displayRoute:
+// (computeRouteTotals/routeSessionFields), elevation.js, favorites.js, and
+// osrm.js (loopVias, isSelfHostedDown) resolve as globals at call time — tests
+// fake them. Every path that puts a route on screen ends up in displayRoute:
 // generate.js directly, pick-mode.js / share-link.js / the history + favorites
 // lists via route-restore.js, and spread-control.js via renderRouteTail.
 
@@ -22,20 +22,33 @@ function getSpreadParams() {
     return computeSpreadParams(parseInt(document.getElementById('spreadSlider').value, 10));
 }
 
-// Routing-mode form state — the one DOM read for smart / winter / maxKm / spread.
-// buildAndDisplay, rerouteWithCurrentSpread, and generateDestination used to
-// each re-read these; a new flag (or a one-way/smart interaction) could land
-// on pick-on-map and miss spread-reroute. smartRouting is off for one-way
-// (no junctions to snap). winterMode is the checkbox as-is: dest-pool road
-// filtering is independent of smart routing, and buildRouteForMode only
-// consults winterMode on the smart-loop branch.
+// Routing-mode form state — the one DOM read for winter / maxKm / spread (and
+// the tripMode-derived smartRouting flag below). buildAndDisplay,
+// rerouteWithCurrentSpread, and generateDestination used to each re-read
+// these; a new flag (or a one-way/smart interaction) could land on
+// pick-on-map and miss spread-reroute. Smart routing is no longer a user
+// toggle — it is on for every round trip and off for one-way (no junctions to
+// snap); route-dispatch.js's buildRouteForMode still takes smartRouting as an
+// explicit dispatch flag (smart-loop vs plain-loop branch), so this is where
+// that flag is derived for its two direct callers, spread-control.js and
+// route-restore.js. generate.js's round-trip path does NOT read this field —
+// destination-resolve.js's buildRouteForDestination runs the smart-loop
+// retry loop unconditionally for any non-degraded round trip; see its header
+// comment. winterMode is the checkbox as-is: dest-pool road filtering is
+// independent of smart routing, and buildRouteForMode only consults
+// winterMode on the smart-loop branch. degraded mirrors osrm.js's
+// isSelfHostedDown() latch (resolved as a global at call time, like loopVias
+// below) — the only place in the whole degraded pipeline that touches the
+// DOM/latch; every downstream module (route-dispatch.js, destination-resolve.js)
+// takes degraded as a passed-in argument.
 function readRouteBuildOptions(tripMode) {
     return {
         tripMode,
-        smartRouting: tripMode !== 'one-way' && document.getElementById('smartRouting').checked,
+        smartRouting: tripMode !== 'one-way',
         winterMode: document.getElementById('winterMode').checked,
         maxKm: parseFloat(document.getElementById('maxDistance').value),
         spread: getSpreadParams(),
+        degraded: isSelfHostedDown(),
     };
 }
 
@@ -50,9 +63,18 @@ function syncDistanceLabel() {
 
 // ─── Duration badges ──────────────────────────────────────────────────────────
 
-function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
+// `noRoute` means routing produced nothing and the map is showing the dashed
+// straight-line placeholder. computeRouteTotals still hands us a number — it
+// substitutes the crow-flies distance for a missing leg — but presenting that
+// as a measured walk, with bike and car times derived from it, is the badge
+// asserting a walk that was never routed. Say straight-line instead, and drop
+// the derived estimates. (A *partial* result — round trip whose return leg
+// alone failed — is not this case and keeps today's estimate; idea #3807.)
+function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode, { noRoute = false } = {}) {
     const label = tripMode === 'one-way' ? 'one way' : 'round trip';
-    document.getElementById('distanceBadge').textContent = `${totalWalkKm.toFixed(1)} km ${label}`;
+    document.getElementById('distanceBadge').textContent = noRoute
+        ? `~${totalWalkKm.toFixed(1)} km straight line`
+        : `${totalWalkKm.toFixed(1)} km ${label}`;
 
     const walkEl = document.getElementById('walkBadge');
     if (walkDurationSec > 0) {
@@ -64,7 +86,7 @@ function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode) {
 
     const bikeEl = document.getElementById('bikeBadge');
     const carEl  = document.getElementById('carBadge');
-    if (totalWalkKm > 0) {
+    if (totalWalkKm > 0 && !noRoute) {
         bikeEl.textContent = `🚲 ~${Math.round(totalWalkKm / 15 * 60)} min`;
         bikeEl.style.display = 'inline-block';
         carEl.textContent  = `🚗 ~${Math.round(totalWalkKm / 35 * 60)} min`;
@@ -112,7 +134,10 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
     // Outbound + return read as one continuous walk; direction is conveyed by
     // the start dot vs dest pin.
     const allCoords = drawRoutePair(outbound, ret, color);
-    if (allCoords.length === 0 && fallbackStraight) {
+    // Captured before the fallback push below, which fills allCoords with the
+    // two straight-line endpoints and would otherwise erase the distinction.
+    const noRoute = allCoords.length === 0;
+    if (noRoute && fallbackStraight) {
         drawRouteGlow([[startLat, startLng], [destLat, destLng]], color, { dashed: true });
         allCoords.push([startLat, startLng], [destLat, destLng]);
     }
@@ -123,7 +148,7 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
     const straightKm = haversineKm(startLat, startLng, destLat, destLng);
     const { totalWalkKm, totalDuration } =
         computeRouteTotals(outbound, ret, straightKm, tripMode);
-    updateDurationBadges(totalWalkKm, totalDuration, tripMode);
+    updateDurationBadges(totalWalkKm, totalDuration, tripMode, { noRoute });
 
     document.getElementById('directionsLink').href =
         buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);

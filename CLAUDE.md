@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Wander** — a Finland-only static web app for generating random walking/exploration destinations. Pick a starting location and radius, get a random POI or point, see a routed round-trip or one-way path on a Leaflet map. Starts outside `bbox.js` `FINLAND_BBOX` are rejected after geocode (`resolveStart` in `location-input.js`) and when restoring a shared link (`restoreFromHash` in `share-link.js`, start and dest); walking routes go to self-hosted OSRM-foot (`https://mase.fi/api/osrm-fi`, `deploy/shelly-osrm/`), not public OSRM.
+**Wander** — a Finland-only static web app for generating random walking/exploration destinations. Pick a starting location and radius, get a random POI or point, see a routed round-trip or one-way path on a Leaflet map. Starts outside `bbox.js` `FINLAND_BBOX` are rejected after geocode (`resolveStart` in `location-input.js`) and when restoring a shared link (`restoreFromHash` in `share-link.js`, start and dest); walking routes go to self-hosted OSRM-foot (`https://mase.fi/api/osrm-fi`, `deploy/shelly-osrm/`), falling back to public FOSSGIS OSRM only when that is unreachable — see the degraded mode in step 4.
 
 UI design system (colors, typography, components, layout) is documented in `DESIGN.md`.
 
@@ -25,7 +25,9 @@ Backend (cloud backup) lives in `server/` — Node 24 + Hono + Drizzle + Postgre
 1. User enters a starting location (address or lat/lng) and a max distance in km
 2. Address inputs are geocoded via Nominatim; `resolveStart` then rejects a start outside `FINLAND_BBOX`
 3. A destination is picked: random POI from Overpass (categorized: nature, food, activity, culture, or "any"), random road point, or fully random point
-4. OSRM calculates a walking route. Round-trip always uses 3 geometric envelope vias per side (spread slider sets loop width). Default (`buildLoop` in `osrm.js`) snaps each via to the nearest road via OSRM nearest within `max(0.3 km, offsetKm·0.5)`. Smart routing (`#smartRouting` in `index.html`) snaps those same vias to OSM junctions from junctions-cache (`buildJunctionLoop` — both chiralities, lower-overlap wins) and falls back to `buildLoop` on Overpass/OSRM failure. See `junctions-cache/README.md`.
+4. OSRM calculates a walking route. Round-trip always uses 3 geometric envelope vias per side (spread slider sets loop width). Round trips snap those vias to OSM junctions from junctions-cache (`buildJunctionLoop` in `osrm.js` — both chiralities, lower-overlap wins) and fall back to `buildLoop` on Overpass/OSRM failure; `buildLoop` snaps each via to the nearest road via OSRM nearest within `max(0.3 km, offsetKm·0.5)`. This is unconditional — the old `#smartRouting` toggle was removed once it had proven itself. See `junctions-cache/README.md`.
+
+   **Degraded mode.** When self-hosted OSRM is unreachable, `osrm.js` latches for 5 minutes (`isSelfHostedDown`) and transparently retries against public FOSSGIS OSRM, serializing every public request ≥1.1 s apart to respect its fair-use cap — that pacing is internal and needs no caller cooperation. The latch also surfaces as a `degraded` mode flag from `readRouteBuildOptions`, threaded like `winterMode`: it skips via-snapping, junctions and candidate retries, cutting a generate from 8 requests to 2. A toast says so once per page load. Routes are rougher and slower, but real. Design: `docs/plans/2026-08-29-public-osrm-fallback-design.md`.
 5. Result shown on Leaflet map with markers, route polylines, elevation profile chart, distance/duration badges, Google Maps directions link
 
 ## Development

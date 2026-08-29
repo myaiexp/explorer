@@ -19,7 +19,6 @@ import { loadScripts } from './helpers/load.js';
 const SPREAD = { offsetKm: 1, spreadFactor: 0.5 };
 
 const FORM_HTML = `
-  <input type="checkbox" id="smartRouting">
   <input type="checkbox" id="winterMode">
   <input id="maxDistance" value="5">`;
 
@@ -146,6 +145,27 @@ describe('restoreResult — re-display must not persist', () => {
 });
 
 describe('buildAndDisplay — successful build persists', () => {
+  // Landmine 1 regression guard, at this call site: buildAndDisplay is what
+  // pick-on-map and share-link's restoreFromHash use to build a route to a
+  // destination the user already chose. It never reads #smartRouting itself
+  // (only forwards whatever readRouteBuildOptions returns), and that element
+  // is gone from FORM_HTML above entirely — a shared-link restore must still
+  // build cleanly.
+  test('a shared-link restore works with no #smartRouting element in the DOM', async () => {
+    expect(document.getElementById('smartRouting')).toBeNull();
+
+    await expect(buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'Jyväskylä',
+      destName: 'Harju',
+      onProgress: () => {},
+    })).resolves.toBeUndefined();
+
+    expect(buildRouteCalls).toHaveLength(1);
+    expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(1);
+  });
+
   test('clears, builds, displays, and saveToHistory after a successful build', async () => {
     const onProgress = vi.fn();
     await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
