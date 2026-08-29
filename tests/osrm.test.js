@@ -12,11 +12,20 @@
  * production module in this realm. fetchWithTimeout is the real one; it
  * calls the per-test `fetch` stub and clears its abort timer on resolve.
  */
-import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
+import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
     loadScripts('osrm');
+});
+
+// osrm.js's self-hosted-down latch and public-request queue are module-scoped
+// state that survives every test in this file (loadScripts only runs once, in
+// beforeAll above). A handful of tests below deliberately trip the latch
+// (self-hosted throw / non-ok) — without a reset, that state would leak into
+// later tests and make them silently skip straight to the public fallback.
+beforeEach(() => {
+    globalThis.resetOsrmFallbackState();
 });
 
 afterEach(() => {
@@ -101,7 +110,12 @@ const LOOP_OPTS = () => ({
 // ── tryOsrm ──────────────────────────────────────────────────────────────────
 
 describe('tryOsrm', () => {
-    const url = 'https://mase.fi/api/osrm-fi/route/v1/foot/24,60;24.1,60.1';
+    // tryOsrm's contract is now a path+query SUFFIX (composed onto whichever
+    // base — self-hosted or public fallback — it decides to use), not a
+    // fully-composed URL. See tests/osrm-fallback.test.js for the fallback
+    // behavior itself (latch, throttle, public retry); this block just pins
+    // parsing + the "does/doesn't latch" split for a self-hosted response.
+    const suffix = '24,60;24.1,60.1';
 
     test('maps geojson [lng,lat] → [lat,lng] and flattens leg steps', async () => {
         installFetch({
@@ -110,7 +124,7 @@ describe('tryOsrm', () => {
                 { duration: 42, distance: 900, legs: [{ steps: [{ name: 'a' }] }, { steps: [{ name: 'b' }] }] },
             )),
         });
-        await expect(globalThis.tryOsrm(url)).resolves.toEqual({
+        await expect(globalThis.tryOsrm(suffix)).resolves.toEqual({
             coords: [[60, 24], [60.1, 24.1]],
             duration: 42,
             distance: 900,
@@ -118,50 +132,81 @@ describe('tryOsrm', () => {
         });
     });
 
-    test('returns null when fetch throws', async () => {
-        globalThis.fetch = vi.fn(async () => { throw new Error('net'); });
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+    test('composes the suffix onto OSRM_FI_BASE while self-hosted is healthy', async () => {
+        const fetch = installFetch();
+        await globalThis.tryOsrm(suffix);
+        expect(String(fetch.mock.calls[0][0])).toBe(`${globalThis.OSRM_FI_BASE}/${suffix}`);
     });
 
-    test('returns null on a non-ok response', async () => {
-        globalThis.fetch = vi.fn(async () => jsonResponse({}, { ok: false, status: 500 }));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+    test('a fetch throw latches self-hosted and falls back to public (still null if both fail)', async () => {
+        const fetch = vi.fn(async () => { throw new Error('net'); });
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(2); // self-hosted attempt, then public retry
+        expect(globalThis.isSelfHostedDown()).toBe(true);
     });
 
-    test('returns null when json() throws', async () => {
-        globalThis.fetch = vi.fn(async () => ({
+    test('a non-ok response latches self-hosted and falls back to public (still null if both fail)', async () => {
+        const fetch = vi.fn(async () => jsonResponse({}, { ok: false, status: 500 }));
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(globalThis.isSelfHostedDown()).toBe(true);
+    });
+
+    test('a malformed self-hosted body (json() throws) latches and falls back to public', async () => {
+        const fetch = vi.fn(async () => ({
             ok: true,
             json: async () => { throw new Error('bad json'); },
         }));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(globalThis.isSelfHostedDown()).toBe(true);
     });
 
-    test('returns null when routes is missing or empty', async () => {
-        globalThis.fetch = vi.fn(async () => jsonResponse({}));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
-        globalThis.fetch = vi.fn(async () => jsonResponse({ routes: [] }));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+    test('returns null when routes is missing or empty, and does NOT latch or ask public', async () => {
+        const fetch = vi.fn(async () => jsonResponse({}));
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
+
+        const fetch2 = vi.fn(async () => jsonResponse({ routes: [] }));
+        globalThis.fetch = fetch2;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch2).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 
-    test('returns null on a 200 whose route has no geometry (finding #7785)', async () => {
-        globalThis.fetch = vi.fn(async () => jsonResponse({
+    test('returns null on a 200 whose route has no geometry (finding #7785), and does NOT latch', async () => {
+        const fetch = vi.fn(async () => jsonResponse({
             routes: [{ duration: 1, distance: 1 }],
         }));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 
-    test('returns null when geometry.coordinates is not an array', async () => {
-        globalThis.fetch = vi.fn(async () => jsonResponse({
+    test('returns null when geometry.coordinates is not an array, and does NOT latch', async () => {
+        const fetch = vi.fn(async () => jsonResponse({
             routes: [{ duration: 1, distance: 1, geometry: { coordinates: null } }],
         }));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 
-    test('returns null when geometry.coordinates is an empty array (finding #7926)', async () => {
-        globalThis.fetch = vi.fn(async () => jsonResponse({
+    test('returns null when geometry.coordinates is an empty array (finding #7926), and does NOT latch', async () => {
+        const fetch = vi.fn(async () => jsonResponse({
             routes: [{ duration: 1, distance: 1, geometry: { coordinates: [] } }],
         }));
-        await expect(globalThis.tryOsrm(url)).resolves.toBeNull();
+        globalThis.fetch = fetch;
+        await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 });
 
@@ -255,6 +300,12 @@ describe('screeningTableFn', () => {
         });
         await expect(globalThis.screeningTableFn(START, [c0]))
             .rejects.toThrow('osrm table malformed');
+
+        // Both sub-cases here trip the self-hosted-down latch (a thrown error
+        // falls back to public, which — same handler — throws too). Reset
+        // between them so the second case isn't just waiting out the public
+        // throttle's PUBLIC_MIN_GAP_MS from the first.
+        globalThis.resetOsrmFallbackState();
 
         installFetch({
             table: () => jsonResponse({ code: 'Ok', destinations: [{ distance: 0 }], distances: null }),
@@ -402,25 +453,35 @@ describe('buildJunctionLoop', () => {
         expect(fetch.mock.calls.some(([url]) => String(url).includes('/junctions'))).toBe(true);
     });
 
-    test('both chiralities fail → buildLoop, still returning the junction pool', async () => {
-        let routeCalls = 0;
-        installFetch({
-            junctions: () => jsonResponse({ junctions: POOL }),
-            route: (url) => {
-                routeCalls += 1;
-                // Four chirality legs fail; the two envelope-snap legs after that succeed.
-                if (routeCalls <= 4) return jsonResponse({}, { ok: false, status: 500 });
-                return echoRoute(url);
-            },
-        });
-        const out = await globalThis.buildJunctionLoop(
-            START.lat, START.lng, DEST.lat, DEST.lng, LOOP_OPTS(),
-        );
-        expect(out.overlap).toBeNull();
-        expect(out.junctions).toBe(POOL);
-        expect(out.outbound).toBeTruthy();
-        expect(out.return).toBeTruthy();
-        expect(routeCalls).toBe(6);
+    // With the public fallback, a self-hosted /route failure no longer just
+    // returns null — tryOsrm also retries on public within the same call, and
+    // the shared self-hosted-down latch then routes buildLoop's own snap +
+    // route calls straight to public too. So "both chiralities fail" is now
+    // pinned by taking BOTH backends down for /route (self-hosted and public
+    // both 500), which also fails buildLoop's fallback attempt — the pool of
+    // junctions is still preserved even though no route could be built at all.
+    // Uses fake timers because the many resulting public-fallback calls are
+    // throttled PUBLIC_MIN_GAP_MS apart, which would otherwise make this test
+    // take several real seconds.
+    test('both chiralities fail on self-hosted AND public → buildLoop also fails, junction pool still returned', async () => {
+        vi.useFakeTimers();
+        try {
+            installFetch({
+                junctions: () => jsonResponse({ junctions: POOL }),
+                route: () => jsonResponse({}, { ok: false, status: 500 }),
+            });
+            const promise = globalThis.buildJunctionLoop(
+                START.lat, START.lng, DEST.lat, DEST.lng, LOOP_OPTS(),
+            );
+            await vi.advanceTimersByTimeAsync(30000);
+            const out = await promise;
+            expect(out.overlap).toBeNull();
+            expect(out.junctions).toBe(POOL);
+            expect(out.outbound).toBeNull();
+            expect(out.return).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     test('cachedJunctions skips Overpass and returns a picked chirality', async () => {
