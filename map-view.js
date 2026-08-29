@@ -8,7 +8,14 @@
 // ─── Map init ────────────────────────────────────────────────────────────────
 
 const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
+    attribution: '© OpenStreetMap contributors',
+    // OSM's tile usage policy requires a Referer — without one it serves a
+    // "403r Access blocked" tile at HTTP 200, so the map fills with grey
+    // warning squares and nothing throws. The per-<img> referrerpolicy
+    // attribute overrides the document policy nginx sets, so the tiles keep
+    // working even if that vhost drifts back to no-referrer. Origin only:
+    // OSM sees https://mase.fi/, never the /explorer/<username> path.
+    referrerPolicy: 'strict-origin'
 });
 
 const satelliteLayer = L.tileLayer(

@@ -6,7 +6,7 @@ Canonical nginx snippets, systemd units, and the shelly OSRM-foot tree for Wande
 
 ## Config files in this directory
 
-- `nginx-explorer.conf` — `/explorer` SPA (`try_files` so `/explorer/<username>` serves `index.html`) plus `/explorer/api/` proxy to port 3700. Location snippet for `sites-enabled/default`.
+- `nginx-explorer.conf` — `/explorer` SPA (`try_files` so `/explorer/<username>` serves `index.html`) plus `/explorer/api/` proxy to port 3700. Location snippet for `sites-enabled/default`. Its `Referrer-Policy` must keep sending an origin (`strict-origin`): OSM's tile servers answer a Referer-less request from a Firefox-family browser with a "403r Access blocked" tile at HTTP 200, so `no-referrer` turned the map into grey warning squares with nothing in the console. Chrome is waved through on its client hints, so this only reproduces on Firefox/Fennec. `map-view.js` also pins `referrerPolicy` on the OSM layer itself, which survives live-vhost drift; `tests/nginx-security.test.js` pins the snippet.
 - `nginx-osrm-fi.conf` — `/api/osrm-fi/` proxy to shelly's Finland OSRM-foot over Tailscale. Same-origin from `/explorer`; no CORS.
 - `nginx-junctions.conf` — `/api/junctions/` location in `sites-enabled/default`.
 - `nginx-junctions-log-format.conf` — http-context `log_format` in `/etc/nginx/conf.d/` (not a server-block snippet). Path-only access log so a leftover GET query cannot persist coords.

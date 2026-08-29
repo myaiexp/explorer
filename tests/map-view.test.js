@@ -227,6 +227,21 @@ describe('clearMap / clearRouteLines', () => {
     });
 });
 
+describe('base tile layers', () => {
+    test('the OSM layer pins a referrer-sending policy on its tiles', () => {
+        const osm = leaflet.map.ofType('tileLayer')
+            .find((l) => l.url.includes('tile.openstreetmap.org'));
+        expect(osm).toBeDefined();
+        // OSM serves a "403r Access blocked" tile to Referer-less requests.
+        // The element attribute beats the document Referrer-Policy, so this
+        // keeps the map drawn even if the live vhost drifts back to
+        // no-referrer (the deploy snippet is not what nginx reads).
+        expect(osm.options.referrerPolicy).toBeTruthy();
+        expect(osm.options.referrerPolicy).not.toBe('no-referrer');
+        expect(osm.options.referrerPolicy).not.toBe('same-origin');
+    });
+});
+
 describe('getRouteColor', () => {
     test('falls back to the default for an unknown stored hex', () => {
         localStorage.setItem('walk_route_color', '#00ff00');

@@ -35,12 +35,23 @@ describe('deploy/nginx-explorer.conf (finding #7059)', () => {
     // static SPA (and its fallback) — not to the Hono API which sets its own.
     const staticBlock = conf.split(/location \/explorer\s*\{/)[1] ?? '';
 
-    test('static /explorer sets CSP, framing, nosniff, and no-referrer', () => {
+    test('static /explorer sets CSP, framing, nosniff, and Permissions-Policy', () => {
         expect(staticBlock).toMatch(/add_header\s+Content-Security-Policy\s+"[^"]*frame-ancestors 'none'/);
         expect(staticBlock).toMatch(/add_header\s+X-Frame-Options\s+"DENY"/);
         expect(staticBlock).toMatch(/add_header\s+X-Content-Type-Options\s+"nosniff"/);
-        expect(staticBlock).toMatch(/add_header\s+Referrer-Policy\s+"no-referrer"/);
         expect(staticBlock).toMatch(/Permissions-Policy\s+"[^"]*geolocation=\(self\)/);
+    });
+
+    test('Referrer-Policy still sends an origin — no-referrer blanks the OSM map', () => {
+        const m = staticBlock.match(/add_header\s+Referrer-Policy\s+"([^"]+)"/);
+        expect(m).not.toBeNull();
+        // OSM's tile usage policy answers a Referer-less request with a "403r
+        // Access blocked" tile (HTTP 200, so nothing errors — the map just
+        // turns into grey warning squares). "no-referrer" and "same-origin"
+        // both strip it from every tile <img>; the origin-only policies hand
+        // OSM https://mase.fi/ and leak no path, query or fragment — so the
+        // /explorer/<username> path and the #t=<token> secret stay private.
+        expect(['strict-origin', 'strict-origin-when-cross-origin']).toContain(m[1]);
     });
 
     test('CSP allows the page\'s real third parties and nothing via default-src *', () => {
