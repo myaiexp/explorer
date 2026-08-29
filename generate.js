@@ -93,7 +93,16 @@ async function generateDestination() {
             // {coords:[]} for a malformed OSRM 200 — finding #7926).
             if (outboundRoute?.coords?.length) saveToHistory(session);
 
-            if (degraded && !degradedNoticeShown) {
+            // Re-read the latch AFTER the build, not just before. Two different
+            // questions: `degraded` above decided how much work to attempt and
+            // has to be answered up front, while this one asks what actually
+            // happened. They differ on exactly one build — the first after a
+            // page load, which starts with the latch clear, discovers the
+            // outage mid-flight and gets silently rescued by the fallback. That
+            // build also pays the self-hosted timeout before falling back, so
+            // it is both the slowest and, without this, the only unexplained one.
+            const degradedNow = degraded || readRouteBuildOptions(tripMode).degraded;
+            if (degradedNow && !degradedNoticeShown) {
                 degradedNoticeShown = true;
                 showWarning('Routing backend is down — using the public server. Routes are rougher and slower than usual.');
             }

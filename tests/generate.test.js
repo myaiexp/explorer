@@ -577,3 +577,43 @@ describe('straight-line placeholder is announced', () => {
     expect(warnings.filter((w) => /straight[- ]line/i.test(w))).toHaveLength(0);
   });
 });
+
+describe('the build that discovers the outage', () => {
+  test('warns even though it started before the latch tripped', async () => {
+    // The first build after a page load reads degraded:false — the latch is
+    // per-page-load module state and nothing has failed yet. Layer 1 then
+    // falls back mid-flight, so the build IS degraded by the time it finishes.
+    // It is also the slowest one (it pays the self-hosted timeout first), so
+    // it is precisely the build that needs explaining.
+    let call = 0;
+    globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
+      tripMode,
+      smartRouting: tripMode !== 'one-way',
+      winterMode: false,
+      maxKm: parseFloat(document.getElementById('maxDistance').value),
+      spread: SPREAD,
+      degraded: call++ > 0,
+    }));
+
+    await generate();
+
+    expect(warnings.some((w) => /public/i.test(w))).toBe(true);
+  });
+
+  test('still reduces nothing on that first build — the flag it passed was false', async () => {
+    let call = 0;
+    globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
+      tripMode,
+      smartRouting: tripMode !== 'one-way',
+      winterMode: false,
+      maxKm: parseFloat(document.getElementById('maxDistance').value),
+      spread: SPREAD,
+      degraded: call++ > 0,
+    }));
+
+    await generate();
+
+    // Pipeline reduction is decided up front and must not be retro-applied.
+    expect(buildRouteForDestination.mock.calls[0][2].degraded).toBe(false);
+  });
+});
