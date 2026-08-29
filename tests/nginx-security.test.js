@@ -130,3 +130,47 @@ describe('deploy/nginx-explorer.conf API proxy (finding #7582)', () => {
     });
 });
 
+
+describe('CSP connect-src covers every host the app actually fetches', () => {
+    // The public-OSRM fallback shipped inert: osrm.js fetched
+    // routing.openstreetmap.de, connect-src did not list it, and the browser
+    // blocked every request with "TypeError: Failed to fetch". Unit tests
+    // passed and a local dev server (which sends no CSP) passed — only prod
+    // failed. Deriving the host list from the source is what closes that gap:
+    // adding a fetch to a new host now fails here until the CSP catches up.
+    const FETCHING_MODULES = [
+        'osrm.js',
+        'overpass.js',
+        'elevation.js',
+        'location-input.js',
+        'sync.js',
+    ];
+
+    const conf = readDeploy('nginx-explorer.conf');
+    const staticBlock = conf.split(/location \/explorer\s*\{/)[1] ?? '';
+    const csp = (staticBlock.match(/add_header\s+Content-Security-Policy\s+"([^"]+)"/) || [])[1] ?? '';
+    const connectSrc = (csp.match(/connect-src ([^;]*)/) || [])[1] ?? '';
+
+    function hostsIn(file) {
+        const src = readFileSync(resolve(ROOT, file), 'utf8');
+        return [...new Set([...src.matchAll(/https:\/\/([a-zA-Z0-9._-]+)/g)].map((m) => m[1]))];
+    }
+
+    test('every fetched host is allowed by connect-src', () => {
+        const missing = [];
+        for (const file of FETCHING_MODULES) {
+            for (const host of hostsIn(file)) {
+                // The app's own origin is covered by 'self'.
+                if (host === 'mase.fi') continue;
+                if (!connectSrc.includes(`https://${host}`)) missing.push(`${host} (${file})`);
+            }
+        }
+        expect(missing).toEqual([]);
+    });
+
+    test('the scan sees real hosts, so it cannot pass vacuously', () => {
+        expect(connectSrc).not.toBe('');
+        expect(hostsIn('osrm.js')).toContain('routing.openstreetmap.de');
+        expect(hostsIn('overpass.js')).toContain('overpass-api.de');
+    });
+});
