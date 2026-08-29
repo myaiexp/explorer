@@ -63,6 +63,7 @@ beforeEach(() => {
     globalThis.fetchElevations = vi.fn(() => Promise.resolve([]));
     globalThis.renderElevationChart = vi.fn();
     globalThis.loopVias = vi.fn(() => ({ rightVias: RIGHT, leftVias: LEFT }));
+    globalThis.isSelfHostedDown = vi.fn(() => false);
     globalThis.drawRouteGlow = vi.fn();
     globalThis.drawRoutePair = vi.fn((outbound, ret) => {
         const all = [];
@@ -106,7 +107,18 @@ describe('readRouteBuildOptions', () => {
             winterMode: true,
             maxKm: 12.5,
             spread: computeSpreadParams(100),
+            degraded: false,
         });
+    });
+
+    test('readRouteBuildOptions reports degraded when the latch is live', () => {
+        globalThis.isSelfHostedDown = vi.fn(() => true);
+        expect(readRouteBuildOptions('round').degraded).toBe(true);
+    });
+
+    test('readRouteBuildOptions reports degraded false when self-hosted is healthy', () => {
+        globalThis.isSelfHostedDown = vi.fn(() => false);
+        expect(readRouteBuildOptions('round').degraded).toBe(false);
     });
 
     test('one-way never enables smart routing, even when both checkboxes are on', () => {

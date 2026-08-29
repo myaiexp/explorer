@@ -430,6 +430,42 @@ describe('buildLoop', () => {
         expect(parseRouteWaypoints(urls[1])).toEqual([B, ...leftVias.slice().reverse(), A]);
         expect(urls.join('')).not.toContain('30,70');
     });
+
+    test('a non-degraded buildLoop still snaps its vias', async () => {
+        const spread = SPREAD();
+        const fetch = installFetch();
+        await globalThis.buildLoop(START.lat, START.lng, DEST.lat, DEST.lng, spread);
+        const nearestCalls = fetch.mock.calls.filter(([url]) => String(url).includes('/nearest/'));
+        expect(nearestCalls).toHaveLength(6);
+    });
+
+    test('a degraded buildLoop issues no nearest calls', async () => {
+        const spread = SPREAD();
+        const { rightVias, leftVias, A, B } = globalThis.loopVias(
+            START.lat, START.lng, DEST.lat, DEST.lng, spread,
+        );
+        const fetch = installFetch();
+        const loop = await globalThis.buildLoop(
+            START.lat, START.lng, DEST.lat, DEST.lng, spread, { degraded: true },
+        );
+        expect(loop.outbound).toBeTruthy();
+        expect(loop.return).toBeTruthy();
+
+        const nearestCalls = fetch.mock.calls.filter(([url]) => String(url).includes('/nearest/'));
+        expect(nearestCalls).toHaveLength(0);
+
+        const urls = routeUrls(fetch);
+        expect(urls).toHaveLength(2);
+        expect(parseRouteWaypoints(urls[0])).toEqual([A, ...rightVias, B]);
+        expect(parseRouteWaypoints(urls[1])).toEqual([B, ...leftVias.slice().reverse(), A]);
+    });
+
+    test('a degraded round trip issues exactly 2 route calls total', async () => {
+        const spread = SPREAD();
+        const fetch = installFetch();
+        await globalThis.buildLoop(START.lat, START.lng, DEST.lat, DEST.lng, spread, { degraded: true });
+        expect(fetch).toHaveBeenCalledTimes(2);
+    });
 });
 
 // ── buildJunctionLoop ────────────────────────────────────────────────────────

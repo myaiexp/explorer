@@ -24,12 +24,21 @@
 //                    forwarded to buildLoop / buildJunctionLoop so the routing
 //                    layer stays DOM-free. Required for loop builds — callers pass
 //                    getSpreadParams(); omitting it makes the loop builders throw.
+//   degraded         bool — Layer 2 of the shelly-down pipeline reduction
+//                    (osrm.js's isSelfHostedDown() latch, read once by
+//                    route-view.js's readRouteBuildOptions and passed down from
+//                    there). Forwarded to buildLoop, which skips its /nearest
+//                    snap when true. Only the plain-loop branch takes it —
+//                    smart round-trips never reach here while degraded;
+//                    destination-resolve.js short-circuits before this
+//                    function's smartRouting check. Default false so
+//                    non-degraded callers (and existing tests) are unaffected.
 //
 // Returns { outbound, return, junctions }. junctions is null except for the
 // smart-loop branch, which returns the pool buildJunctionLoop used or fetched.
 async function buildRouteForMode(startLat, startLng, destLat, destLng, {
     tripMode, smartRouting, winterMode, maxKm, onProgress,
-    cachedJunctions = null, buildingMessage = null, spread = undefined,
+    cachedJunctions = null, buildingMessage = null, spread = undefined, degraded = false,
 } = {}) {
     if (tripMode === 'one-way') {
         if (buildingMessage && onProgress) onProgress(buildingMessage);
@@ -42,7 +51,7 @@ async function buildRouteForMode(startLat, startLng, destLat, destLng, {
         return { outbound: result.outbound, return: result.return, junctions: result.junctions };
     }
     if (buildingMessage && onProgress) onProgress(buildingMessage);
-    const loop = await buildLoop(startLat, startLng, destLat, destLng, spread);
+    const loop = await buildLoop(startLat, startLng, destLat, destLng, spread, { degraded });
     return { outbound: loop.outbound, return: loop.return, junctions: null };
 }
 

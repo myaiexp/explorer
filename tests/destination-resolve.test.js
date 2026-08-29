@@ -402,4 +402,66 @@ describe('buildRouteForDestination', () => {
         expect(built.outbound).toEqual({ coords: ['lo'] });
         expect(built.return).toEqual({ coords: ['lr'] });
     });
+
+    // ── degraded (Layer 2 pipeline reduction) ────────────────────────────────
+
+    test('degraded skips the junctions path even for a round trip', async () => {
+        globalThis.buildRouteForMode.mockResolvedValue({
+            outbound: { coords: ['lo'] }, return: { coords: ['lr'] }, junctions: null });
+        const built = await globalThis.buildRouteForDestination(60, 24, {
+            candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
+            maxKm: 5, tripMode: 'round', spread: {}, smartRouting: true, winterMode: false,
+            onProgress: vi.fn(), degraded: true });
+        // buildJunctionLoop is the only path that fetches /api/junctions/
+        // (osrm.test.js pins that); asserting it's never called is the same
+        // as asserting no junctions fetch happened.
+        expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
+        expect(globalThis.buildRouteForMode).toHaveBeenCalledWith(60, 24, 61, 25, expect.objectContaining({
+            tripMode: 'round', smartRouting: false, degraded: true }));
+        expect(built.outbound).toEqual({ coords: ['lo'] });
+        expect(built.return).toEqual({ coords: ['lr'] });
+    });
+
+    test('degraded never enters findBestLoop (one build attempt for a 3-candidate pool)', async () => {
+        const pool = [
+            { lat: 1, lng: 1, name: 'a' },
+            { lat: 2, lng: 2, name: 'b' },
+            { lat: 3, lng: 3, name: 'c' },
+        ];
+        globalThis.buildRouteForMode.mockResolvedValue({
+            outbound: { coords: ['lo'] }, return: { coords: ['lr'] }, junctions: null });
+        await globalThis.buildRouteForDestination(60, 24, {
+            candidatePool: pool, dest: pool[0], destName: 'a', existingDests: [],
+            maxKm: 5, tripMode: 'round', spread: {}, smartRouting: true, winterMode: false,
+            onProgress: vi.fn(), degraded: true });
+        // findBestLoop would call buildJunctionLoop up to MAX_RETRY_ATTEMPTS (3)
+        // times for this pool; degraded must never enter that loop at all.
+        expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
+        expect(globalThis.buildRouteForMode).toHaveBeenCalledTimes(1);
+    });
+
+    test('a non-degraded smart round trip still uses findBestLoop', async () => {
+        globalThis.buildJunctionLoop.mockResolvedValue({
+            outbound: { coords: ['o'] }, return: { coords: ['r'] }, overlap: 0.1, junctions: [{ j: 1 }],
+        });
+        const built = await globalThis.buildRouteForDestination(60, 24, {
+            candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
+            maxKm: 5, tripMode: 'round', spread: {}, smartRouting: true, winterMode: false,
+            onProgress: vi.fn(), degraded: false });
+        expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(1);
+        expect(globalThis.buildRouteForMode).not.toHaveBeenCalled();
+        expect(built.overlap).toBe(0.1);
+    });
+
+    test('one-way builds are unaffected by degraded', async () => {
+        globalThis.buildRouteForMode.mockResolvedValue({ outbound: { coords: ['ow'] }, return: null, junctions: null });
+        const built = await globalThis.buildRouteForDestination(60, 24, {
+            candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
+            maxKm: 5, tripMode: 'one-way', spread: {}, smartRouting: true, winterMode: true,
+            onProgress: vi.fn(), degraded: true });
+        expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
+        expect(globalThis.buildRouteForMode).toHaveBeenCalledWith(60, 24, 61, 25, expect.objectContaining({
+            tripMode: 'one-way', smartRouting: false, winterMode: false, degraded: true }));
+        expect(built.outbound).toEqual({ coords: ['ow'] });
+    });
 });

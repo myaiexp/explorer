@@ -2,12 +2,14 @@
 // water-reachability, and build the best route for it. Pure orchestration of
 // pieces that live in sibling modules (overpass fetchers, screening, novelty
 // ranking, junction/route builders); reads NO DOM — mode flags (winterMode,
-// smartRouting) are passed in, matching route-dispatch.js. Every cross-file
-// dependency (rankByNovelty, generateRandomPointAnnulus, capPool,
-// screenCandidates, screeningTableFn, fetchRoadsInRadius, fetchPOIsInRadius,
-// buildJunctionLoop, buildRouteForMode, OVERLAP_BAD_THRESHOLD, POI_TYPES) is
-// resolved from globalThis at call time. Loaded after route-dispatch.js +
-// osrm.js + overpass.js, before app.js; generate.js's generateDestination wires it.
+// smartRouting, degraded) are passed in, matching route-dispatch.js. This file
+// never touches document/DOM or osrm.js's isSelfHostedDown() latch directly.
+// Every cross-file dependency (rankByNovelty, generateRandomPointAnnulus,
+// capPool, screenCandidates, screeningTableFn, fetchRoadsInRadius,
+// fetchPOIsInRadius, buildJunctionLoop, buildRouteForMode,
+// OVERLAP_BAD_THRESHOLD, POI_TYPES) is resolved from globalThis at call time.
+// Loaded after route-dispatch.js + osrm.js + overpass.js, before app.js;
+// generate.js's generateDestination wires it.
 
 // Orchestration-layer routing policy — the size of the random-annulus candidate
 // pool and the smart-routing retry budget for findBestLoop. (Don't confuse
@@ -199,14 +201,22 @@ async function findBestLoop(startLat, startLng, { candidatePool, dest, existingD
 // Build the route for a resolved destination. Smart round-trips run the
 // novelty-retry loop (findBestLoop), which may substitute a different,
 // lower-overlap destination; one-way and plain loops dispatch straight through
-// buildRouteForMode. `smartRouting`/`winterMode` are passed in (read from the
-// DOM by the caller). Returns the (possibly updated) dest/destName plus the
-// built legs, junctions, and loop overlap (null when not a measured smart loop,
-// and outbound/return are undefined when a smart build produced nothing).
+// buildRouteForMode. `smartRouting`/`winterMode`/`degraded` are passed in (read
+// from the DOM/latch by the caller). `degraded` — Layer 2 of the shelly-down
+// pipeline reduction — short-circuits BEFORE the smartRouting check: while
+// degraded, findBestLoop (and therefore buildJunctionLoop, and therefore the
+// junctions-cache fetch) is never entered at all, regardless of smartRouting —
+// no candidate retries, one chirality, one buildRouteForMode call. That's the
+// whole reduction; findBestLoop itself is untouched (retryBudget stays what it
+// is — do not add a second retry-limiting mechanism there). Returns the
+// (possibly updated) dest/destName plus the built legs, junctions, and loop
+// overlap (null when not a measured smart loop, and outbound/return are
+// undefined when a smart build produced nothing).
 async function buildRouteForDestination(startLat, startLng, {
     candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, smartRouting, winterMode, onProgress,
+    degraded = false,
 }) {
-    if (tripMode !== 'one-way' && smartRouting) {
+    if (!degraded && tripMode !== 'one-way' && smartRouting) {
         const best = await findBestLoop(startLat, startLng,
             { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress });
         if (best) {
@@ -217,7 +227,7 @@ async function buildRouteForDestination(startLat, startLng, {
     }
     const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
         tripMode, smartRouting: false, winterMode: false, onProgress,
-        buildingMessage: 'Building route…', spread,
+        buildingMessage: 'Building route…', spread, degraded,
     });
     return { dest, destName, outbound: r.outbound, return: r.return, junctions: null, overlap: null };
 }

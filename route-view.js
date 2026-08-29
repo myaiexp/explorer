@@ -5,9 +5,9 @@
 // collaborators tests load for real).
 //
 // map-view.js (markers/polylines/route color), session.js
-// (computeRouteTotals/routeSessionFields), elevation.js and favorites.js
-// resolve as globals at call time — tests fake them. Every path that puts a
-// route on screen ends up in displayRoute:
+// (computeRouteTotals/routeSessionFields), elevation.js, favorites.js, and
+// osrm.js (loopVias, isSelfHostedDown) resolve as globals at call time — tests
+// fake them. Every path that puts a route on screen ends up in displayRoute:
 // generate.js directly, pick-mode.js / share-link.js / the history + favorites
 // lists via route-restore.js, and spread-control.js via renderRouteTail.
 
@@ -28,7 +28,11 @@ function getSpreadParams() {
 // on pick-on-map and miss spread-reroute. smartRouting is off for one-way
 // (no junctions to snap). winterMode is the checkbox as-is: dest-pool road
 // filtering is independent of smart routing, and buildRouteForMode only
-// consults winterMode on the smart-loop branch.
+// consults winterMode on the smart-loop branch. degraded mirrors osrm.js's
+// isSelfHostedDown() latch (resolved as a global at call time, like loopVias
+// below) — the only place in the whole degraded pipeline that touches the
+// DOM/latch; every downstream module (route-dispatch.js, destination-resolve.js)
+// takes degraded as a passed-in argument.
 function readRouteBuildOptions(tripMode) {
     return {
         tripMode,
@@ -36,6 +40,7 @@ function readRouteBuildOptions(tripMode) {
         winterMode: document.getElementById('winterMode').checked,
         maxKm: parseFloat(document.getElementById('maxDistance').value),
         spread: getSpreadParams(),
+        degraded: isSelfHostedDown(),
     };
 }
 

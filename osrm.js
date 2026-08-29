@@ -286,15 +286,30 @@ function loopVias(startLat, startLng, destLat, destLng, spread) {
 // Builds a single chirality (right-side out, left-side back); buildJunctionLoop
 // is the variant that tries both chiralities and picks the lower-overlap one.
 // `spread` is the precomputed { offsetMult, viaTs } from computeSpreadParams.
-async function buildLoop(startLat, startLng, destLat, destLng, spread) {
+// `degraded` (Layer 2 of the shelly-down pipeline reduction, see osrm-fallback
+// tests) skips the /nearest snap entirely and routes through the raw geometric
+// vias as-is — while we're already paced onto the public fallback (Layer 1),
+// cutting 6 nearest calls down to 0 is a pure work reduction; it never affects
+// whether we're allowed to make a request, only how many we make.
+async function buildLoop(startLat, startLng, destLat, destLng, spread, { degraded = false } = {}) {
     const { rightVias, leftVias, A, B, snapRadius } = loopVias(startLat, startLng, destLat, destLng, spread);
 
-    // Snap all 6 vias to nearest roads in parallel (threshold: half the offset
-    // distance). The return leg walks the left side back toward A, so reverse it.
-    const allVias = [...rightVias, ...leftVias.slice().reverse()];
-    const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
-    const snappedRight = snapped.slice(0, 3);
-    const snappedLeft = snapped.slice(3);
+    // The return leg walks the left side back toward A, so reverse it up front —
+    // both branches below need it in that order.
+    const reversedLeft = leftVias.slice().reverse();
+
+    let snappedRight, snappedLeft;
+    if (degraded) {
+        snappedRight = rightVias;
+        snappedLeft = reversedLeft;
+    } else {
+        // Snap all 6 vias to nearest roads in parallel (threshold: half the
+        // offset distance).
+        const allVias = [...rightVias, ...reversedLeft];
+        const snapped = await Promise.all(allVias.map(v => snapToRoad(v, snapRadius)));
+        snappedRight = snapped.slice(0, 3);
+        snappedLeft = snapped.slice(3);
+    }
 
     const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
     const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
