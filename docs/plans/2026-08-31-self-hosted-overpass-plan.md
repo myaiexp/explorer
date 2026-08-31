@@ -258,7 +258,8 @@ cd junctions-cache && build-lock pnpm test overpass && build-lock pnpm typecheck
 
 **Files:**
 - Create: `junctions-cache/src/poi-catalog.ts`
-- Create: `tests/poi-catalog-parity.test.js`
+- Create: `junctions-cache/tests/poi-catalog.test.ts` (the `filtersForTypes` cases below)
+- Create: `tests/poi-catalog-parity.test.js` (the two cross-repo parity cases below)
 
 Note the twin bookkeeping: this task *adds* a POI-catalog twin
 (`poi-types.js` ↔ `poi-catalog.ts`) in a new guard file. Task 7 *removes* the
