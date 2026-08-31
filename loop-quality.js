@@ -47,9 +47,33 @@ function loopOverlapFraction(outboundCoords, returnCoords) {
     return Math.max(a, b);
 }
 
+// How far a built loop runs past the user's distance budget, as a fraction of
+// that budget: 0 when it fits, 0.4 when it is 40% too long. Undershoot is NOT
+// penalised — the min-distance field is what puts a floor under a walk, and a
+// short loop is the honest result of a nearby destination, not a defect.
+// Returns 0 for an unusable budget so a missing maxKm degrades to ranking on
+// overlap alone rather than poisoning every score with NaN.
+function loopBudgetOvershoot(totalKm, maxKm) {
+    if (!Number.isFinite(totalKm) || !Number.isFinite(maxKm) || maxKm <= 0) return 0;
+    return Math.max(0, totalKm / maxKm - 1);
+}
+
+// Combined loop badness, lower is better. Overlap and overshoot are both
+// dimensionless fractions of the thing they measure, so they add directly: a
+// loop 40% over budget ranks as badly as one whose legs share 40% of their
+// length. Returns null when overlap is unknown, which keeps the "an unmeasured
+// candidate never displaces a measured one" rule in destination-resolve.js's
+// isBetterLoop working on this field exactly as it does on overlap.
+function loopScore(overlap, totalKm, maxKm) {
+    if (overlap === null || overlap === undefined) return null;
+    return overlap + loopBudgetOvershoot(totalKm, maxKm);
+}
+
 // Browser script tags hoist top-level function declarations to window
 // automatically. Explicit globalThis assignment makes the helpers loadable
 // from non-script consumers (e.g. vm.runInThisContext in tests).
 globalThis.OVERLAP_PROXIMITY_M = OVERLAP_PROXIMITY_M;
 globalThis.OVERLAP_BAD_THRESHOLD = OVERLAP_BAD_THRESHOLD;
 globalThis.loopOverlapFraction = loopOverlapFraction;
+globalThis.loopBudgetOvershoot = loopBudgetOvershoot;
+globalThis.loopScore = loopScore;

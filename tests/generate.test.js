@@ -28,6 +28,7 @@ const FORM_HTML = `
     <option value="park" selected>park</option>
   </select>
   <input type="checkbox" id="winterMode">
+  <input type="checkbox" id="avoidBacktracking">
   <input type="range" id="spreadSlider" min="0" max="100" value="50">
   <div id="notification" class="active"></div>
   <button id="generateBtn"></button>
@@ -221,6 +222,41 @@ describe('straight-line scale', () => {
     expect(opts.straightMin).toBeCloseTo(1 / 1.3);
     expect(opts.straightMax).toBeCloseTo(5.2 / 1.3);
     expect(readRouteBuildOptions).toHaveBeenCalledWith('one-way');
+  });
+
+  // The wider envelope adds length for the same destination distance, so the
+  // destination has to be picked closer or the loop runs past the budget. The
+  // toggle owns both halves; splitting them would ship the length without the
+  // allowance for it.
+  test('avoid-backtracking round-trips divide by the wider 3.4 instead', async () => {
+    document.getElementById('roundTrip').checked = true;
+    document.getElementById('oneWay').checked = false;
+    readRouteBuildOptions.mockReturnValue({
+      tripMode: 'round', winterMode: false, spread: SPREAD,
+      maxKm: parseFloat(document.getElementById('maxDistance').value),
+      avoidBacktracking: true,
+    });
+
+    await generate();
+
+    const opts = resolveOpts();
+    expect(opts.straightMin).toBeCloseTo(1 / 3.4);
+    expect(opts.straightMax).toBeCloseTo(5.2 / 3.4);
+  });
+
+  test('one-way ignores it — there is no envelope to widen', async () => {
+    document.getElementById('roundTrip').checked = false;
+    document.getElementById('oneWay').checked = true;
+    readRouteBuildOptions.mockReturnValue({
+      tripMode: 'one-way', winterMode: false, spread: SPREAD,
+      maxKm: parseFloat(document.getElementById('maxDistance').value),
+      avoidBacktracking: true,
+    });
+
+    await generate();
+
+    const opts = resolveOpts();
+    expect(opts.straightMax).toBeCloseTo(5.2 / 1.3);
   });
 });
 

@@ -34,7 +34,8 @@ const RESULT_HTML = `
   <span id="bikeBadge"></span>
   <span id="carBadge"></span>
   <select id="locationTypeSelect"><option value="park">park</option></select>
-  <input id="spreadSlider" type="range" value="50">`;
+  <input id="spreadSlider" type="range" value="50">
+  <input type="checkbox" id="avoidBacktracking">`;
 
 beforeEach(() => {
   document.body.innerHTML = PANEL_HTML + RESULT_HTML;

@@ -23,6 +23,7 @@ const FORM_HTML = `
   <select id="locationTypeSelect"></select>
   <input id="spreadSlider" type="range" value="50">
   <input type="checkbox" id="winterMode">
+  <input type="checkbox" id="avoidBacktracking">
   <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
   <input type="radio" name="tripMode" id="oneWay" value="one-way">
 `;

@@ -23,6 +23,7 @@ const RETURN = { coords: [[62.2, 25.8], [62.1, 25.7]], distance: 1100, duration:
 const FORM_HTML = `
   <input type="range" id="spreadSlider" min="0" max="100" value="50" step="5">
   <input type="checkbox" id="winterMode">
+  <input type="checkbox" id="avoidBacktracking">
   <input id="maxDistance" value="5">
   <div id="loading"><p>Finding your random destination…</p></div>
   <button id="generateBtn"></button>

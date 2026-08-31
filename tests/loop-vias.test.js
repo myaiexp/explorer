@@ -79,3 +79,46 @@ describe('loopVias', () => {
         expect(leftVias.slice().reverse()).toEqual(oldViasLeftReturn);
     });
 });
+
+// ── avoidBacktracking envelope ───────────────────────────────────────────────
+//
+// The toggle exists because the legacy pair is incoherent: snapRadius floors at
+// 300 m while offsetKm floors at 100 m, so a via can be snapped further than the
+// envelope displaced it — back across the A→B line, collapsing the loop onto
+// one set of streets. These pin the two properties that fix must hold.
+describe('buildLoopSetup with avoidBacktracking', () => {
+    const near = { lat: 60.012, lng: 24 };   // ~1.33 km — the short-trip case
+
+    const setupFor = (slider, opts) => globalThis.buildLoopSetup(
+        A.lat, A.lng, near.lat, near.lng, globalThis.computeSpreadParams(slider), opts);
+
+    test('the snap radius can never exceed the offset that placed the via', () => {
+        for (const slider of [0, 25, 50, 75, 100]) {
+            const { offsetKm, snapRadius } = setupFor(slider, { avoidBacktracking: true });
+            expect(snapRadius).toBeLessThanOrEqual(offsetKm);
+        }
+    });
+
+    test('legacy geometry has the inverted relationship this replaces', () => {
+        // Not aspirational — this is the bug, pinned so the comparison stays honest.
+        const { offsetKm, snapRadius } = setupFor(50, { avoidBacktracking: false });
+        expect(snapRadius).toBeGreaterThan(offsetKm);
+    });
+
+    test('the whole slider stays live — legacy collapses its bottom quarter', () => {
+        const legacy = [0, 25].map(s => setupFor(s, { avoidBacktracking: false }).offsetKm);
+        expect(legacy[0]).toBe(legacy[1]);           // the dead zone, as shipped
+
+        const fixed = [0, 25, 50, 75, 100].map(s => setupFor(s, { avoidBacktracking: true }).offsetKm);
+        for (let i = 1; i < fixed.length; i++) expect(fixed[i]).toBeGreaterThan(fixed[i - 1]);
+    });
+
+    test('the narrowest loop clears the block spacing that forced leg reuse', () => {
+        expect(setupFor(0, { avoidBacktracking: true }).offsetKm)
+            .toBeGreaterThanOrEqual(globalThis.MIN_LOOP_OFFSET_KM);
+    });
+
+    test('omitting the option leaves the legacy geometry byte-identical', () => {
+        expect(setupFor(50, undefined)).toEqual(setupFor(50, { avoidBacktracking: false }));
+    });
+});

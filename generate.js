@@ -11,6 +11,22 @@ function getAllExistingDestinations() {
     return getVisits().map(v => [v.destLat, v.destLng]);
 }
 
+// Budget → straight-line destination distance. The walk is always longer than
+// the crow-flies distance out and back, so the destination must sit closer than
+// half the budget; these divisors are that allowance.
+//
+// 2.6 assumes a 1.3x detour per leg. Measured over real generated routes the
+// factor is ~1.7, which is why round trips routinely ran past the number the
+// user typed — it is left untouched so the toggle stays a clean A/B.
+// avoid-backtracking's wider envelope adds more length still, so it carries its
+// own divisor: 3.4, picked by sweeping 2.6–3.8 against live OSRM (12 candidate
+// pools per value) — 3.4 came in 1/12 over budget with a 5.6 km worst case on a
+// 5 km ask, against 2.6's 5/12 and 8.5 km, and beat 3.0 and 3.8 on overlap and
+// doubling-back too.
+const ONE_WAY_SCALE = 1.3;
+const ROUND_TRIP_SCALE = 2.6;
+const ROUND_TRIP_SCALE_WIDE = 3.4;
+
 // One "we're on the public backup" notice per page load. The condition lasts as
 // long as the self-hosted backend is down, so warning on every generate would be
 // nagging about something the user already knows and cannot fix.
@@ -49,11 +65,6 @@ async function generateDestination() {
             // fully random point anywhere, not to roads or POIs.
             const routingStrategy = ['roads', 'any_poi', 'any'].includes(rawLocationType) ? rawLocationType : 'poi';
 
-            // Straight-line scaling: round trip ≈ budget / 2.6, one-way ≈ budget / 1.3
-            const scale = tripMode === 'one-way' ? 1.3 : 2.6;
-            const straightMin = minKm / scale;
-            const straightMax = maxKm / scale;
-
             // Mode toggles + spread read once here, at the UI layer, and passed
             // down so the destination-resolve pipeline stays DOM-free. maxKm
             // was already parsed (and validated) above; keep that snapshot so
@@ -61,8 +72,19 @@ async function generateDestination() {
             // into the build. smartRouting is not read here: it is no longer a
             // toggle a caller can opt out of — buildRouteForDestination runs
             // its junction-snap retry loop unconditionally for every
-            // non-degraded round trip (see destination-resolve.js).
-            const { winterMode, spread, degraded } = readRouteBuildOptions(tripMode);
+            // non-degraded round trip (see destination-resolve.js). Read BEFORE
+            // the straight-line scaling below, which now depends on it.
+            const { winterMode, spread, degraded, avoidBacktracking } = readRouteBuildOptions(tripMode);
+
+            // Straight-line scaling: the walk is longer than the crow-flies
+            // distance out and back, so the destination is picked closer than
+            // half the budget. See the scale constants above for why avoid-
+            // backtracking needs its own, wider divisor.
+            const scale = tripMode === 'one-way'
+                ? ONE_WAY_SCALE
+                : (avoidBacktracking ? ROUND_TRIP_SCALE_WIDE : ROUND_TRIP_SCALE);
+            const straightMin = minKm / scale;
+            const straightMax = maxKm / scale;
 
             // Resolve a candidate pool, then screen it for water-reachability.
             const resolved = await resolveCandidatePool(startLat, startLng, {
@@ -76,7 +98,7 @@ async function generateDestination() {
             // read dest/destName back from the build result.
             const built = await buildRouteForDestination(startLat, startLng, {
                 candidatePool, dest: screened.dest, destName: screened.destName,
-                existingDests, maxKm, tripMode, spread, winterMode, degraded, onProgress });
+                existingDests, maxKm, tripMode, spread, winterMode, degraded, avoidBacktracking, onProgress });
             const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
             const session = displayRoute({
@@ -150,5 +172,8 @@ function surpriseMe() {
 }
 
 globalThis.getAllExistingDestinations = getAllExistingDestinations;
+globalThis.ONE_WAY_SCALE = ONE_WAY_SCALE;
+globalThis.ROUND_TRIP_SCALE = ROUND_TRIP_SCALE;
+globalThis.ROUND_TRIP_SCALE_WIDE = ROUND_TRIP_SCALE_WIDE;
 globalThis.generateDestination = generateDestination;
 globalThis.surpriseMe = surpriseMe;

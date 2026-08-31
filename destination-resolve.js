@@ -9,7 +9,7 @@
 // for every non-degraded round trip; see its own comment below.
 // Every cross-file dependency (rankByNovelty, generateRandomPointAnnulus,
 // capPool, screenCandidates, screeningTableFn, fetchRoadsInRadius,
-// fetchPOIsInRadius, buildJunctionLoop, buildRouteForMode,
+// fetchPOIsInRadius, buildJunctionLoop, buildRouteForMode, loopScore,
 // OVERLAP_BAD_THRESHOLD, POI_TYPES) is resolved from globalThis at call time.
 // Loaded after route-dispatch.js + osrm.js + overpass.js, before app.js;
 // generate.js's generateDestination wires it.
@@ -153,12 +153,18 @@ async function screenCandidatePool(startLat, startLng, { candidatePool, dest, de
 // present — a total OSRM failure ({outbound:null,return:null,overlap:null}) is
 // never ranked, so findBestLoop returns null when nothing usable was built
 // (and a later buildLoop fallback with null overlap can still win). A measured
-// overlap always beats a null (unknown) overlap; two nulls never displace.
-function isBetterLoop(candidate, best) {
+// rank always beats a null (unknown) rank; two nulls never displace.
+//
+// `rankKey` names the field to rank on: 'overlap' (legacy — leg-vs-leg overlap
+// only) or 'score' (avoidBacktracking — overlap plus budget overshoot, from
+// loop-quality.js's loopScore). Both fields carry the same null-means-unknown
+// contract, which is why one comparison serves both.
+function isBetterLoop(candidate, best, rankKey = 'overlap') {
     if (!candidate.outbound || !candidate.return) return false;
     if (!best) return true;
-    if (candidate.overlap === null) return false;
-    return best.overlap === null || candidate.overlap < best.overlap;
+    if (candidate[rankKey] === null || candidate[rankKey] === undefined) return false;
+    const bestRank = best[rankKey];
+    return bestRank === null || bestRank === undefined || candidate[rankKey] < bestRank;
 }
 
 // Smart-routing retry loop: rank the pool by novelty and build a junction loop
@@ -168,10 +174,20 @@ function isBetterLoop(candidate, best) {
 // would silently disable snapping on dests in a different direction. The
 // junctions-cache service keys on start+maxKm+exclude, so the refetch is a
 // cache hit, not a new Overpass query. Returns the best { dest, destName,
-// outbound, return, overlap, junctions } seen, or null if nothing was built.
-async function findBestLoop(startLat, startLng, { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress }) {
+// outbound, return, overlap, score, junctions } seen, or null if nothing was
+// built.
+//
+// `avoidBacktracking` changes BOTH the geometry (forwarded to
+// buildJunctionLoop) and what "best" means here: ranking switches from overlap
+// alone to loopScore, which also penalises running past maxKm. Ranking on
+// overlap alone is why a 6.9 km loop could win a 5 km budget — nothing in this
+// loop ever compared the built route to the number the user typed.
+async function findBestLoop(startLat, startLng, {
+    candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress, avoidBacktracking = false,
+}) {
     const ranked = candidatePool ? rankByNovelty(candidatePool, existingDests) : [dest];
     const retryBudget = Math.min(MAX_RETRY_ATTEMPTS, ranked.length || 1);
+    const rankKey = avoidBacktracking ? 'score' : 'overlap';
 
     let bestSeen = null;
 
@@ -184,19 +200,28 @@ async function findBestLoop(startLat, startLng, { candidatePool, dest, existingD
             : 'Building route…');
         // cachedJunctions: null on every dest — corridor pools do not transfer.
         const result = await buildJunctionLoop(startLat, startLng, tryDest.lat, tryDest.lng,
-            { maxKm, onProgress, cachedJunctions: null, winterMode, spread });
+            { maxKm, onProgress, cachedJunctions: null, winterMode, spread, avoidBacktracking });
 
+        // Legs carry METRES (see osrm.js); loopScore wants km against the km
+        // budget. A missing leg leaves totalKm NaN, which loopBudgetOvershoot
+        // reads as "no usable budget" — such a candidate is already unrankable
+        // on the both-legs-present check in isBetterLoop.
+        const totalKm = (result.outbound && result.return)
+            ? (result.outbound.distance + result.return.distance) / 1000
+            : NaN;
         const candidate = {
             dest: tryDest,
             destName: tryDest.name || null,
             outbound: result.outbound,
             return: result.return,
             overlap: result.overlap,
+            score: loopScore(result.overlap, totalKm, maxKm),
             junctions: result.junctions,
         };
-        if (isBetterLoop(candidate, bestSeen)) bestSeen = candidate;
+        if (isBetterLoop(candidate, bestSeen, rankKey)) bestSeen = candidate;
 
-        if (candidate.overlap !== null && candidate.overlap < OVERLAP_BAD_THRESHOLD) break;
+        const rank = candidate[rankKey];
+        if (rank !== null && rank !== undefined && rank < OVERLAP_BAD_THRESHOLD) break;
     }
     return bestSeen;
 }
@@ -223,20 +248,22 @@ async function findBestLoop(startLat, startLng, { candidatePool, dest, existingD
 // build produced nothing).
 async function buildRouteForDestination(startLat, startLng, {
     candidatePool, dest, destName, existingDests, maxKm, tripMode, spread, winterMode, onProgress,
-    degraded = false,
+    degraded = false, avoidBacktracking = false,
 }) {
     if (!degraded && tripMode !== 'one-way') {
         const best = await findBestLoop(startLat, startLng,
-            { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress });
+            { candidatePool, dest, existingDests, maxKm, winterMode, spread, onProgress, avoidBacktracking });
         if (best) {
             return { dest: best.dest, destName: best.destName, outbound: best.outbound,
                 return: best.return, junctions: best.junctions, overlap: best.overlap };
         }
         return { dest, destName, outbound: undefined, return: undefined, junctions: null, overlap: null };
     }
+    // The degraded round trip still gets the wider envelope — it costs no extra
+    // request, and a rough public-OSRM loop is exactly where retracing hurts most.
     const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
         tripMode, smartRouting: false, winterMode: false, onProgress,
-        buildingMessage: 'Building route…', spread, degraded,
+        buildingMessage: 'Building route…', spread, degraded, avoidBacktracking,
     });
     return { dest, destName, outbound: r.outbound, return: r.return, junctions: null, overlap: null };
 }

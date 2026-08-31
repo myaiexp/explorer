@@ -24,6 +24,7 @@ const SETTINGS_FIELDS = [
     { key: 'poiType',      id: 'locationTypeSelect', prop: 'value',   skipEmpty: true },
     { key: 'spread',       id: 'spreadSlider',       prop: 'value' },
     { key: 'winterMode',   id: 'winterMode',         prop: 'checked' },
+    { key: 'avoidBacktracking', id: 'avoidBacktracking', prop: 'checked' },
 ];
 
 function saveSettings() {

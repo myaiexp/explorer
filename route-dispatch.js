@@ -41,12 +41,19 @@
 //                    destination-resolve.js short-circuits before ever calling
 //                    findBestLoop. Default false so non-degraded callers (and
 //                    existing tests) are unaffected.
+//   avoidBacktracking  bool — the #avoidBacktracking checkbox, read by
+//                    route-view.js's readRouteBuildOptions. Widens the loop
+//                    envelope and keeps the via snap inside it (see osrm.js's
+//                    loop envelope constants). Forwarded to BOTH loop branches:
+//                    it is pure geometry, so it applies equally to a smart loop
+//                    and a plain one, and one-way has no envelope to widen.
 //
 // Returns { outbound, return, junctions }. junctions is null except for the
 // smart-loop branch, which returns the pool buildJunctionLoop used or fetched.
 async function buildRouteForMode(startLat, startLng, destLat, destLng, {
     tripMode, smartRouting, winterMode, maxKm, onProgress,
     cachedJunctions = null, buildingMessage = null, spread = undefined, degraded = false,
+    avoidBacktracking = false,
 } = {}) {
     if (tripMode === 'one-way') {
         if (buildingMessage && onProgress) onProgress(buildingMessage);
@@ -62,11 +69,12 @@ async function buildRouteForMode(startLat, startLng, destLat, destLng, {
     // true for every round trip — so the gate has to exist here too.
     if (smartRouting && !degraded) {
         const result = await buildJunctionLoop(
-            startLat, startLng, destLat, destLng, { maxKm, onProgress, cachedJunctions, winterMode, spread });
+            startLat, startLng, destLat, destLng,
+            { maxKm, onProgress, cachedJunctions, winterMode, spread, avoidBacktracking });
         return { outbound: result.outbound, return: result.return, junctions: result.junctions };
     }
     if (buildingMessage && onProgress) onProgress(buildingMessage);
-    const loop = await buildLoop(startLat, startLng, destLat, destLng, spread, { degraded });
+    const loop = await buildLoop(startLat, startLng, destLat, destLng, spread, { degraded, avoidBacktracking });
     return { outbound: loop.outbound, return: loop.return, junctions: null };
 }
 

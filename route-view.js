@@ -22,6 +22,16 @@ function getSpreadParams() {
     return computeSpreadParams(parseInt(document.getElementById('spreadSlider').value, 10));
 }
 
+// UI-layer read of the loop-shape checkbox, in the same spirit as
+// getSpreadParams: shaped as an options object because it is spread straight
+// into loopVias/buildLoopSetup. Two readers need it — readRouteBuildOptions
+// (every route build) and buildDirectionsUrl (the Google Maps link) — and the
+// link has to use the SAME envelope as the route, or it traces an oval the
+// walk never took.
+function getLoopShapeOptions() {
+    return { avoidBacktracking: document.getElementById('avoidBacktracking').checked };
+}
+
 // Routing-mode form state — the one DOM read for winter / maxKm / spread (and
 // the tripMode-derived smartRouting flag below). buildAndDisplay,
 // rerouteWithCurrentSpread, and generateDestination used to each re-read
@@ -49,6 +59,7 @@ function readRouteBuildOptions(tripMode) {
         maxKm: parseFloat(document.getElementById('maxDistance').value),
         spread: getSpreadParams(),
         degraded: isSelfHostedDown(),
+        ...getLoopShapeOptions(),
     };
 }
 
@@ -108,7 +119,8 @@ function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
     // Round-trip: reuse osrm.js's loopVias so the Google Maps link traces the
     // same oval the in-app route does — one source for the envelope geometry.
     // The return leg walks the left side back toward the start, so reverse it.
-    const { rightVias: outVias, leftVias } = loopVias(startLat, startLng, destLat, destLng, getSpreadParams());
+    const { rightVias: outVias, leftVias } =
+        loopVias(startLat, startLng, destLat, destLng, getSpreadParams(), getLoopShapeOptions());
     const retVias = leftVias.slice().reverse();
 
     const waypoints = [
@@ -233,6 +245,7 @@ function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
 }
 
 globalThis.getSpreadParams = getSpreadParams;
+globalThis.getLoopShapeOptions = getLoopShapeOptions;
 globalThis.readRouteBuildOptions = readRouteBuildOptions;
 globalThis.syncDistanceLabel = syncDistanceLabel;
 globalThis.updateDurationBadges = updateDurationBadges;

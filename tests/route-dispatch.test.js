@@ -80,7 +80,7 @@ describe('buildRouteForMode dispatch', () => {
         expect(buildJunctionLoop).toHaveBeenCalledTimes(1);
         // signature: (startLat, startLng, destLat, destLng, { maxKm, onProgress, cachedJunctions, winterMode, spread })
         expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25,
-            { maxKm: 12, onProgress, cachedJunctions: cached, winterMode: true, spread });
+            { maxKm: 12, onProgress, cachedJunctions: cached, winterMode: true, spread, avoidBacktracking: false });
         expect(buildOneWay).not.toHaveBeenCalled();
         expect(buildLoop).not.toHaveBeenCalled();
         expect(r).toEqual({
@@ -98,7 +98,7 @@ describe('buildRouteForMode dispatch', () => {
         });
         // maxKm + spread omitted from opts → forwarded as undefined
         expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25,
-            { maxKm: undefined, onProgress: expect.any(Function), cachedJunctions: null, winterMode: false, spread: undefined });
+            { maxKm: undefined, onProgress: expect.any(Function), cachedJunctions: null, winterMode: false, spread: undefined, avoidBacktracking: false });
     });
 
     // ── Branch: plain loop ───────────────────────────────────────────────────
@@ -111,7 +111,7 @@ describe('buildRouteForMode dispatch', () => {
         expect(buildLoop).toHaveBeenCalledTimes(1);
         // signature: (startLat, startLng, destLat, destLng, spread, { degraded });
         // spread omitted → undefined; degraded omitted → defaults to false.
-        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, { degraded: false });
+        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, { degraded: false, avoidBacktracking: false });
         expect(buildOneWay).not.toHaveBeenCalled();
         expect(buildJunctionLoop).not.toHaveBeenCalled();
         expect(r).toEqual({
@@ -127,7 +127,7 @@ describe('buildRouteForMode dispatch', () => {
             tripMode: 'round', smartRouting: false, winterMode: false, onProgress: vi.fn(),
             buildingMessage: 'Building route…', degraded: true,
         });
-        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, { degraded: true });
+        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, { degraded: true, avoidBacktracking: false });
     });
 
     test('one-way builds are unaffected by degraded', async () => {
@@ -176,7 +176,7 @@ describe('degraded round trips never reach the junctions path', () => {
         expect(buildLoop).toHaveBeenCalledWith(
             60, 24, 61, 25,
             { offsetMult: 0.5, viaTs: [0.25, 0.5, 0.75] },
-            { degraded: true },
+            { degraded: true, avoidBacktracking: false },
         );
         expect(r.junctions).toBeNull();
     });

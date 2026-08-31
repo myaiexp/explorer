@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Tests for loop-quality.js — loopOverlapFraction.
+ * Tests for loop-quality.js — loopOverlapFraction, loopBudgetOvershoot, loopScore.
  *
  * Loading: loop-quality.js is a non-module browser script. It reads the
  * shared globalThis.haversineM (audit #1262), so geo-utils.js must load
@@ -75,5 +75,42 @@ describe('loopOverlapFraction', () => {
         // ret→out is fully covered (1.0); out→ret is only ~25% covered.
         // Max is 1.0.
         expect(overlap).toBeCloseTo(1.0, 1);
+    });
+});
+
+describe('loopBudgetOvershoot', () => {
+    test('a loop inside the budget is not penalised, at any margin', () => {
+        expect(globalThis.loopBudgetOvershoot(3, 5)).toBe(0);
+        expect(globalThis.loopBudgetOvershoot(5, 5)).toBe(0);
+    });
+
+    test('overshoot is the fraction of the budget exceeded', () => {
+        expect(globalThis.loopBudgetOvershoot(7, 5)).toBeCloseTo(0.4, 10);
+        expect(globalThis.loopBudgetOvershoot(10, 5)).toBeCloseTo(1.0, 10);
+    });
+
+    test('an unusable budget scores 0 rather than poisoning the rank with NaN', () => {
+        // A missing leg leaves totalKm NaN; maxKm can be NaN from an empty field.
+        for (const [total, max] of [[NaN, 5], [7, NaN], [7, 0], [7, -1], [7, undefined]]) {
+            expect(globalThis.loopBudgetOvershoot(total, max)).toBe(0);
+        }
+    });
+});
+
+describe('loopScore', () => {
+    test('adds overlap and overshoot on the same scale', () => {
+        expect(globalThis.loopScore(0.2, 6, 5)).toBeCloseTo(0.4, 10);   // 0.2 + 0.2
+        expect(globalThis.loopScore(0.2, 4, 5)).toBeCloseTo(0.2, 10);   // in budget
+    });
+
+    test('an over-budget loop loses to a worse-overlapping one that fits', () => {
+        const sprawling = globalThis.loopScore(0.10, 9, 5);   // great legs, 80% over
+        const tidy      = globalThis.loopScore(0.35, 5, 5);   // worse legs, fits
+        expect(tidy).toBeLessThan(sprawling);
+    });
+
+    test('unknown overlap stays null so it never displaces a measured candidate', () => {
+        expect(globalThis.loopScore(null, 4, 5)).toBeNull();
+        expect(globalThis.loopScore(undefined, 4, 5)).toBeNull();
     });
 });

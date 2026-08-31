@@ -32,6 +32,7 @@ const PANEL_HTML = `
   <select id="locationTypeSelect"><option value="park">park</option></select>
   <input id="spreadSlider" type="range" value="50">
   <input type="checkbox" id="winterMode">
+  <input type="checkbox" id="avoidBacktracking">
   <input id="maxDistance" value="5">
   <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
   <input type="radio" name="tripMode" id="oneWay" value="one-way">
@@ -110,6 +111,7 @@ describe('readRouteBuildOptions', () => {
             maxKm: 12.5,
             spread: computeSpreadParams(100),
             degraded: false,
+            avoidBacktracking: false,
         });
     });
 
@@ -236,8 +238,11 @@ describe('buildDirectionsUrl', () => {
         expect(url).toContain(`origin=${START.lat},${START.lng}`);
         expect(url).toContain(`destination=${START.lat},${START.lng}`);
         expect(url).toContain(`waypoints=${expected}`);
+        // The Google Maps link must trace the SAME envelope as the route, so the
+        // loop-shape options travel with the spread params into loopVias.
         expect(loopVias).toHaveBeenCalledWith(
             START.lat, START.lng, DEST.lat, DEST.lng, getSpreadParams(),
+            { avoidBacktracking: false },
         );
     });
 });

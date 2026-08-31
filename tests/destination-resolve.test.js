@@ -9,7 +9,7 @@
  * globalThis assignments expose the pipeline functions. Every cross-file
  * dependency (rankByNovelty, generateRandomPointAnnulus, capPool,
  * screenCandidates, screeningTableFn, fetchRoadsInRadius, fetchPOIsInRadius,
- * buildJunctionLoop, buildRouteForMode, OVERLAP_BAD_THRESHOLD, POI_TYPES) is
+ * buildJunctionLoop, buildRouteForMode, loopScore, OVERLAP_BAD_THRESHOLD, POI_TYPES) is
  * resolved from globalThis at call time — exactly as in the browser — so each
  * test installs fakes on globalThis instead of pulling in real sources (no
  * SCRIPT_DEPS entry for this module). rankByNovelty is faked as identity,
@@ -21,7 +21,12 @@ import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    loadScripts('destination-resolve');
+    // loop-quality is loaded for REAL, not faked: findBestLoop ranks candidates
+    // with its loopScore, so a stub would rank nothing and the ranking tests
+    // below would pass against a fiction. It is pure (no DOM, no network) and
+    // supplies OVERLAP_BAD_THRESHOLD too — beforeEach re-pins that to the same
+    // 0.4 so the threshold a test reasons about stays visible in the test file.
+    loadScripts('loop-quality', 'destination-resolve');
 });
 
 // POI catalog fake — two keys so poi vs any_poi filter/label logic is exercised.
@@ -346,6 +351,74 @@ describe('findBestLoop', () => {
 });
 
 // ── buildRouteForDestination ──────────────────────────────────────────────────
+
+// ── budget-aware ranking (avoidBacktracking) ─────────────────────────────────
+//
+// Legacy findBestLoop ranks on leg overlap alone, which is how a 6.9 km loop won
+// a 5 km budget: nothing ever compared the built route to the number the user
+// typed. With avoidBacktracking the rank becomes loopScore (overlap + budget
+// overshoot). These pin BOTH sides — the fix, and the legacy behaviour it is
+// opt-in against.
+describe('findBestLoop budget-aware ranking', () => {
+    // Legs carry METRES, as they do off OSRM; the km conversion is findBestLoop's.
+    function sizedLoop(overlap, totalKm) {
+        return {
+            outbound: { coords: ['o'], distance: totalKm * 500 },
+            return:   { coords: ['r'], distance: totalKm * 500 },
+            overlap,
+            junctions: [{ j: 1 }],
+        };
+    }
+    // Two candidates: a sprawling loop with tidy legs, then a compact loop with
+    // worse legs. Overlap alone prefers the first; budget-aware prefers the second.
+    const sprawling = sizedLoop(0.10, 9);   // 80% over a 5 km budget
+    const compact   = sizedLoop(0.35, 5);   // fits exactly
+    const twoDests  = [{ lat: 1, lng: 1, name: 'sprawling' }, { lat: 2, lng: 2, name: 'compact' }];
+
+    function optsFor(avoidBacktracking) {
+        return {
+            candidatePool: twoDests, dest: twoDests[0], existingDests: [], maxKm: 5,
+            winterMode: false, spread: { offsetMult: 0.2, viaTs: [] }, onProgress: vi.fn(),
+            avoidBacktracking,
+        };
+    }
+
+    test('legacy ranking keeps the over-budget loop because its legs overlap least', async () => {
+        globalThis.buildJunctionLoop
+            .mockResolvedValueOnce(sprawling)
+            .mockResolvedValueOnce(compact);
+        const best = await globalThis.findBestLoop(60, 24, optsFor(false));
+        expect(best.destName).toBe('sprawling');
+    });
+
+    test('budget-aware ranking prefers the loop that fits the distance asked for', async () => {
+        globalThis.buildJunctionLoop
+            .mockResolvedValueOnce(sprawling)
+            .mockResolvedValueOnce(compact);
+        const best = await globalThis.findBestLoop(60, 24, optsFor(true));
+        expect(best.destName).toBe('compact');
+        // overlap is still reported unmodified — generate.js warns the user on it.
+        expect(best.overlap).toBe(0.35);
+    });
+
+    test('a sub-threshold overlap that busts the budget no longer stops the retry loop', async () => {
+        // 0.10 overlap is under OVERLAP_BAD_THRESHOLD, so legacy early-exits on
+        // attempt 1. Budget-aware scores it 0.10 + 0.80 and keeps looking.
+        globalThis.buildJunctionLoop.mockResolvedValue(sprawling);
+        await globalThis.findBestLoop(60, 24, optsFor(false));
+        expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(1);
+
+        globalThis.buildJunctionLoop.mockClear();
+        await globalThis.findBestLoop(60, 24, optsFor(true));
+        expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(2);
+    });
+
+    test('the flag reaches buildJunctionLoop, not just the ranking', async () => {
+        globalThis.buildJunctionLoop.mockResolvedValue(compact);
+        await globalThis.findBestLoop(60, 24, optsFor(true));
+        expect(globalThis.buildJunctionLoop.mock.calls[0][4].avoidBacktracking).toBe(true);
+    });
+});
 
 describe('buildRouteForDestination', () => {
     const dest = { lat: 61, lng: 25, name: 'Dest' };

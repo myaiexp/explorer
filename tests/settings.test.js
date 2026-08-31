@@ -29,6 +29,7 @@ const FORM_HTML = `
   </select>
   <input id="spreadSlider" type="range" min="0" max="100" value="50">
   <input type="checkbox" id="winterMode">
+  <input type="checkbox" id="avoidBacktracking">
   <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
   <input type="radio" name="tripMode" id="oneWay" value="one-way">
   <label id="distanceLabel">Round-trip distance (km)</label>
@@ -41,6 +42,7 @@ const DEFAULTS = {
     poiType: 'park',
     spread: '50',
     winterMode: false,
+    avoidBacktracking: false,
     tripMode: 'round',
 };
 
@@ -51,6 +53,7 @@ const NON_DEFAULTS = {
     poiType: 'cafe',
     spread: '75',
     winterMode: true,
+    avoidBacktracking: true,
     tripMode: 'one-way',
 };
 
@@ -62,6 +65,7 @@ function readForm() {
         poiType: document.getElementById('locationTypeSelect').value,
         spread: document.getElementById('spreadSlider').value,
         winterMode: document.getElementById('winterMode').checked,
+        avoidBacktracking: document.getElementById('avoidBacktracking').checked,
         tripMode: document.querySelector('input[name="tripMode"]:checked').value,
     };
 }
@@ -73,6 +77,7 @@ function applyForm(values) {
     document.getElementById('locationTypeSelect').value = values.poiType;
     document.getElementById('spreadSlider').value = values.spread;
     document.getElementById('winterMode').checked = values.winterMode;
+    document.getElementById('avoidBacktracking').checked = values.avoidBacktracking;
     document.getElementById('roundTrip').checked = values.tripMode !== 'one-way';
     document.getElementById('oneWay').checked = values.tripMode === 'one-way';
 }
