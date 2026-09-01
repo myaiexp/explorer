@@ -200,6 +200,46 @@ describe('buildAndDisplay — successful build persists', () => {
     expect(displayRouteCalls[0].poiCategory).toBe('activity');
   });
 
+  // #3663 — buildAndDisplay used to clearMap() before an awaited build. When
+  // that build threw (OSRM down, a junction fetch failing), displayRoute was
+  // never reached, so the dashed straight-line fallback never ran either: the
+  // user was left with a blank map while the result panel and the session still
+  // described the route that had just been wiped off it. Nothing is destroyed
+  // until the replacement exists — the principle finding #7303 established for
+  // the spread reroute, applied to the two "we know where we're going" flows.
+  test('a throwing build leaves the previous map view intact', async () => {
+    globalThis.buildRouteForMode = async () => { throw new Error('OSRM down'); };
+
+    await expect(buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'x',
+      destName: 'y',
+      onProgress: () => {},
+    })).rejects.toThrow('OSRM down');
+
+    expect(clearMapCalls).toBe(0);
+    expect(displayRouteCalls).toHaveLength(0);
+    expect(saveToHistoryCalls).toHaveLength(0);
+  });
+
+  test('clearMap runs before displayRoute, so the old view is replaced not stacked', async () => {
+    // displayRoute adds markers/circles/polylines on top rather than replacing
+    // them, so deferring the clear must not defer it past the draw.
+    const order = [];
+    globalThis.clearMap = () => { clearMapCalls++; order.push('clear'); };
+    const realDisplay = globalThis.displayRoute;
+    globalThis.displayRoute = (args) => { order.push('display'); return realDisplay(args); };
+
+    await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round',
+      locationInput: 'x',
+      destName: 'y',
+      onProgress: () => {},
+    });
+
+    expect(order).toEqual(['clear', 'display']);
+  });
+
   test('spreads readRouteBuildOptions into buildRouteForMode', async () => {
     const blob = {
       tripMode: 'round', smartRouting: true, winterMode: true,

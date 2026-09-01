@@ -16,7 +16,6 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
     tripMode, locationInput, destName, onProgress,
     loadingMessage = null, buildingMessage = null, poiCategory = null,
 }) {
-    clearMap();
     if (loadingMessage) onProgress(loadingMessage);
     const r = await buildRouteForMode(startLat, startLng, destLat, destLng, {
         ...readRouteBuildOptions(tripMode),
@@ -24,6 +23,15 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         cachedJunctions: null,
         buildingMessage,
     });
+    // Clear only now that the replacement is in hand (#3663). Clearing before
+    // the await meant a throwing build left a blank map — displayRoute is never
+    // reached, so its dashed straight-line fallback never runs either — while
+    // the result panel and the session still described the route that had just
+    // been wiped off the map. Same principle as the spread reroute's
+    // keep-the-previous-view fix (finding #7303). It must still run BEFORE
+    // displayRoute, which adds markers/circles/lines on top rather than
+    // replacing them.
+    clearMap();
     const session = displayRoute({
         startLat, startLng, destLat, destLng,
         outbound: r.outbound, ret: r.return,
