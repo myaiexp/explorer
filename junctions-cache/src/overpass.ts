@@ -25,14 +25,15 @@ export type OverpassElement = {
     tags?: Record<string, string>;
 };
 
-// TWIN: explorer/overpass.js carries the same HIGHWAY_EXCLUDE presets and the
-// same status-parse + retry loop (queryOverpass there / runOverpassQuery
-// here). Deliberately independent — separate deployables (this ships to shelly,
-// that serves as a raw static asset), so there is no build step to share a
-// constant through. These exclude strings MUST stay byte-identical to the
-// frontend's or server-cached junctions stop matching what a direct frontend
-// Overpass call would compute. explorer/tests/overpass-exclude-parity.test.js
-// fails RED if the two copies drift.
+// The road-filter presets. NO LONGER A TWIN: explorer/overpass.js used to carry
+// byte-identical HIGHWAY_EXCLUDE_DEFAULT / _WINTER copies plus its own
+// status-parse + retry loop, kept in lockstep by
+// explorer/tests/overpass-exclude-parity.test.js. The frontend now POSTs /pois
+// and /roads and names a preset by keyword ('default' | 'winter'), so this is
+// the single copy and that parity test is gone with its twin. Do not
+// reintroduce a client-side copy: a client that can only name a preset cannot
+// inject a filter into our own Overpass instance. (The live twin that remains
+// is poi-catalog.ts ↔ explorer/poi-types.js.)
 export type ExcludePreset = 'default' | 'winter';
 export const HIGHWAY_EXCLUDE: Record<ExcludePreset, string> = {
     default: 'motorway|motorway_link|trunk|trunk_link|service|steps',

@@ -11,7 +11,7 @@
  * (X-Real-IP, else X-Forwarded-For's last hop, but only when the TCP peer is a
  * known proxy — audit #1342 / finding #7895), and the Retry-After deficit math. There is no shared package to
  * enforce this (separate lockfiles, separate boxes), so this test is the
- * enforcement — the sibling of tests/overpass-exclude-parity.test.js.
+ * enforcement — the sibling of tests/poi-catalog-parity.test.js.
  *
  * Rather than compare source text (the two files legitimately differ in variable
  * names, structure, and per-service policy), we drive both limiters through

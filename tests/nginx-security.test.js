@@ -63,7 +63,8 @@ describe('deploy/nginx-explorer.conf (finding #7059)', () => {
         expect(csp).toMatch(/https:\/\/unpkg\.com\/leaflet@1\.9\.4\//);
         expect(csp).toMatch(/https:\/\/\*\.tile\.openstreetmap\.org/);
         expect(csp).toMatch(/https:\/\/server\.arcgisonline\.com/);
-        expect(csp).toMatch(/https:\/\/overpass-api\.de/);
+        // No overpass-api.de: POI/road pools are same-origin POSTs to
+        // /api/junctions/*, already covered by connect-src 'self'.
         expect(csp).toMatch(/https:\/\/nominatim\.openstreetmap\.org/);
         expect(csp).toMatch(/https:\/\/api\.open-meteo\.com/);
     });
@@ -171,6 +172,11 @@ describe('CSP connect-src covers every host the app actually fetches', () => {
     test('the scan sees real hosts, so it cannot pass vacuously', () => {
         expect(connectSrc).not.toBe('');
         expect(hostsIn('osrm.js')).toContain('routing.openstreetmap.de');
-        expect(hostsIn('overpass.js')).toContain('overpass-api.de');
+        // Anchored on elevation.js since overpass.js stopped naming a third
+        // party (its pools are same-origin now). This assertion is why the
+        // scan above cannot pass by scanning nothing, so it must always point
+        // at a module that really does fetch a cross-origin host — re-anchor
+        // it, never delete it.
+        expect(hostsIn('elevation.js')).toContain('api.open-meteo.com');
     });
 });

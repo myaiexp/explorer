@@ -29,7 +29,10 @@ beforeAll(() => {
     loadScripts('loop-quality', 'destination-resolve');
 });
 
-// POI catalog fake — two keys so poi vs any_poi filter/label logic is exercised.
+// POI catalog fake — two keys so poi vs any_poi key/label logic is exercised.
+// The `filter` values are kept deliberately: the catalog still carries them (to
+// describe the dropdown), and the assertions below prove they are NOT what
+// reaches fetchPOIsInRadius. The service takes catalog keys only.
 const POI_TYPES = [
     { label: 'park', key: 'park', filter: '["leisure"="park"]' },
     { label: 'cafe', key: 'cafe', filter: '["amenity"="cafe"]' },
@@ -89,13 +92,16 @@ describe('resolveCandidatePool', () => {
         expect(r.destName).toBeNull();
     });
 
-    test('poi: success → dest.name becomes destName; single filter passed unwrapped', async () => {
+    test('poi: success → dest.name becomes destName; the catalog KEY is sent, not its filter', async () => {
         const pois = [{ lat: 60.1, lng: 24.1, name: 'Central Park' }];
         globalThis.fetchPOIsInRadius.mockResolvedValue(pois);
         const r = await globalThis.resolveCandidatePool(60, 24, {
             ...base, routingStrategy: 'poi', rawLocationType: 'park', onProgress: vi.fn() });
-        // one filter → passed as the bare string, not an array
-        expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, '["leisure"="park"]', expect.any(Function));
+        // The bare key, not an array and never the Overpass filter string —
+        // overpass.js wraps a scalar key, and the service resolves keys through
+        // its own catalog so a client cannot inject a query.
+        expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, 'park', expect.any(Function));
+        expect(globalThis.fetchPOIsInRadius.mock.calls[0][4]).not.toContain('leisure');
         expect(r.dest).toBe(pois[0]);
         expect(r.destName).toBe('Central Park');
     });
@@ -118,9 +124,10 @@ describe('resolveCandidatePool', () => {
     });
 
     // Stale settings restore a poiType with no matching <option>, so the select
-    // value is '' (or a retired key). That must not reach Overpass as an empty
-    // union — the user would see "Overpass unavailable" for a bad dropdown.
-    test.each(['', 'stale_key'])('poi: unknown type %j → random fallback, no Overpass fetch', async (raw) => {
+    // value is '' (or a retired key). That must not reach the pool endpoint as
+    // an empty or unknown selection — the service 400s on both, and the user
+    // would see "Overpass unavailable" for what is really a bad dropdown.
+    test.each(['', 'stale_key'])('poi: unknown type %j → random fallback, no pool fetch', async (raw) => {
         globalThis.fetchPOIsInRadius.mockResolvedValue([]);
         const onProgress = vi.fn();
         const r = await globalThis.resolveCandidatePool(60, 24, {
@@ -132,14 +139,16 @@ describe('resolveCandidatePool', () => {
         expect(r.destName).toBeNull();
     });
 
-    test('any_poi: all POI filters passed as an array, label "any POI"', async () => {
+    test('any_poi: the "all" selector is sent, not an expanded catalog, label "any POI"', async () => {
         globalThis.fetchPOIsInRadius.mockResolvedValue([{ lat: 60.1, lng: 24.1, name: 'X' }]);
         const onProgress = vi.fn();
         await globalThis.resolveCandidatePool(60, 24, {
             ...base, routingStrategy: 'any_poi', onProgress });
         expect(onProgress).toHaveBeenCalledWith('Searching for any POI…');
+        // 'all' says the same thing as every key in the catalog, in one token,
+        // and cannot drift when the two catalogs differ by an entry.
         expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(
-            60, 24, 0.5, 2, ['["leisure"="park"]', '["amenity"="cafe"]'], expect.any(Function));
+            60, 24, 0.5, 2, 'all', expect.any(Function));
     });
 
     test('any: straight random pool, no Overpass fetch', async () => {

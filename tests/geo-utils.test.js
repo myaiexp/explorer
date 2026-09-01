@@ -2,9 +2,10 @@
 /**
  * Tests for geo-utils.js — haversineKm / haversineM plus the km→degree
  * projection (kmToDegLat / kmToDegLng / bboxAround). Finding #7589: the
- * projection helpers are the single source for Overpass radius bboxes and
- * osrm.js corridor padding; overpass-parse.test.js only asserted the query
- * contains bboxAround(...) — a tautology if the 111 km/deg formula drifted.
+ * projection helpers back osrm.js's corridor padding (and, until the Overpass
+ * queries moved server-side, the radius bboxes too). The deleted
+ * overpass-parse.test.js only asserted the query contained bboxAround(...) —
+ * a tautology if the 111 km/deg formula drifted. These assert the numbers.
  *
  * Loading: geo-utils.js is a non-module browser script, loaded via
  * helpers/load.js's loadScripts('geo-utils'); the script's explicit

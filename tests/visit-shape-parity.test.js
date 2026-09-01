@@ -11,7 +11,7 @@
  * ISO-date prefix regex MUST stay in lockstep so a row that survives
  * normalizeVisit (and therefore reaches the cloud outbox) is one the API will
  * accept. There is no shared package to enforce this, so this test is the
- * enforcement — the sibling of tests/overpass-exclude-parity.test.js and
+ * enforcement — the sibling of tests/poi-catalog-parity.test.js and
  * tests/rate-limit-parity.test.js.
  *
  * Two checks, because the copies are not byte-identical adapters:

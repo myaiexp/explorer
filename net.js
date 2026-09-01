@@ -6,7 +6,8 @@
 // fetchWithTimeout. No DOM. Loaded first, before any module that fetches.
 
 // Default per-call ceiling. OSRM (self-hosted, fast), Nominatim, and the sync
-// API all fit well under this; slow Overpass calls pass an explicit larger ms.
+// API all fit well under this; the junctions-cache pool endpoints pass an
+// explicit larger ms, since a cache miss there has to reach Overpass.
 const FETCH_TIMEOUT_MS = 20000;
 
 // Same signature as fetch(url, init), plus a per-call timeout (ms). Rejects with
