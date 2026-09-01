@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Bootstrap installer for shelly: wander-junctions systemd unit + dedicated user.
-# Run from the explorer checkout on shelly (after git pull), or:
+# Run from the wander checkout on shelly (after git pull), or:
 #   ssh shelly 'bash -s' < deploy/install-wander-junctions.sh
 # Idempotent: safe to rerun. Does not rebuild junctions-cache (the post-receive
 # hook still owns pnpm install + build).
 set -euo pipefail
 
-CHECKOUT=/home/shelly/Projects/explorer
+CHECKOUT=/home/shelly/Projects/wander
 UNIT_SRC="$CHECKOUT/deploy/wander-junctions.service"
 CODE_DIR="$CHECKOUT/junctions-cache"
 STATE_DIR=/var/lib/wander-junctions

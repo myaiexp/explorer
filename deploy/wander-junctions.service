@@ -9,7 +9,7 @@ After=network.target
 Type=simple
 User=wander-junctions
 Group=wander-junctions
-WorkingDirectory=/home/shelly/Projects/explorer/junctions-cache
+WorkingDirectory=/home/shelly/Projects/wander/junctions-cache
 ExecStart=/usr/bin/node dist/index.js
 Environment=PORT=5001
 Environment=HOST=100.69.160.113
@@ -41,7 +41,7 @@ StandardError=journal
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=tmpfs
-BindReadOnlyPaths=/home/shelly/Projects/explorer/junctions-cache
+BindReadOnlyPaths=/home/shelly/Projects/wander/junctions-cache
 StateDirectory=wander-junctions
 PrivateTmp=yes
 PrivateDevices=yes

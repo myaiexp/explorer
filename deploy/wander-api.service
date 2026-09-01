@@ -2,21 +2,21 @@
 # Read by deploy/check-unit-drift.sh, which diffs this file against
 # /etc/systemd/system/ on that host every deploy. `local` is the VPS.
 [Unit]
-Description=Explorer API (Wander cloud backup)
+Description=Wander API (cloud backup)
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
-User=explorer
-Group=explorer
-WorkingDirectory=/home/mase/Projects/explorer/server
-EnvironmentFile=/home/mase/Projects/explorer/server/.env
+User=wander
+Group=wander
+WorkingDirectory=/home/mase/Projects/wander/server
+EnvironmentFile=/home/mase/Projects/wander/server/.env
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=5
 
-# Dedicated explorer uid so an RCE/OOM cannot read /home/mase or share the
+# Dedicated wander uid so an RCE/OOM cannot read /home/mase or share the
 # interactive user's cgroup (finding #7560). ProtectHome=tmpfs (not yes):
 # yes overmounts /home and hides a BindReadOnlyPaths target underneath it.
 # tmpfs + the bind keeps only the server tree reachable. EnvironmentFile is
@@ -27,7 +27,7 @@ RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=tmpfs
-BindReadOnlyPaths=/home/mase/Projects/explorer/server
+BindReadOnlyPaths=/home/mase/Projects/wander/server
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
