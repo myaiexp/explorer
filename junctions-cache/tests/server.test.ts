@@ -43,12 +43,19 @@ async function loadServer() {
     process.env.CACHE_PATH = tmpCacheFile();
     const overpass = await import('../src/overpass.js');
     const logMod = await import('../src/log.js');
+    // Both hold module-level state that /health reads, so they come from the
+    // same freshly-reset module graph the app was built from — importing them
+    // at file scope would hand the test a different copy than the route sees.
+    const freshness = await import('../src/overpass-freshness.js');
+    const target = await import('../src/overpass-target.js');
     const { createApp } = await import('../src/app.js');
     const app = createApp();
     return {
         fetch: app.fetch as FetchFn,
         fetchMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
         getRecentLogs: logMod.getRecentLogs as unknown as Mock,
+        freshness,
+        target,
     };
 }
 
@@ -83,7 +90,37 @@ describe('GET /health', () => {
         const { fetch } = await loadServer();
         const { status, body } = await get(fetch, '/health');
         expect(status).toBe(200);
-        expect(body).toEqual({ ok: true, cacheEntries: 0 }); // fresh cache ⇒ 0
+        expect(body.ok).toBe(true);
+        expect(body.cacheEntries).toBe(0); // fresh cache ⇒ 0
+    });
+
+    // Idea #4011: a wedged Geofabrik updater or a stuck fallback latch are both
+    // invisible without this — queries keep succeeding either way.
+    test('reports the Overpass target and data freshness', async () => {
+        const { fetch, freshness, target } = await loadServer();
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        freshness.recordLocalDataTimestamp({ timestamp_osm_base: '2026-09-01T11:00:00Z' });
+        expect(target.isLocalDown()).toBe(false);
+
+        const { body } = await get(fetch, '/health');
+        expect(body.overpass).toEqual({
+            local: true,
+            dataTimestamp: '2026-09-01T11:00:00Z',
+            dataAgeSec: 3600,
+            observedAt: '2026-09-01T12:00:00.000Z',
+            observedAgeSec: 0,
+        });
+    });
+
+    test('reports local:false while the fallback latch is live', async () => {
+        const { fetch, target } = await loadServer();
+        target.markLocalDown();
+
+        const { body } = await get(fetch, '/health');
+        expect(body.overpass.local).toBe(false);
+        // Never asked local yet ⇒ nulls, not a fabricated fresh reading.
+        expect(body.overpass.dataTimestamp).toBeNull();
+        expect(body.overpass.dataAgeSec).toBeNull();
     });
 });
 

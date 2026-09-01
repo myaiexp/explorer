@@ -5,6 +5,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { cacheSize } from '../cache.js';
 import { ipRateLimit } from '../rate-limit.js';
 import { getRecentLogs } from '../log.js';
+import { isLocalDown } from '../overpass-target.js';
+import { getFreshness } from '../overpass-freshness.js';
 
 // /logs serves recent request events back to a remote caller (debugging). Those
 // events include the walker's anchored `start` at ~110 m precision (≈ home) and
@@ -28,7 +30,16 @@ export function registerMetaRoutes(app: Hono): void {
     const logsRateLimit = ipRateLimit(30);
     const healthRateLimit = ipRateLimit(120);
 
-    app.get('/health', healthRateLimit, c => c.json({ ok: true, cacheEntries: cacheSize() }));
+    // `overpass` answers the two ways this service degrades without failing:
+    // stuck on the public fallback (local:false long after a blip), and serving
+    // a wedged local instance whose Geofabrik updater stopped (dataAgeSec
+    // climbing past a day). Both keep returning 200s otherwise. Reported, not
+    // probed — see overpass-freshness.ts on why /health never queries Overpass.
+    app.get('/health', healthRateLimit, c => c.json({
+        ok: true,
+        cacheEntries: cacheSize(),
+        overpass: { local: !isLocalDown(), ...getFreshness() },
+    }));
 
     app.get('/logs', logsRateLimit, c => {
         if (!logsTokenOk(c)) return c.json({ error: 'unauthorized' }, 401);

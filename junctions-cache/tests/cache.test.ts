@@ -92,6 +92,7 @@ afterEach(() => {
     // The TTL / cap tests set these before loadFresh; clear them so they don't
     // leak into other tests (the module reads them once at import).
     delete process.env.CACHE_TTL_MS;
+    delete process.env.CACHE_EMPTY_TTL_MS;
     delete process.env.CACHE_MAX_ENTRIES;
     delete process.env.CACHE_MAX_POINTS;
     delete process.env.CACHE_SAVE_DEBOUNCE_MS;
@@ -581,6 +582,67 @@ describe('TTL on read', () => {
         await cache.getJunctions(BBOX, 'default');    // expired → refetch → {2,2}
         const next = await cache.getJunctions(BBOX, 'default');
         expect(next).toEqual({ cache: 'hit', junctions: [{ lat: 2, lng: 2 }] }); // fresh value now cached
+    });
+});
+
+// ── Short TTL for empty results (idea #4016) ─────────────────────────────────
+//
+// An empty answer is a legitimate one for a genuinely bare area, so it is still
+// cached — but it is also what a mid-diff-update or half-loaded Overpass returns,
+// and at the full 30-day TTL a single transient empty pins "nothing near you" on
+// that start for a month. The TTL is derived from the entry's own length, so it
+// also applies to empties already sitting in the on-disk snapshot.
+describe('empty-result TTL', () => {
+    test('an empty result expires on the short TTL while a full one is still fresh', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_TTL_MS = String(60_000);
+        process.env.CACHE_EMPTY_TTL_MS = String(5_000);
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+
+        const EMPTY = { minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 };
+        const FULL = { minLat: 62, minLng: 26, maxLat: 63, maxLng: 27 };
+        fetchMock.mockResolvedValueOnce([]);                       // EMPTY, miss 1
+        fetchMock.mockResolvedValueOnce([{ lat: 1, lng: 1 }]);     // FULL, miss 1
+        fetchMock.mockResolvedValueOnce([{ lat: 2, lng: 2 }]);     // EMPTY, refetch
+
+        expect((await cache.getJunctions(EMPTY, 'default')).cache).toBe('miss');
+        expect((await cache.getJunctions(FULL, 'default')).cache).toBe('miss');
+        // Both cached: an empty answer is still worth holding briefly.
+        expect((await cache.getJunctions(EMPTY, 'default')).cache).toBe('hit');
+
+        vi.setSystemTime(Date.now() + 6_000);   // past the empty TTL, inside the full one
+        const empty = await cache.getJunctions(EMPTY, 'default');
+        expect(empty.cache).toBe('miss');
+        expect(empty.junctions).toEqual([{ lat: 2, lng: 2 }]);   // the transient empty is gone
+        expect((await cache.getJunctions(FULL, 'default')).cache).toBe('hit');
+    });
+
+    test('prune drops an empty entry on the short TTL, keeping a same-age full one', async () => {
+        vi.useFakeTimers();
+        process.env.CACHE_TTL_MS = String(60_000);
+        process.env.CACHE_EMPTY_TTL_MS = String(5_000);
+        const file = tmpCacheFile();
+        const { cache } = await loadFresh(file);
+
+        // A snapshot written 6s ago: past the empty TTL, well inside the full one.
+        const cachedAt = Date.now() - 6_000;
+        writeFileSync(file, JSON.stringify({
+            'a,b,c,d|default': { junctions: [], cachedAt },
+            'e,f,g,h|default': { junctions: [{ lat: 1, lng: 1 }], cachedAt },
+        }));
+        await cache.loadCache();
+
+        expect(cache.cacheSize()).toBe(1);   // the empty row pruned on load, the full one kept
+    });
+
+    test('an empty result is still cached — a bare area does not re-hit Overpass every request', async () => {
+        vi.useFakeTimers();
+        const { cache, fetchMock } = await loadFresh(tmpCacheFile());
+        fetchMock.mockResolvedValue([]);
+
+        expect((await cache.getJunctions(BBOX, 'default')).cache).toBe('miss');
+        expect((await cache.getJunctions(BBOX, 'default')).cache).toBe('hit');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });
 

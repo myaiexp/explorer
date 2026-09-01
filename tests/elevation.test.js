@@ -91,13 +91,59 @@ describe('fetchElevations', () => {
         const [url] = global.fetch.mock.calls[0];
         const nLats = new URL(url).searchParams.get('latitude').split(',').length;
         expect(nLats).toBeLessThan(n);
-        expect(nLats).toBeLessThanOrEqual(101);
+        expect(nLats).toBeLessThanOrEqual(100);
 
-        // Samples at 0, 4, … plus the last vertex. First sample → 100; last → 100+nLats-1.
+        // Samples every `step` plus the last vertex. First sample → 100; last → 100+nLats-1.
         expect(result[0]).toBe(100);
         expect(result[n - 1]).toBe(100 + nLats - 1);
-        // Index 2 sits halfway (by distance, equal spacing) between samples 0 and 4.
-        expect(result[2]).toBeCloseTo(100.5, 5);
+    });
+
+    // Idea #4020: Open-Meteo rejects >100 coordinates with a 400, and
+    // fetchElevations turns that into null — a silently missing chart on every
+    // route over 100 vertices. The cap is a hard API limit, so it is pinned here
+    // across the whole shape of n rather than at one sample length.
+    test.each([100, 101, 161, 199, 200, 201, 397, 500, 3000, 16000])(
+        'a %i-vertex route sends at most 100 coordinates to Open-Meteo',
+        async (n) => {
+            const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
+            global.fetch = vi.fn((url) => {
+                const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({
+                        elevation: Array.from({ length: nLats }, () => 100),
+                    }),
+                });
+            });
+
+            await fetchElevations(long);
+            const [url] = global.fetch.mock.calls[0];
+            const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+            const nLngs = new URL(url).searchParams.get('longitude').split(',').length;
+            expect(nLats).toBeLessThanOrEqual(100);
+            expect(nLngs).toBe(nLats);
+        },
+    );
+
+    // A route at or under the cap needs no downsampling at all — one Open-Meteo
+    // reading per vertex, no interpolation error introduced for free.
+    test('a route at the cap is sent 1:1, not downsampled', async () => {
+        const n = 100;
+        const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
+        global.fetch = vi.fn((url) => {
+            const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({
+                    elevation: Array.from({ length: nLats }, (_, i) => 100 + i),
+                }),
+            });
+        });
+
+        const result = await fetchElevations(long);
+        const [url] = global.fetch.mock.calls[0];
+        expect(new URL(url).searchParams.get('latitude').split(',')).toHaveLength(n);
+        expect(result).toEqual(Array.from({ length: n }, (_, i) => 100 + i));
     });
 });
 

@@ -34,7 +34,9 @@ Overpass targets (`src/overpass-target.ts`):
 
 A local connection failure or 5xx latches local down for 5 minutes and sends traffic to the fallback; a local **4xx does not** latch, since a malformed query fails identically against the fallback. The slot probe and its back-off sleep run only when the public instance itself just pushed back — not on a local retry, and not on the local→public handover, so the first request of a latch window is not the slow one.
 
-The store is bounded so neither memory nor the JSON snapshot grows without limit: entries expire after `CACHE_TTL_MS` (default 30 days — a stale entry is refetched on the next read, not served forever), the entry count is capped at `CACHE_MAX_ENTRIES` (default 500), and the total junction count is capped at `CACHE_MAX_POINTS` (default 1,000,000). Eviction is oldest-`cachedAt`-first until both caps are satisfied; a single fetch larger than the point budget is kept (otherwise it would miss-loop). All three bounds are also applied when the snapshot is loaded at startup. Snapshot writes are debounced by `CACHE_SAVE_DEBOUNCE_MS` (default 2000 ms) so a burst of misses stringifies the store once, not per insert.
+Overpass reports its own timeout and out-of-memory failures **inside a 200**, as a `remark` beside a truncated or empty `elements`. Read at face value that is a silently partial pool — and a non-empty one would then sit in the cache for the full 30-day TTL. So a `remark` raises `OverpassIncompleteError`: retried like any other failed attempt, surfaced in the thrown message once the budget is spent, and logged as `overpass_remark`. It gets its own class because a connection failure and a remark otherwise look identical to the retry loop (both are a thrown `Error` with no HTTP code in the message), and that branch latches local down — which a too-big query must not, since it would fail the same way on the fallback (idea #3160).
+
+The store is bounded so neither memory nor the JSON snapshot grows without limit: entries expire after `CACHE_TTL_MS` (default 30 days — a stale entry is refetched on the next read, not served forever), an **empty** result expires after the much shorter `CACHE_EMPTY_TTL_MS` (default 15 minutes — a bare area is a legitimate answer worth caching, but an empty is also what a mid-diff-update instance returns, and at 30 days one transient empty would pin "nothing near you" on that start for a month), the entry count is capped at `CACHE_MAX_ENTRIES` (default 500), and the total junction count is capped at `CACHE_MAX_POINTS` (default 1,000,000). Eviction is oldest-`cachedAt`-first until both caps are satisfied; a single fetch larger than the point budget is kept (otherwise it would miss-loop). All three bounds are also applied when the snapshot is loaded at startup. Snapshot writes are debounced by `CACHE_SAVE_DEBOUNCE_MS` (default 2000 ms) so a burst of misses stringifies the store once, not per insert.
 
 ## Tests
 
@@ -65,6 +67,24 @@ GET  /logs?n=<count>
 ```
 
 Start/radius used to travel on the GET query string and land in nginx access logs at full JS precision (often home). They now go in the POST body so the request line has no coordinates (finding #7559). GET is bbox-only: any of `startLat`/`startLng`/`maxKm` on the query string 400s with "must be sent in the POST body".
+
+`/health` reports the two ways this service degrades without failing — both keep answering 200s otherwise:
+
+```json
+{
+    "ok": true,
+    "cacheEntries": 20,
+    "overpass": {
+        "local": true,                              // false ⇒ serving the public fallback (latch live)
+        "dataTimestamp": "2026-09-01T11:00:00Z",    // osm3s.timestamp_osm_base from the local instance
+        "dataAgeSec": 3600,                         // climbing past a day ⇒ the Geofabrik updater has wedged
+        "observedAt": "2026-09-01T12:00:00.000Z",   // when that reading was taken…
+        "observedAgeSec": 0                         // …so old news reads differently from stale data
+    }
+}
+```
+
+The reading is recorded off the queries the service already makes, never probed: `/health` is publicly reachable through the VPS proxy, so querying Overpass from it would let any caller drive outbound load and — since every query latches the target on failure — let a health check reroute production traffic to the fallback. The four freshness fields are `null` until the first local answer after a restart.
 
 POST body:
 

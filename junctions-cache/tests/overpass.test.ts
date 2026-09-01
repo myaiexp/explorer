@@ -36,6 +36,10 @@ import {
     FALLBACK_URL,
     STATUS_URL,
 } from '../src/overpass-target.js';
+import {
+    _resetFreshness,
+    getFreshness,
+} from '../src/overpass-freshness.js';
 import { log } from '../src/log.js';
 
 // Mock log so we can read the per-retry wait_sec (= getStatusWaitSec()'s return)
@@ -568,5 +572,166 @@ describe('getStatusWaitSec (via overpass_retry wait_sec, public path)', () => {
     test('falls back to 15s when the status fetch throws', async () => {
         const wait = await firstRetryWait({ statusThrows: true });
         expect(wait).toBe(15);
+    });
+});
+
+// ── osm3s data-freshness recording (idea #4011) ──────────────────────────────
+//
+// wander-overpass applies Geofabrik diffs hourly; the classic failure is the
+// updater wedging while the instance keeps serving, so data rots invisibly.
+// Every answer carries osm3s.timestamp_osm_base, and recording it off the
+// queries we already make makes that observable on /health. Local answers only:
+// a fallback answer's timestamp describes overpass-api.de, not our instance.
+
+describe('osm3s freshness recording', () => {
+    beforeEach(() => {
+        _resetFreshness();
+    });
+
+    async function query(opts: Parameters<typeof installFetch>[0]) {
+        installFetch(opts);
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+        return p;
+    }
+
+    test('records timestamp_osm_base from a local answer', async () => {
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        await query({
+            local: [okJson({
+                version: 0.6,
+                osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' },
+                elements: [],
+            })],
+        });
+
+        const f = getFreshness();
+        expect(f.dataTimestamp).toBe('2026-09-01T11:00:00Z');
+        expect(f.dataAgeSec).toBe(3600);
+        expect(f.observedAt).toBe('2026-09-01T12:00:00.000Z');
+        expect(f.observedAgeSec).toBe(0);
+    });
+
+    test('does NOT record a public-fallback answer — that timestamp is not ours', async () => {
+        usePublic();
+        await query({
+            fallback: [okJson({
+                osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' },
+                elements: [],
+            })],
+        });
+
+        expect(getFreshness().dataTimestamp).toBeNull();
+    });
+
+    test('an answer with no osm3s header leaves the previous reading intact', async () => {
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        await query({
+            local: [
+                okJson({ osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' }, elements: [] }),
+                okJson({ elements: [] }),                       // no header at all
+                okJson({ osm3s: { timestamp_osm_base: 'not a date' }, elements: [] }),
+            ],
+        });
+        await query({ local: [okJson({ elements: [] })] });
+        await query({ local: [okJson({ osm3s: { timestamp_osm_base: 'not a date' }, elements: [] })] });
+
+        // Unknown is no evidence about freshness — better a stale-but-true
+        // reading with an old observedAt than a null that reads as "never asked".
+        expect(getFreshness().dataTimestamp).toBe('2026-09-01T11:00:00Z');
+    });
+
+    test('a later local answer replaces the earlier reading', async () => {
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        await query({ local: [okJson({ osm3s: { timestamp_osm_base: '2026-09-01T09:00:00Z' }, elements: [] })] });
+        vi.setSystemTime(new Date('2026-09-01T13:00:00Z'));
+        await query({ local: [okJson({ osm3s: { timestamp_osm_base: '2026-09-01T12:30:00Z' }, elements: [] })] });
+
+        const f = getFreshness();
+        expect(f.dataTimestamp).toBe('2026-09-01T12:30:00Z');
+        expect(f.dataAgeSec).toBe(1800);
+    });
+
+    test('reports nulls before any local answer, not a fabricated zero age', () => {
+        const f = getFreshness();
+        expect(f).toEqual({
+            dataTimestamp: null,
+            dataAgeSec: null,
+            observedAt: null,
+            observedAgeSec: null,
+        });
+    });
+});
+
+// ── Overpass `remark` = an incomplete answer (idea #3160) ────────────────────
+//
+// Overpass reports its own timeout and out-of-memory failures INSIDE a 200:
+// `remark: "runtime error: Query timed out in \"query\" at line 3 after 15
+// seconds."` alongside a truncated or empty `elements`. Read as a success it is
+// a silently partial pool — and since idea #4016 a non-empty one would then sit
+// in the cache for 30 days. So a remark is a failed attempt, retried like any
+// other, and surfaced in the thrown message rather than swallowed.
+
+describe('Overpass remark handling', () => {
+    const timedOut = () => okJson({
+        version: 0.6,
+        osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' },
+        elements: [],
+        remark: 'runtime error: Query timed out in "query" at line 3 after 15 seconds.',
+    });
+
+    // One Response per attempt, not one repeated: installFetch repeats the LAST
+    // queue entry, and a Response body can only be read once — a reused one
+    // fails the second read as a generic error, which would latch local down and
+    // quietly test something else entirely.
+    test('a remark on every attempt throws, carrying the remark text', async () => {
+        installFetch({ local: [timedOut(), timedOut(), timedOut()] });
+        const p = runOverpassQuery(QUERY);
+        // Attach the rejection handler BEFORE advancing timers, or the retry
+        // back-off fires with nothing waiting and the run reports an unhandled
+        // rejection alongside a passing test.
+        const assertion = expect(p).rejects.toThrow(/timed out/i);
+        await vi.runAllTimersAsync();
+        await assertion;
+    });
+
+    test('a remark is retried — a later clean answer wins', async () => {
+        const m = installFetch({
+            local: [timedOut(), okJson({ elements: [{ type: 'node', id: 1, lat: 60, lon: 24 }] })],
+        });
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+
+        await expect(p).resolves.toEqual([{ type: 'node', id: 1, lat: 60, lon: 24 }]);
+        expect(urlCalls(m)).toBe(2);
+    });
+
+    // A partial answer is not evidence the instance is unhealthy — the query was
+    // too big for its timeout, and it would fail the same way on the fallback.
+    // Latching would ship that query to a public server and cost five minutes of
+    // local for nothing (same reasoning as BodyTooLargeError).
+    test('a remark does not latch local down', async () => {
+        installFetch({ local: [timedOut(), timedOut(), timedOut()] });
+        const p = runOverpassQuery(QUERY);
+        const assertion = expect(p).rejects.toThrow();
+        await vi.runAllTimersAsync();
+        await assertion;
+        expect(isLocalDown()).toBe(false);
+    });
+
+    test('an answer with no remark is unaffected', async () => {
+        installFetch({ local: [okJson({ elements: [{ type: 'node', id: 7, lat: 61, lon: 25 }] })] });
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+        await expect(p).resolves.toHaveLength(1);
+    });
+
+    // An empty-but-clean answer is a real "nothing here", not a failure — the
+    // frontend's "nothing nearby, using a random point" path depends on it.
+    test('an empty answer with no remark still resolves as an empty pool', async () => {
+        installFetch({ local: [okJson({ elements: [] })] });
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+        await expect(p).resolves.toEqual([]);
     });
 });

@@ -27,6 +27,14 @@ function envPositiveInt(name: string, fallback: number): number {
 //         (by cachedAt) first. Entry count alone left 500 × ~30k-point sets
 //         free to grow toward a gigabyte.
 const CACHE_TTL_MS = envPositiveInt('CACHE_TTL_MS', 30 * 24 * 60 * 60 * 1000);
+// An empty answer is cached like any other — a genuinely bare area shouldn't
+// re-hit Overpass on every request — but it is also what a mid-diff-update or
+// half-loaded instance returns, and at 30 days one transient empty pins
+// "nothing near you" on that start for a month. 15 minutes is long enough to
+// absorb a re-roll burst and short enough that the next diff cycle (hourly)
+// clears it. Derived from the entry's own length rather than stored as a flag,
+// so it applies retroactively to empties already in the on-disk snapshot.
+const CACHE_EMPTY_TTL_MS = envPositiveInt('CACHE_EMPTY_TTL_MS', 15 * 60 * 1000);
 const CACHE_MAX_ENTRIES = envPositiveInt('CACHE_MAX_ENTRIES', 500);
 const CACHE_MAX_POINTS = envPositiveInt('CACHE_MAX_POINTS', 1_000_000);
 const CACHE_SAVE_DEBOUNCE_MS = envPositiveInt('CACHE_SAVE_DEBOUNCE_MS', 2000);
@@ -45,6 +53,17 @@ let totalPoints = 0;
 let generation = 0;
 let savedGeneration = 0;
 let saving: Promise<void> | null = null;
+
+// How long this entry stays fresh. Empty sets get the short TTL; see
+// CACHE_EMPTY_TTL_MS. The only freshness rule in the module — readFresh and
+// prune both go through it, so the two enforcement points cannot diverge.
+function ttlFor(entry: Entry): number {
+    return entry.junctions.length === 0 ? CACHE_EMPTY_TTL_MS : CACHE_TTL_MS;
+}
+
+function isExpired(entry: Entry, now: number): boolean {
+    return now - entry.cachedAt > ttlFor(entry);
+}
 
 export function setEntry(key: string, entry: Entry): void {
     const prev = store.get(key);
@@ -139,7 +158,7 @@ export function bumpAndSave(): void {
 export function readFresh(key: string): Entry | undefined {
     const entry = store.get(key);
     if (!entry) return undefined;
-    if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+    if (isExpired(entry, Date.now())) {
         deleteEntry(key);
         bumpAndSave();
         return undefined;
@@ -156,7 +175,7 @@ export function readFresh(key: string): Entry | undefined {
 export function prune(now: number): number {
     let removed = 0;
     for (const [k, v] of store) {
-        if (now - v.cachedAt > CACHE_TTL_MS) { deleteEntry(k); removed++; }
+        if (isExpired(v, now)) { deleteEntry(k); removed++; }
     }
     if (store.size <= CACHE_MAX_ENTRIES && totalPoints <= CACHE_MAX_POINTS) return removed;
     const byAge = [...store.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt);

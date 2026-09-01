@@ -14,9 +14,18 @@ const ELEVATION_TIMEOUT_MS = 10000;
 
 // Vertex indices sent to Open-Meteo: every `step` along the polyline, plus the
 // last vertex so the series always covers the full path.
+//
+// maxPts is a hard Open-Meteo limit, not a preference — over it the API 400s
+// ("must not exceed 100 coordinates") and fetchElevations returns null, so the
+// chart silently vanishes. Two things keep the count under it: routes at or
+// below the cap go 1:1 (no interpolation error for free), and above it the step
+// divides by maxPts-1 so the loop yields at most maxPts-1 indices, leaving room
+// for the appended final vertex. Dividing by maxPts instead — with floor, worse
+// still — overshoots: n=161 gave step 1 and all 161 vertices.
 function sampleRouteIndices(n, maxPts = 100) {
     if (n <= 0) return [];
-    const step = Math.max(1, Math.floor(n / maxPts));
+    if (n <= maxPts) return Array.from({ length: n }, (_, i) => i);
+    const step = Math.ceil(n / (maxPts - 1));
     const indices = [];
     for (let i = 0; i < n; i += step) indices.push(i);
     if (indices[indices.length - 1] !== n - 1) indices.push(n - 1);
