@@ -1,11 +1,10 @@
 // @vitest-environment node
 /**
  * Tests for geo-utils.js — haversineKm / haversineM plus the km→degree
- * projection (kmToDegLat / kmToDegLng / bboxAround). Finding #7589: the
- * projection helpers back osrm.js's corridor padding (and, until the Overpass
- * queries moved server-side, the radius bboxes too). The deleted
- * overpass-parse.test.js only asserted the query contained bboxAround(...) —
- * a tautology if the 111 km/deg formula drifted. These assert the numbers.
+ * projection (kmToDegLat / kmToDegLng). Finding #7589: the projection helpers
+ * back osrm.js's corridor padding. The deleted overpass-parse.test.js only
+ * asserted the query contained a bbox string — a tautology if the 111 km/deg
+ * formula drifted. These assert the numbers.
  *
  * Loading: geo-utils.js is a non-module browser script, loaded via
  * helpers/load.js's loadScripts('geo-utils'); the script's explicit
@@ -94,20 +93,5 @@ describe('kmToDegLng', () => {
 
     test('at the equator lng pad equals lat pad (cos(0°)=1)', () => {
         expect(globalThis.kmToDegLng(10, 0)).toBe(globalThis.kmToDegLat(10));
-    });
-});
-
-describe('bboxAround', () => {
-    test('10 km box at 60°N, 24°E matches the 111 km/deg cache convention', () => {
-        // Overpass string "minLat,minLng,maxLat,maxLng", no spaces.
-        // latPad = 10/111; lngPad = 10/(111·cos60°) = 10/55.5.
-        const s = globalThis.bboxAround(60, 24, 10);
-        expect(s.includes(' ')).toBe(false);
-        const parts = s.split(',');
-        expect(parts).toHaveLength(4);
-        expect(Number(parts[0])).toBeCloseTo(60 - 10 / 111, 10);
-        expect(Number(parts[1])).toBeCloseTo(24 - 10 / 55.5, 10);
-        expect(Number(parts[2])).toBeCloseTo(60 + 10 / 111, 10);
-        expect(Number(parts[3])).toBeCloseTo(24 + 10 / 55.5, 10);
     });
 });

@@ -35,17 +35,7 @@ function kmToDegLng(km, lat) {
     return km / (111 * Math.cos(lat * Math.PI / 180));
 }
 
-// Overpass bbox string "minLat,minLng,maxLat,maxLng" for a square-ish box of
-// half-extent `km` centred on (centerLat, centerLng). Used by every symmetric
-// radius fetch so the corner math has exactly one source.
-function bboxAround(centerLat, centerLng, km) {
-    const latOffset = kmToDegLat(km);
-    const lngOffset = kmToDegLng(km, centerLat);
-    return `${centerLat - latOffset},${centerLng - lngOffset},${centerLat + latOffset},${centerLng + lngOffset}`;
-}
-
 globalThis.haversineKm = haversineKm;
 globalThis.haversineM = haversineM;
 globalThis.kmToDegLat = kmToDegLat;
 globalThis.kmToDegLng = kmToDegLng;
-globalThis.bboxAround = bboxAround;
