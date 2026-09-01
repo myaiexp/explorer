@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx scripts/db-migrate.ts",
     "db:reset:test": "tsx scripts/reset-test-db.ts"
   },
   "dependencies": {

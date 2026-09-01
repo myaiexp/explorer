@@ -49,6 +49,8 @@ cd server
 pnpm install
 pnpm dev               # tsx watch
 pnpm test              # vitest (runs against explorer_test, never prod)
+pnpm db:reset:test     # rebuild explorer_test from the migration chain
+pnpm db:migrate        # PROD — guarded: refuses destructive DDL from a worktree
 pnpm build             # tsc → dist/
 ```
 
