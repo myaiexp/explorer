@@ -13,10 +13,15 @@ Canonical nginx snippets, systemd units, and the shelly OSRM-foot tree for Wande
 - `explorer-api.service` — VPS unit for the cloud-backup API.
 - `wander-junctions.service` — shelly unit for junctions-cache (dedicated `wander-junctions` user, cache under `/var/lib/wander-junctions`).
 - `install-wander-junctions.sh` — idempotent shelly installer for that unit + user (finding #7755 / #7754).
+- `check-unit-drift.sh` — diffs every committed unit against the copy installed on its `# deploy-host:`. Run by `scripts/post-deploy.sh`; pinned by `tests/unit-drift.test.js`.
 - `shelly-osrm/` — self-hosted OSRM-foot service, refresh timer, and install script for the shelly box.
 - `shelly-overpass/` — self-hosted Overpass API (pinned `wiktorn/overpass-api` container over the Geofabrik Finland extract) on shelly's `127.0.0.1:5002`, the upstream `wander-junctions` queries before falling back to public Overpass. Unit + installer + its own README. Loopback-only: junctions-cache runs natively on that host and is the sole consumer.
 
 ## Unit install
+
+**A unit change is not deployed until you install it, and `check-unit-drift.sh` is what tells you.** `wander-junctions.service` ran on shelly for months as the old pre-#7755 unit — no dedicated user, cache still under `/home/shelly` — while `junctions-cache/tests/wander-junctions-service.test.ts` asserted the hardened shape and passed every run. Both were true: the test reads the *repo* copy, and `deploy` restarts a unit but never installs it. A test that reads a repo file proves the intent, never the deployment (idea #4018).
+
+So `scripts/post-deploy.sh` runs `check-unit-drift.sh` on every deploy: it diffs each `*.service`/`*.timer` under `deploy/` against `/etc/systemd/system/` on the host that unit's own `# deploy-host:` header names (`local` = VPS, otherwise an ssh destination). A unit added later joins the check automatically; one with no header **fails** rather than being skipped, since opt-in would reproduce the same silence. DRIFT and MISSING fail the hook; an unreachable host only warns, because ssh being down is not evidence about drift. It reports — installing stays deliberate, since a unit change usually wants its installer (users, state migration).
 
 `deploy` restarts `explorer-api` but does not install the unit — after editing `explorer-api.service`, `sudo cp` it to `/etc/systemd/system/` and `daemon-reload`. The `explorer` system user (`nologin`, no home) is required; `ProtectHome` must stay `tmpfs` (not `yes`) so `BindReadOnlyPaths` of the server tree remains reachable. Isolation is pinned by `server/tests/explorer-api-service.test.ts`.
 

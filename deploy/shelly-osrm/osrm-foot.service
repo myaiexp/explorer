@@ -1,3 +1,6 @@
+# deploy-host: shelly
+# Read by deploy/check-unit-drift.sh, which diffs this file against
+# /etc/systemd/system/ on that host every deploy. `local` is the VPS.
 # OSRM-foot routing service for Finland (Wander self-hosted endpoint)
 [Unit]
 Description=OSRM-foot routing service (Finland)

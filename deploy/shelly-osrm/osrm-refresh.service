@@ -1,3 +1,6 @@
+# deploy-host: shelly
+# Read by deploy/check-unit-drift.sh, which diffs this file against
+# /etc/systemd/system/ on that host every deploy. `local` is the VPS.
 # Weekly refresh of OSRM-foot Finland data set.
 [Unit]
 Description=Refresh OSRM-foot Finland data
