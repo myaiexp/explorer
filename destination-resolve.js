@@ -47,14 +47,18 @@ function randomPoolResult(startLat, startLng, straightMin, straightMax, existing
 }
 
 // Resolve the destination candidate pool for the chosen routing strategy.
-// POI/road strategies hit Overpass and fall back to a random annulus pool; 'any'
-// goes straight to a random pool. `rawLocationType` is the underlying <select>
-// value — only meaningful in the 'poi' branch, where it names the specific POI
-// key to look up. `winterMode` (roads branch) is passed in, not read from the
-// DOM. Three distinct fallbacks with accurate progress messages: a genuine fetch
-// failure (only the fetch call is in the try), a successful-but-empty response,
-// and a 'poi' key that isn't in the catalog (stale settings restore a value
-// with no matching <option>, leaving select.value === ''). Errors from
+// POI/road strategies hit the junctions-cache pool endpoints (which own the
+// Overpass call) and fall back to a random annulus pool; 'any' goes straight to
+// a random pool. `rawLocationType` is the underlying <select> value — only
+// meaningful in the 'poi' branch, where it names the specific POI key to look
+// up. `winterMode` (roads branch) is passed in, not read from the DOM. Three
+// distinct fallbacks with accurate progress messages: a genuine fetch failure
+// (only the fetch call is in the try), a successful-but-empty response, and a
+// 'poi' key that isn't in the catalog (stale settings restore a value with no
+// matching <option>, leaving select.value === ''). The service already samples
+// each pool to its own cap, so the capPool calls below are defensive rather
+// than load-bearing — the client bounds its own OSRM /table fan-out whatever a
+// server hands it. Errors from
 // capPool/pickMostNovelDestination are NOT caught here — they surface to
 // generateDestination's handler instead of being silently masked as "Overpass
 // unavailable". Returns the full pool plus an initial novelty pick:
@@ -79,26 +83,31 @@ async function resolveCandidatePool(startLat, startLng, {
         return { candidatePool, dest: pickMostNovelDestination(candidatePool, existingDests), destName: null };
     }
     if (routingStrategy === 'any_poi' || routingStrategy === 'poi') {
-        let filters, label;
+        let types, label;
         if (routingStrategy === 'any_poi') {
-            filters = POI_TYPES.map(p => p.filter);
+            // 'all' is the selector the service expands to the whole catalog —
+            // sending 13 keys would say the same thing in 13x the body and go
+            // stale the moment the two catalogs differ by one entry.
+            types = 'all';
             label = 'any POI';
         } else {
-            // One catalog lookup. fetchPOIsInRadius already wraps a scalar
-            // filter in an array, so pass poiType.filter as-is — do not
-            // wrap-then-unwrap, and do not send an empty union on a miss.
+            // One catalog lookup. The service takes catalog KEYS, never filter
+            // strings, and fetchPOIsInRadius already wraps a scalar key in an
+            // array — so pass poiType.key as-is, do not wrap-then-unwrap, and
+            // do not send an empty selection on a miss (the service 400s on
+            // one, which would surface here as "Overpass unavailable").
             const poiType = POI_TYPES.find(p => p.key === rawLocationType);
             if (!poiType) {
                 onProgress('Unknown place type, using random point…');
                 return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
             }
-            filters = poiType.filter;
+            types = poiType.key;
             label = poiType.label || 'places';
         }
         onProgress(`Searching for ${label}…`);
         let pois;
         try {
-            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, filters, onProgress);
+            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, types, onProgress);
         } catch {
             onProgress('Overpass unavailable, using random point…');
             return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);

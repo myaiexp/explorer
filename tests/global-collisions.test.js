@@ -8,9 +8,10 @@
  *
  * Caught for real while adding the public-OSRM throttle: osrm.js grew a
  * top-level `function sleep`, and because index.html loads osrm.js after
- * overpass.js, overpass.js's retry backoff would have started calling it.
- * The two implementations were identical, so nothing failed — which is
- * precisely why this needs a test rather than a code review.
+ * overpass.js, overpass.js's retry backoff (since moved server-side, along
+ * with its own `sleep`) would have started calling it. The two implementations
+ * were identical, so nothing failed — which is precisely why this needs a test
+ * rather than a code review.
  */
 import { describe, test, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -24,9 +25,15 @@ function rootScripts() {
         .filter((f) => f.endsWith('.js') && !SKIP.has(f));
 }
 
-/** Top-level `function name(` declarations — column 0 only, so nested ones don't count. */
+/**
+ * Top-level `function name(` declarations — column 0 only, so nested ones don't
+ * count. `async function` counts too: it lands on the same shared global and
+ * collides identically. Without it the scan was blind to whole files —
+ * overpass.js's fetchers are all async, so it contributed exactly one name
+ * (`sleep`) and, once that moved server-side, none at all.
+ */
 function topLevelFunctions(source) {
-    return [...source.matchAll(/^function ([A-Za-z0-9_$]+)\s*\(/gm)].map((m) => m[1]);
+    return [...source.matchAll(/^(?:async )?function ([A-Za-z0-9_$]+)\s*\(/gm)].map((m) => m[1]);
 }
 
 describe('classic-script global scope', () => {
@@ -52,7 +59,11 @@ describe('classic-script global scope', () => {
         expect(files).toContain('osrm.js');
         expect(files).toContain('overpass.js');
         expect(files.length).toBeGreaterThan(20);
+        // Any real top-level name will do; this one just has to exist, or the
+        // extractor above could return [] for every file and pass vacuously.
         expect(topLevelFunctions(readFileSync(join(ROOT, 'overpass.js'), 'utf8')))
-            .toContain('sleep');
+            .toContain('fetchPOIsInRadius');
+        expect(topLevelFunctions(readFileSync(join(ROOT, 'osrm.js'), 'utf8')))
+            .toContain('throttleSleep');
     });
 });

@@ -33,12 +33,19 @@ const POI_TYPES = POI_CATEGORIES.flatMap(c => c.pois);
 
 // Populate the destination-type select: the three routing strategies first, then
 // one optgroup per POI category.
+//
+// `any POI` is FIRST, which makes it the default for a browser with nothing
+// saved — it produces the most interesting walks, and it is the reason the
+// self-hosted Overpass instance exists (it is the most expensive query in the
+// catalog, a 26-statement union). Reordering only reaches new installs:
+// settings.js restores poiType with skipEmpty, so an existing saved 'any'
+// survives untouched. The one-time migration in settings.js is the other half.
 (function populateLocationTypeSelect() {
     const sel = document.getElementById('locationTypeSelect');
     if (!sel) return;
+    sel.add(new Option('any POI', 'any_poi'));
     sel.add(new Option('location (anywhere)', 'any'));
     sel.add(new Option('road', 'roads'));
-    sel.add(new Option('any POI', 'any_poi'));
     for (const cat of POI_CATEGORIES) {
         const group = document.createElement('optgroup');
         group.label = cat.group;

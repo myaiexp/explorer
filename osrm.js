@@ -22,12 +22,12 @@ const SELF_HOSTED_RETRY_MS = 5 * 60 * 1000;
 // Minimum spacing between consecutive requests to the public fallback.
 const PUBLIC_MIN_GAP_MS = 1100;
 
-// osrm.js has no sleep of its own (overpass.js's isn't in this file's
-// SCRIPT_DEPS), so a tiny local one backs the public-fallback throttle.
-// NOT named `sleep`: these are classic scripts sharing one global scope, and
-// osrm.js loads after overpass.js — a second top-level `function sleep` would
-// redefine the global and hand overpass.js's retry backoff this function
-// instead of its own. Identical today, a silent bug the day either diverges.
+// A tiny local sleep backs the public-fallback throttle. NOT named `sleep`:
+// these are classic scripts sharing one global scope, so a bare `sleep` here
+// would silently redefine any other file's. overpass.js used to own one for its
+// Overpass retry backoff (that loop is server-side now, so the collision is
+// gone) — the specific name is retired, the hazard is not.
+// tests/global-collisions.test.js is the enforcement.
 function throttleSleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 // ── Self-hosted-down latch + public-fallback throttle ──────────────────────

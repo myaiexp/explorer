@@ -37,7 +37,43 @@ function saveSettings() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+// `any POI` replaced `location (anywhere)` as the default destination type.
+// Reordering the <select> alone reaches nobody who has used the app: poiType is
+// restored with skipEmpty, so an existing saved 'any' survives and nothing
+// visibly changes. This rewrites that stored value ONCE.
+//
+// The flag is what makes it once rather than permanent. Without it, a user who
+// reads the new default and deliberately picks "anywhere" back gets overridden
+// on their next reload, forever. It is set even when there is nothing to
+// migrate — a fresh install that later picks 'any' must not be migrated on the
+// following load.
+//
+// The rewrite is PERSISTED, not applied in memory. Setting the flag while
+// leaving 'any' on disk would suppress re-migration against a value that was
+// never corrected, so the next untouched reload silently reverts.
+const ANY_POI_MIGRATION_KEY = 'walk_migrated_any_poi';
+
+function migrateAnyToAnyPoi() {
+    if (localStorage.getItem(ANY_POI_MIGRATION_KEY)) return;
+    let settings;
+    try {
+        settings = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+    } catch {
+        // A corrupt blob has nothing to migrate and restoreSettings is about to
+        // ignore it anyway. Still mark the migration done, so a value saved
+        // after the blob is rewritten is treated as a deliberate choice.
+        localStorage.setItem(ANY_POI_MIGRATION_KEY, '1');
+        return;
+    }
+    if (settings && settings.poiType === 'any') {
+        settings.poiType = 'any_poi';
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    }
+    localStorage.setItem(ANY_POI_MIGRATION_KEY, '1');
+}
+
 function restoreSettings() {
+    migrateAnyToAnyPoi();
     // Only the parse is guarded — corrupt localStorage JSON is external data we
     // tolerate. The DOM application below runs OUTSIDE the catch so a drifted
     // element id (getElementById → null) throws loudly instead of silently
@@ -75,3 +111,4 @@ function initSettingsListeners() {
 globalThis.saveSettings = saveSettings;
 globalThis.restoreSettings = restoreSettings;
 globalThis.initSettingsListeners = initSettingsListeners;
+globalThis.ANY_POI_MIGRATION_KEY = ANY_POI_MIGRATION_KEY;

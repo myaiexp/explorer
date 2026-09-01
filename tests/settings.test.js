@@ -26,6 +26,7 @@ const FORM_HTML = `
     <option value="park">park</option>
     <option value="cafe">cafe</option>
     <option value="any">any</option>
+    <option value="any_poi">any POI</option>
   </select>
   <input id="spreadSlider" type="range" min="0" max="100" value="50">
   <input type="checkbox" id="winterMode">
@@ -136,6 +137,78 @@ describe('restoreSettings', () => {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...NON_DEFAULTS, smartRouting: true }));
         expect(() => restoreSettings()).not.toThrow();
         expect(readForm()).toEqual(NON_DEFAULTS);
+    });
+});
+
+// `any POI` replaced `location (anywhere)` as the default destination type.
+// Reordering the <select> only reaches new installs — poiType restores with
+// skipEmpty, so an existing saved 'any' would survive untouched. These pin the
+// one-time migration that is the other half of the change.
+describe('any → any_poi one-time migration', () => {
+    test('a stored poiType of "any" migrates to any_poi on first restore', () => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...NON_DEFAULTS, poiType: 'any' }));
+        restoreSettings();
+        expect(document.getElementById('locationTypeSelect').value).toBe('any_poi');
+    });
+
+    // The migration must correct the STORED blob, not just what lands in the
+    // DOM. An implementation that rewrites the in-memory value while still
+    // setting the one-time flag passes every other test here, then silently
+    // reverts to 'any' on the next untouched reload — the flag suppresses
+    // re-migration against a value that was never corrected.
+    test('the migrated value is PERSISTED, not just applied to the DOM', () => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...NON_DEFAULTS, poiType: 'any' }));
+        restoreSettings();
+        expect(stored().poiType).toBe('any_poi');
+    });
+
+    test('the migration does not re-fire — re-picking "any" afterwards survives a reload', () => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...NON_DEFAULTS, poiType: 'any' }));
+        restoreSettings();
+        expect(stored().poiType).toBe('any_poi');
+
+        // The user reads the new default and deliberately picks "anywhere" back.
+        applyForm({ ...NON_DEFAULTS, poiType: 'any' });
+        saveSettings();
+        expect(stored().poiType).toBe('any');
+
+        // Reload. Without the flag this would override their choice, forever.
+        restoreSettings();
+        expect(stored().poiType).toBe('any');
+        expect(document.getElementById('locationTypeSelect').value).toBe('any');
+    });
+
+    test('a stored poiType of "cafe" is untouched by the migration', () => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...NON_DEFAULTS, poiType: 'cafe' }));
+        restoreSettings();
+        expect(stored().poiType).toBe('cafe');
+        expect(document.getElementById('locationTypeSelect').value).toBe('cafe');
+    });
+
+    test('a corrupt settings blob does not throw during migration', () => {
+        localStorage.setItem(SETTINGS_KEY, '{not json');
+        expect(() => restoreSettings()).not.toThrow();
+        expect(readForm()).toEqual(DEFAULTS);
+    });
+
+    // A browser that has never used the app has nothing to migrate, but must
+    // still be marked done: otherwise a deliberate 'any' saved afterwards gets
+    // migrated on the following load.
+    test('a fresh install marks the migration done with nothing stored', () => {
+        expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
+        restoreSettings();
+        expect(localStorage.getItem(ANY_POI_MIGRATION_KEY)).toBeTruthy();
+
+        applyForm({ ...DEFAULTS, poiType: 'any' });
+        saveSettings();
+        restoreSettings();
+        expect(stored().poiType).toBe('any');
+    });
+
+    test('the migration flag is set after a real migration too', () => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({ poiType: 'any' }));
+        restoreSettings();
+        expect(localStorage.getItem(ANY_POI_MIGRATION_KEY)).toBeTruthy();
     });
 });
 
