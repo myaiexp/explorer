@@ -79,3 +79,7 @@ Dominant convention, not a hard rule:
 The `.unit.` marker keeps same-named unit/integration pairs distinct at a glance (`sections.unit.test.ts` vs `sections.test.ts`). Import's unit file is `src/routes/import-validators.unit.test.ts`, not `import.unit.test.ts` — it covers the extracted validators, while `server/tests/import.test.ts` is the real-DB route.
 
 A few files under `server/tests/` are DB-free: `username.test.ts` stubs db; `rate-limit-buckets.test.ts` mounts middleware with no Postgres; `test-db.test.ts` pins the `*_test` URL guard (finding #7777). Wordlists vs the client `USERNAME_RE` live in `src/username.unit.test.ts` (finding #7778).
+
+### Type-checking
+
+`cd server && tsc --noEmit` covers `src/`, `tests/` **and** `scripts/` — the default config is the wide, no-emit one so the command a session already types is the complete one. `pnpm build` uses the narrow `tsconfig.build.json` (src only, rooted so the entry lands at `dist/index.js`). Don't reverse that: when `src/**/*` was the *default* include, `tsc --noEmit` reported clean while two real errors sat in `tests/`, and vitest could not catch them because esbuild strips types without checking them (idea #4045). `tests/typecheck-coverage.test.ts` fails if either config drifts back.
