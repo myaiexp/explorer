@@ -58,12 +58,19 @@ describe('POI_TYPES catalog', () => {
 });
 
 describe('populateLocationTypeSelect', () => {
-    test('emits any/roads/any_poi then one optgroup per category', () => {
+    // any_poi is FIRST, so a browser with nothing saved defaults to it. The
+    // other half of that change is the one-time any → any_poi migration in
+    // settings.js, which is what reaches browsers that already have a value.
+    test('a fresh install defaults the select to any_poi', () => {
+        expect(document.getElementById('locationTypeSelect').value).toBe('any_poi');
+    });
+
+    test('emits any_poi/any/roads then one optgroup per category', () => {
         const sel = document.getElementById('locationTypeSelect');
         const direct = [...sel.children]
             .filter((n) => n.tagName === 'OPTION')
             .map((o) => o.value);
-        expect(direct).toEqual(['any', 'roads', 'any_poi']);
+        expect(direct).toEqual(['any_poi', 'any', 'roads']);
 
         const groups = [...sel.querySelectorAll('optgroup')];
         expect(groups.map((g) => g.label)).toEqual(GROUPS);
@@ -76,12 +83,12 @@ describe('populateLocationTypeSelect', () => {
         }
 
         expect([...sel.options].map((o) => o.value))
-            .toEqual(['any', 'roads', 'any_poi', ...POI_TYPES.map((p) => p.key)]);
+            .toEqual(['any_poi', 'any', 'roads', ...POI_TYPES.map((p) => p.key)]);
     });
 
     test('every strategy and catalog key is a selectable option', () => {
         const sel = document.getElementById('locationTypeSelect');
-        for (const value of ['any', 'roads', 'any_poi', ...POI_TYPES.map((p) => p.key)]) {
+        for (const value of ['any_poi', 'any', 'roads', ...POI_TYPES.map((p) => p.key)]) {
             sel.value = value;
             expect(sel.value).toBe(value);
         }
