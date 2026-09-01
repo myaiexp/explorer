@@ -28,7 +28,7 @@ describe('deploy/wander-junctions.service sandbox (finding #7755)', () => {
         expect(unit).toMatch(/^ProtectHome=tmpfs$/m);
         expect(unit).toMatch(/^PrivateTmp=yes$/m);
         expect(unit).toMatch(/^NoNewPrivileges=yes$/m);
-        expect(unit).toMatch(/BindReadOnlyPaths=\/home\/shelly\/Projects\/explorer\/junctions-cache/);
+        expect(unit).toMatch(/BindReadOnlyPaths=\/home\/shelly\/Projects\/wander\/junctions-cache/);
         expect(unit).toMatch(/^RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6$/m);
     });
 
