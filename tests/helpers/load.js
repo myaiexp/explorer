@@ -71,6 +71,9 @@ export const SCRIPT_DEPS = {
     // list it via the reverse-completeness check and clobber those stubs.
     'route-view':   ['session-state', 'geometry', 'result-panel'],
     'visits-io':    ['visit-shape'],
+    // The synced-down trip rows go through the same normalizeVisit gate an
+    // uploaded backup file does (#2735), so visit-shape must load first.
+    'sync-sections': ['visit-shape'],
     'sync':         ['sync-flush', 'sync-sections', 'sync-init'],
     // The state machine reads the section helpers directly (mergeSection /
     // populateSection / wipeSections), so it needs them loaded too.

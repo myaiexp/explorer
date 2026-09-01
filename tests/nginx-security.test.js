@@ -132,6 +132,48 @@ describe('deploy/nginx-explorer.conf API proxy (finding #7582)', () => {
 });
 
 
+describe('CSP img-src covers every tile host map-view.js can request', () => {
+    // Sibling of the connect-src scan below, and of the same failure shape:
+    // a tile host the CSP does not list is refused with only a console
+    // violation — the map turns grey and nothing throws. `{s}` is the sharp
+    // case: `https://*.tile.openstreetmap.org` matches `a.tile...` but NOT
+    // the bare `tile.openstreetmap.org`, so dropping Leaflet's deprecated
+    // subdomain placeholder (which OSM operations and Leaflet's own docs now
+    // steer clients toward) blanks every tile. Both forms are allowed so the
+    // switch is a one-line edit in map-view.js, not a silent outage.
+    const conf = readDeploy('nginx-explorer.conf');
+    const staticBlock = conf.split(/location \/explorer\s*\{/)[1] ?? '';
+    const csp = (staticBlock.match(/add_header\s+Content-Security-Policy\s+"([^"]+)"/) || [])[1] ?? '';
+    const imgSrc = (csp.match(/img-src ([^;]*)/) || [])[1] ?? '';
+
+    function tileHosts() {
+        const src = readFileSync(resolve(ROOT, 'map-view.js'), 'utf8');
+        return [...new Set(
+            [...src.matchAll(/L\.tileLayer\(\s*'https:\/\/([^/']+)/g)].map((m) => m[1])
+        )];
+    }
+
+    test('every tile host is allowed by img-src, with and without {s}', () => {
+        const missing = [];
+        for (const host of tileHosts()) {
+            // `{s}.example.org` needs the wildcard for Leaflet's a/b/c
+            // expansion AND the bare host for the no-placeholder form.
+            const bare = host.replace(/^\{s\}\./, '');
+            const needed = host === bare ? [`https://${bare}`] : [`https://*.${bare}`, `https://${bare}`];
+            for (const token of needed) {
+                if (!imgSrc.split(/\s+/).includes(token)) missing.push(`${token} (${host})`);
+            }
+        }
+        expect(missing).toEqual([]);
+    });
+
+    test('the scan sees real tile layers, so it cannot pass vacuously', () => {
+        expect(imgSrc).not.toBe('');
+        expect(tileHosts()).toContain('{s}.tile.openstreetmap.org');
+        expect(tileHosts()).toContain('server.arcgisonline.com');
+    });
+});
+
 describe('CSP connect-src covers every host the app actually fetches', () => {
     // The public-OSRM fallback shipped inert: osrm.js fetched
     // routing.openstreetmap.de, connect-src did not list it, and the browser

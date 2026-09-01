@@ -11,7 +11,7 @@
 import { describe, test, expect, vi } from 'vitest';
 import {
     installSyncLifecycle, loadSync, setLocation, setLocalStorage,
-    mockFetch, drainFlushPump, setupAnonymous, setupAccepted,
+    mockFetch, drainFlushPump, setupAnonymous, setupAccepted, serverTrip,
 } from './helpers/sync-harness.js';
 installSyncLifecycle();
 
@@ -42,7 +42,7 @@ describe('ExplorerSync.init', () => {
         setLocalStorage({});
         mockFetch({
             '/explorer/api/rugged-pine-42': {
-                visits: [{ id: '1', updatedAt: '2024-01-01T00:00:00Z' }],
+                visits: [serverTrip({ updatedAt: '2024-01-01T00:00:00Z' })],
                 favorites: [], savedLocations: [], history: [],
             },
         });
@@ -145,13 +145,13 @@ describe('ExplorerSync.init', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         mockFetch({
             '/explorer/api/rugged-pine-42': {
-                visits: [{ id: 'server-1' }], favorites: [], savedLocations: [], history: [],
+                visits: [serverTrip({ id: 'server-1' })], favorites: [], savedLocations: [], history: [],
             },
         });
         loadSync();
         await window.ExplorerSync.init();
         expect(window.ExplorerSync.getState().state).toBe('accepted');
-        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'server-1' }]);
+        expect(JSON.parse(localStorage.getItem('walk_visits')).map((v) => v.id)).toEqual(['server-1']);
     });
 
     test('declined flag with no URL segment stays declined', async () => {
@@ -296,7 +296,7 @@ describe('init Case 2 merge fires state-change so the UI re-renders', () => {
 
     test('own-device merge dispatches explorer-sync-state-change on success', async () => {
         setupCase2({
-            visits: [{ id: 'server-1', updatedAt: '2024-06-01T00:00:00Z' }],
+            visits: [serverTrip({ id: 'server-1', updatedAt: '2024-06-01T00:00:00Z' })],
             favorites: [], savedLocations: [], history: [],
         });
         const eventSpy = vi.fn();
