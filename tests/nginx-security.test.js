@@ -25,7 +25,9 @@ function readDeploy(name) {
  * them apart.
  */
 function blockFor(conf, path) {
-    const escaped = path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    // Spaces in a matcher (`^~ /explorer/`, `= /explorer`) become \s+ so the
+    // lookup does not depend on the file's exact spacing.
+    const escaped = path.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/ +/g, '\\s+');
     const open = new RegExp(`location\\s+${escaped}\\s*\\{`, 'g');
     const m = open.exec(conf);
     if (!m) return '';
@@ -108,21 +110,18 @@ describe('deploy/nginx-wander-headers.conf (finding #7059)', () => {
     });
 });
 
-describe('deploy/nginx-wander.conf static blocks', () => {
+describe('deploy/nginx-wander.conf static block', () => {
     const conf = readDeploy('nginx-wander.conf');
 
-    // nginx add_header is all-or-nothing per context, so a block that grew its
-    // own copy of the header set would silently shadow the shared one — the
-    // weaker of the two wins for whoever is using that prefix, with no error.
-    test.each(['/wander', '/explorer'])('%s includes the shared header snippet and carries no add_header of its own', (path) => {
-        const block = blockFor(conf, path);
+    test('/wander serves the wander webroot and includes the shared header snippet', () => {
+        const block = blockFor(conf, '/wander');
         expect(block).not.toBe('');
+        expect(block).toMatch(/alias\s+\/var\/www\/html\/wander;/);
         expect(block).toMatch(/include\s+\S*wander-headers\.conf;/);
+        // nginx add_header is all-or-nothing per context: a block that grew its
+        // own copy would silently shadow the shared set, and the weaker of the
+        // two would win for whoever hit that block, with no error anywhere.
         expect(directivesOf(block)).not.toMatch(/add_header/);
-    });
-
-    test.each(['/wander', '/explorer'])('%s serves the wander webroot', (path) => {
-        expect(blockFor(conf, path)).toMatch(/alias\s+\/var\/www\/html\/wander;/);
     });
 
     // Cloud-backup links are /<prefix>/<username>#t=<token>. Dropping try_files
@@ -133,16 +132,50 @@ describe('deploy/nginx-wander.conf static blocks', () => {
         expect(blockFor(conf, '/wander')).toMatch(/^\s*try_files\s+\$uri\s+\$uri\/\s+\/wander\/index\.html;/m);
     });
 
-    test('/explorer falls back to its own index so the SPA still boots on the old path', () => {
-        expect(blockFor(conf, '/explorer')).toMatch(/^\s*try_files\s+\$uri\s+\$uri\/\s+\/explorer\/index\.html;/m);
-    });
-
     test('blockFor tells the static block from its API sibling', () => {
         // Guards the helper itself: `location /wander` is a prefix of
         // `location /wander/api/`, and the old split-on-substring approach
         // matched the wrong one.
         expect(blockFor(conf, '/wander')).toMatch(/alias/);
         expect(blockFor(conf, '/wander')).not.toMatch(/proxy_pass/);
+    });
+});
+
+describe('deploy/nginx-wander.conf legacy /explorer prefix', () => {
+    const conf = readDeploy('nginx-wander.conf');
+
+    test('everything under /explorer/ is re-matched as /wander/, internally', () => {
+        // A REWRITE, not a redirect: the browser URL must stay put so the
+        // #t=<token> fragment and the username in the path reach the SPA
+        // exactly as sent, with no dependence on client redirect behaviour
+        // for a credential.
+        const block = blockFor(conf, '^~ /explorer/');
+        expect(block).not.toBe('');
+        expect(block).toMatch(/rewrite\s+\^\/explorer\/\(\.\*\)\$\s+\/wander\/\$1\s+last;/);
+        expect(directivesOf(block)).not.toMatch(/return\s+30[12]/);
+    });
+
+    test('the legacy prefix is ^~, so the regex asset locations cannot outrank it', () => {
+        // This is the whole bug the rewrite replaced. A regex location beats a
+        // prefix location, so the vhost's `location ~* \.(css|js|…)$` blocks
+        // won against a plain `location /explorer` — meaning /explorer/sync.js
+        // was never served by the /explorer block at all, only ever from the
+        // server-level root, and 404'd the moment the webroot was renamed.
+        // Drop the ^~ and the legacy prefix serves an HTML shell with no
+        // scripts: HTTP 200, blank app, nothing in any log.
+        expect(conf).toMatch(/location\s+\^~\s+\/explorer\/\s*\{/);
+    });
+
+    test('bare /explorer redirects — it carries no username and no fragment', () => {
+        expect(blockFor(conf, '= /explorer')).toMatch(/return\s+301\s+\/wander\/;/);
+    });
+
+    test('the legacy prefix owns no headers, no alias and no proxy of its own', () => {
+        // Everything it needs it gets by being re-matched into the /wander
+        // blocks. A second copy of the CSP or the proxy pins is exactly the
+        // drift this structure exists to make impossible.
+        const block = directivesOf(blockFor(conf, '^~ /explorer/'));
+        expect(block).not.toMatch(/add_header|alias|proxy_pass|try_files/);
     });
 });
 
@@ -182,13 +215,14 @@ describe('deploy/nginx-junctions.conf (finding #7559)', () => {
     });
 });
 
-describe('deploy/nginx-wander.conf API proxies (finding #7582)', () => {
+describe('deploy/nginx-wander.conf API proxy (finding #7582)', () => {
     const conf = readDeploy('nginx-wander.conf');
 
-    // Both proxies are pinned, not just the canonical one: /wander/api/ is
-    // permanent, so a rate-limit or XFF regression there is just as live.
-    test.each(['/wander/api/', '/wander/api/'])('%s is pinned to the wander-api upstream, rate-limited, and does not trust client XFF', (path) => {
-        const block = blockFor(conf, path);
+    // One proxy block, not two. /explorer/api/ is permanent, but it reaches
+    // this same block through the legacy-prefix rewrite, so its rate limit and
+    // XFF overwrite cannot drift away from the canonical prefix's.
+    test('/wander/api/ is pinned to the wander-api upstream, rate-limited, and does not trust client XFF', () => {
+        const block = blockFor(conf, '/wander/api/');
         expect(block).not.toBe('');
         expect(block).toMatch(/^\s*limit_req\s+zone=api\s+burst=10\s+nodelay;/m);
         expect(block).toMatch(/^\s*proxy_pass\s+http:\/\/127\.0\.0\.1:3700\/api\/;/m);
