@@ -17,7 +17,17 @@ Overrides live in those `pnpm-workspace.yaml` files rather than a `pnpm` key in 
 
 ## Test DB safety
 
-The server suite calls `truncateAll()` in `beforeEach`, so it must never touch the prod `explorer` DB. `server/tests/test-db.ts` resolves the connection: it derives the DB name from `.env`'s `DATABASE_URL` (or an explicit `TEST_DATABASE_URL`), forces the name to `*_test`, and **hard-throws** unless it ends in `_test` — so a prod-pointing `.env` (Helm copies it into worktrees) can never be truncated. `server/vitest.config.ts` sets `fileParallelism: false` because every DB-backed file shares the one `explorer_test` DB and would otherwise race on truncate. To recreate the test DB on a fresh box: `createdb explorer_test` (owner `explorer`), then apply migrations against it (`DATABASE_URL=postgresql://explorer:…@localhost:5432/explorer_test pnpm db:migrate`).
+The server suite calls `truncateAll()` in `beforeEach`, so it must never touch the prod `explorer` DB. `server/tests/test-db.ts` resolves the connection: it derives the DB name from `.env`'s `DATABASE_URL` (or an explicit `TEST_DATABASE_URL`), forces the name to `*_test`, and **hard-throws** unless it ends in `_test` — so a prod-pointing `.env` (Helm copies it into worktrees) can never be truncated. `server/vitest.config.ts` sets `fileParallelism: false` because every DB-backed file shares the one `explorer_test` DB and would otherwise race on truncate. That only serializes files inside one vitest process — two *worktrees* running the suite at once still collide on the same `explorer_test`, which reads as scattered FK violations and deadlocks (idea #4042).
+
+### Migrating the test DB
+
+```bash
+cd server && pnpm db:reset:test   # drop, replay every migration, stamp the journal
+```
+
+The suite never migrates — it assumes the schema is already there. `tests/migrations.test.ts` is what stops that assumption going stale: it compares `drizzle.__drizzle_migrations` in the live test DB against `drizzle/meta/_journal.json` (same tags, same order, same sha256 per `.sql`), so a migration you generated but never applied to `explorer_test` fails the suite instead of silently letting it assert against last month's columns.
+
+`db:reset:test` is the fix in both directions — after `pnpm db:generate`, and on a fresh box after `createdb explorer_test` (owner `explorer`). It goes through `resolveTestDatabaseUrl()`, so the same `_test`-suffix hard-throw that protects `truncateAll` protects the DROP. Plain `pnpm db:migrate` targets `.env`'s `DATABASE_URL` — **production** — and is the deploy chain's job, not a test step.
 
 ## Frontend loader
 

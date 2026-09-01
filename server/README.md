@@ -8,8 +8,13 @@ and exposed via nginx at `/explorer/api/*`. Production runs Node 24
 pnpm install
 pnpm dev               # tsx watch src/index.ts
 pnpm test              # vitest against explorer_test, never prod
+pnpm db:reset:test     # rebuild explorer_test from the migration chain
 pnpm build             # tsc → dist/
 ```
+
+`pnpm db:migrate` targets `.env`'s `DATABASE_URL` — production. Use
+`db:reset:test` for the test DB; it resolves the same guarded `*_test` URL the
+suite uses, so it cannot point at prod.
 
 `src/app.ts` is the factory (`createApp(db)`). `src/index.ts` opens Postgres
 and `serve()`s. pnpm layout, DB safety, and the unit vs integration split:
