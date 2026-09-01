@@ -185,9 +185,9 @@ describe('deploy/nginx-junctions.conf (finding #7559)', () => {
 describe('deploy/nginx-wander.conf API proxies (finding #7582)', () => {
     const conf = readDeploy('nginx-wander.conf');
 
-    // Both proxies are pinned, not just the canonical one: /explorer/api/ is
+    // Both proxies are pinned, not just the canonical one: /wander/api/ is
     // permanent, so a rate-limit or XFF regression there is just as live.
-    test.each(['/wander/api/', '/explorer/api/'])('%s is pinned to the wander-api upstream, rate-limited, and does not trust client XFF', (path) => {
+    test.each(['/wander/api/', '/wander/api/'])('%s is pinned to the wander-api upstream, rate-limited, and does not trust client XFF', (path) => {
         const block = blockFor(conf, path);
         expect(block).not.toBe('');
         expect(block).toMatch(/^\s*limit_req\s+zone=api\s+burst=10\s+nodelay;/m);

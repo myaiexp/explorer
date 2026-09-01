@@ -40,7 +40,7 @@ describe('restoreSections failure', () => {
         // sync-sections.test.js, but every section write throws — apply fails
         // (so the wipe must roll back) AND restoreSections's raw setItem fails
         // too. That is the remaining data-loss path.
-        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({
             walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
             walk_visits: JSON.stringify([{ id: 'local-v' }]),
@@ -48,7 +48,7 @@ describe('restoreSections failure', () => {
         });
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         mockFetch({
-            '/explorer/api/mossy-fern-7': {
+            '/wander/api/mossy-fern-7': {
                 visits: [{ id: 'server-v' }], favorites: [], savedLocations: [], history: [],
             },
         });

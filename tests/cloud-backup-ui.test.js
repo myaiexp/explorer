@@ -141,8 +141,8 @@ describe('showConsentToast', () => {
 
     test('Accept success settles accepted and does not persist declined', async () => {
         mockFetch({
-            'POST /explorer/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
-            'POST /explorer/api/rugged-pine-42/import': { status: 204 },
+            'POST /wander/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
+            'POST /wander/api/rugged-pine-42/import': { status: 204 },
         });
         const decline = vi.spyOn(window.ExplorerSync, 'decline');
         const pending = globalThis.showConsentToast();
@@ -169,7 +169,7 @@ describe('showConsentToast', () => {
     });
 
     test('Accept failure settles declined without calling ExplorerSync.decline()', async () => {
-        mockFetch({ 'POST /explorer/api/accounts': { status: 500 } });
+        mockFetch({ 'POST /wander/api/accounts': { status: 500 } });
         vi.spyOn(console, 'warn').mockImplementation(() => {});
         const decline = vi.spyOn(window.ExplorerSync, 'decline');
         const pending = globalThis.showConsentToast();
@@ -217,7 +217,7 @@ describe('copyBackupLink', () => {
         globalThis.copyBackupLink();
         expect(globalThis.closeOverflowMenuIfOpen).toHaveBeenCalled();
         expect(writeText).toHaveBeenCalledWith(
-            'https://mase.fi/explorer/rugged-pine-42#t=tok-rugged-pine-42',
+            'https://mase.fi/wander/rugged-pine-42#t=tok-rugged-pine-42',
         );
         await writeText.mock.results[0].value;
         expect(successes).toEqual([
@@ -260,7 +260,7 @@ describe('confirmDeleteCloudData', () => {
     test('confirm calls deleteAccount and toasts success', async () => {
         await setupAccepted('rugged-pine-42');
         vi.spyOn(window, 'confirm').mockReturnValue(true);
-        mockFetch({ 'DELETE /explorer/api/rugged-pine-42': { status: 204 } });
+        mockFetch({ 'DELETE /wander/api/rugged-pine-42': { status: 204 } });
         const del = vi.spyOn(window.ExplorerSync, 'deleteAccount');
         globalThis.confirmDeleteCloudData();
         expect(del).toHaveBeenCalledTimes(1);

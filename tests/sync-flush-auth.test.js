@@ -58,7 +58,7 @@ describe('auth hard-stop (audit #6223)', () => {
         const errors = [];
         globalThis.showError = (msg) => { errors.push(msg); };
         mockFetch({
-            'PUT /explorer/api/rugged-pine-42/visits/uuid-f': { status: 403 },
+            'PUT /wander/api/rugged-pine-42/visits/uuid-f': { status: 403 },
         });
         window.ExplorerSync.mutate('visits', 'put', 'uuid-f', { id: 'uuid-f' });
         await drainFlushPump();

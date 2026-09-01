@@ -56,7 +56,7 @@ export function installSyncLifecycle() {
         localStorage.clear();
         vi.restoreAllMocks();
         delete window.ExplorerSyncUI;
-        setLocation('/explorer/');
+        setLocation('/wander/');
         loadSync();
     });
 
@@ -164,16 +164,16 @@ export async function flushMicrotasks(n = 3) {
 // ── Common starting states ───────────────────────────────────────────────────
 
 export function setupAnonymous() {
-    setLocation('/explorer/');
+    setLocation('/wander/');
     setLocalStorage({});
     loadSync();
 }
 
 export async function setupAccepted(username) {
-    setLocation('/explorer/' + username);
+    setLocation('/wander/' + username);
     setLocalStorage({ walk_cloud_backup: JSON.stringify({ state: 'accepted', username, token: 'tok-' + username }) });
     mockFetch({
-        ['/explorer/api/' + username]: { visits: [], favorites: [], savedLocations: [], history: [] },
+        ['/wander/api/' + username]: { visits: [], favorites: [], savedLocations: [], history: [] },
     });
     loadSync();
     await window.ExplorerSync.init();

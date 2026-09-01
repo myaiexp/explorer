@@ -22,7 +22,12 @@
     // only a hash). See server/README.md "Client contract".
     var BACKUP_KEY = 'walk_cloud_backup';
     var USERNAME_RE = /^[a-z]+-[a-z]+-\d{1,2}$/;
-    var API_BASE = '/explorer/api';
+    // One absolute constant, deliberately NOT derived from location.pathname:
+    // a page served at /explorer/… calling /wander/api is same-origin, so the
+    // CSP's connect-src 'self' already permits it, and one constant cannot
+    // drift out of sync with the prefix it was loaded under. nginx keeps an
+    // /explorer/api/ proxy anyway, for pages loaded before the rename.
+    var API_BASE = '/wander/api';
 
     // The four synced sections + their local-data helpers live in sync-sections.js.
     var Sections = globalThis.SyncSections;
@@ -180,7 +185,7 @@
                 token: _token,
                 // Full private link (with the secret in the fragment) for cross-device access.
                 link: (_state === 'accepted' && _username && _token)
-                    ? location.origin + '/explorer/' + _username + '#t=' + _token
+                    ? location.origin + '/wander/' + _username + '#t=' + _token
                     : null,
                 outboxLength: flushWorker.length()
             };
@@ -242,7 +247,7 @@
                     _state = 'accepted';
                     _username = username;
                     // Carry the secret in the fragment so the link itself is the credential.
-                    history.replaceState(null, '', '/explorer/' + username + '#t=' + token);
+                    history.replaceState(null, '', '/wander/' + username + '#t=' + token);
                     fireStateChange();
                 }).catch(function (e) {
                     _token = null;   // roll back partial auth state if the import failed
@@ -267,7 +272,7 @@
                 _state = 'anonymous';
                 _username = null;
                 _token = null;
-                history.replaceState(null, '', '/explorer/');
+                history.replaceState(null, '', '/wander/');
                 fireStateChange();
             });
         },
