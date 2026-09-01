@@ -16,12 +16,36 @@
 // trip's (absent) return leg, which contributes 0 (there is no return). This is
 // the correct rule; displayRoute previously inlined a copy that omitted the
 // one-way guard and so double-counted one-way distances.
+//
+// `estimated` reports whether that substitution happened, so a caller never has
+// to re-derive it (idea #3807). It is true when any leg the trip mode expects is
+// missing, and it says two things about the numbers: totalWalkKm is part
+// crow-flies guess, and totalDuration counts ONLY the legs that routed — a round
+// trip with a failed return under-reports the walk time by roughly half. Neither
+// may be presented or persisted as measured.
 function computeRouteTotals(outbound, ret, straightKm, tripMode) {
     const outKm = outbound ? outbound.distance / 1000 : straightKm;
     const retKm = ret ? ret.distance / 1000 : (tripMode === 'one-way' ? 0 : straightKm);
     const totalWalkKm = outKm + retKm;
     const totalDuration = (outbound?.duration || 0) + (ret?.duration || 0);
-    return { outKm, retKm, totalWalkKm, totalDuration };
+    const estimated = !outbound || (tripMode !== 'one-way' && !ret);
+    return { outKm, retKm, totalWalkKm, totalDuration, estimated };
+}
+
+// Is this leg pair a walk that was actually routed, end to end? The one owner of
+// the persist rule for history / favorites / the cloud backup: a round trip
+// needs BOTH legs, a one-way only its outbound. Anything less has a fabricated
+// distance inside its total (see computeRouteTotals), and the persisted row
+// stores that as plain measured km with nothing marking it.
+//
+// Coords, not truthiness: a truthy leg with empty coords is a failed route in a
+// route object's clothing (finding #7926) and drew nothing on the map either.
+// computeRouteTotals deliberately stays on truthiness — restoreResult hands it a
+// zero-distance, coord-less return stub to mean "measured, contributes nothing".
+function isMeasuredWalk(outbound, ret, tripMode) {
+    if (!outbound?.coords?.length) return false;
+    if (tripMode !== 'one-way' && !ret?.coords?.length) return false;
+    return true;
 }
 
 // The eight route fields on currentSession, mapped from an outbound/return
@@ -68,5 +92,6 @@ function snapshotSession(session, extra = {}) {
 }
 
 globalThis.computeRouteTotals = computeRouteTotals;
+globalThis.isMeasuredWalk = isMeasuredWalk;
 globalThis.routeSessionFields = routeSessionFields;
 globalThis.snapshotSession = snapshotSession;

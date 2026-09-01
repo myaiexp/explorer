@@ -79,16 +79,23 @@ function syncDistanceLabel() {
 // substitutes the crow-flies distance for a missing leg — but presenting that
 // as a measured walk, with bike and car times derived from it, is the badge
 // asserting a walk that was never routed. Say straight-line instead, and drop
-// the derived estimates. (A *partial* result — round trip whose return leg
-// alone failed — is not this case and keeps today's estimate; idea #3807.)
-function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode, { noRoute = false } = {}) {
+// the derived estimates.
+//
+// `estimated` is the wider question that covers it: ANY substituted leg,
+// including the partial case (a round trip whose return alone failed), where
+// half the total is a guess and totalDuration counts only the leg that routed
+// — so the walk badge would under-report by roughly half. Idea #3807: mark the
+// distance and drop every time derived from it; only the leg count differs
+// between the two cases, so only the label does.
+function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode, { noRoute = false, estimated = noRoute } = {}) {
     const label = tripMode === 'one-way' ? 'one way' : 'round trip';
-    document.getElementById('distanceBadge').textContent = noRoute
-        ? `~${totalWalkKm.toFixed(1)} km straight line`
+    const badge = noRoute ? 'km straight line' : `km ${label} (est.)`;
+    document.getElementById('distanceBadge').textContent = estimated
+        ? `~${totalWalkKm.toFixed(1)} ${badge}`
         : `${totalWalkKm.toFixed(1)} km ${label}`;
 
     const walkEl = document.getElementById('walkBadge');
-    if (walkDurationSec > 0) {
+    if (walkDurationSec > 0 && !estimated) {
         walkEl.textContent = `🚶 ~${Math.round(walkDurationSec / 60)} min`;
         walkEl.style.display = 'inline-block';
     } else {
@@ -97,7 +104,7 @@ function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode, { noRoute 
 
     const bikeEl = document.getElementById('bikeBadge');
     const carEl  = document.getElementById('carBadge');
-    if (totalWalkKm > 0 && !noRoute) {
+    if (totalWalkKm > 0 && !estimated) {
         bikeEl.textContent = `🚲 ~${Math.round(totalWalkKm / 15 * 60)} min`;
         bikeEl.style.display = 'inline-block';
         carEl.textContent  = `🚗 ~${Math.round(totalWalkKm / 35 * 60)} min`;
@@ -158,9 +165,9 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
     }
 
     const straightKm = haversineKm(startLat, startLng, destLat, destLng);
-    const { totalWalkKm, totalDuration } =
+    const { totalWalkKm, totalDuration, estimated } =
         computeRouteTotals(outbound, ret, straightKm, tripMode);
-    updateDurationBadges(totalWalkKm, totalDuration, tripMode, { noRoute });
+    updateDurationBadges(totalWalkKm, totalDuration, tripMode, { noRoute, estimated });
 
     document.getElementById('directionsLink').href =
         buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode);

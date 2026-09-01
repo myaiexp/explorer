@@ -263,8 +263,10 @@ describe('renderRouteTail — fallbackStraight', () => {
 
     test('a later real route restores the bike and car badges', () => {
         renderRouteTail(...args(), { fallbackStraight: true });
+        // Both legs: on a round trip a lone outbound is a partial estimate, and
+        // the badges stay hidden for that too (idea #3807).
         const outbound = { coords: [[START.lat, START.lng], [DEST.lat, DEST.lng]], distance: 3200, duration: 2400 };
-        renderRouteTail(START.lat, START.lng, DEST.lat, DEST.lng, outbound, null, 'round', COLOR, { fallbackStraight: true });
+        renderRouteTail(START.lat, START.lng, DEST.lat, DEST.lng, outbound, outbound, 'round', COLOR, { fallbackStraight: true });
         expect(document.getElementById('bikeBadge').style.display).toBe('inline-block');
         expect(document.getElementById('carBadge').style.display).toBe('inline-block');
         expect(document.getElementById('distanceBadge').textContent).not.toMatch(/straight line/i);
@@ -344,6 +346,35 @@ describe('displayRoute', () => {
         // unchanged); what changed is that it no longer claims to be a walk.
         expect(document.getElementById('distanceBadge').textContent)
             .toBe(`~${(straight * 2).toFixed(1)} km straight line`);
+    });
+
+    // Idea #3807: a round trip whose return leg alone failed is half measured,
+    // half crow-flies, and its duration counts only the leg that routed. The
+    // badge used to present that total as a plain measured walk and derive bike
+    // / car times from it.
+    describe('partially estimated round trip', () => {
+        const outbound = { coords: [[START.lat, START.lng]], distance: 3200, duration: 1800 };
+
+        test('distance badge marks the total as an estimate', () => {
+            displayed({ outbound, ret: null, tripMode: 'round' });
+            const straight = haversineKm(START.lat, START.lng, DEST.lat, DEST.lng);
+            expect(document.getElementById('distanceBadge').textContent)
+                .toBe(`~${(3.2 + straight).toFixed(1)} km round trip (est.)`);
+        });
+
+        test('drops the walk / bike / car times derived from it', () => {
+            displayed({ outbound, ret: null, tripMode: 'round' });
+            expect(document.getElementById('walkBadge').style.display).toBe('none');
+            expect(document.getElementById('bikeBadge').style.display).toBe('none');
+            expect(document.getElementById('carBadge').style.display).toBe('none');
+        });
+
+        test('a fully measured round trip keeps the plain copy and the times', () => {
+            displayed({ outbound, ret: outbound, tripMode: 'round' });
+            expect(document.getElementById('distanceBadge').textContent).toBe('6.4 km round trip');
+            expect(document.getElementById('walkBadge').style.display).toBe('inline-block');
+            expect(document.getElementById('bikeBadge').style.display).toBe('inline-block');
+        });
     });
 
     test('displayRoute always requests the straight-line fallback (first render)', () => {

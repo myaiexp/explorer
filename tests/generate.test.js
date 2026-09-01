@@ -113,7 +113,9 @@ beforeEach(() => {
   };
   globalThis.saveToHistory = (session) => { saveToHistoryCalls.push(session); };
 
-  loadScripts('generate');
+  // session.js for real: the history gate is its isMeasuredWalk, a pure
+  // predicate with no collaborators of its own to clobber.
+  loadScripts('session', 'generate');
 });
 
 async function generate() {
@@ -482,6 +484,35 @@ describe('undefined-legs path (smart routing built nothing)', () => {
     await generate();
 
     expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(0);
+  });
+
+  // Idea #3807: computeRouteTotals substitutes the crow-flies distance for a
+  // missing return leg, so a round trip that only routed outbound was stored in
+  // history and the cloud backup with half its distance fabricated — presented
+  // as measured km, and with the missing leg's time dropped from the duration.
+  test('does not persist a round trip whose return leg failed', async () => {
+    buildRouteForDestination.mockResolvedValue({
+      dest: DEST, destName: 'Park',
+      outbound: OUTBOUND, return: null,
+      junctions: null, overlap: null,
+    });
+
+    await generate();
+
+    expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(0);
+  });
+
+  test('does not persist a round trip whose return leg has empty coords', async () => {
+    buildRouteForDestination.mockResolvedValue({
+      dest: DEST, destName: 'Park',
+      outbound: OUTBOUND, return: { coords: [], distance: 1, duration: 1 },
+      junctions: null, overlap: null,
+    });
+
+    await generate();
+
     expect(saveToHistoryCalls).toHaveLength(0);
   });
 

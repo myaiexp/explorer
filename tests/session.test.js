@@ -20,7 +20,9 @@ describe('computeRouteTotals', () => {
 
     test('round-trip with both legs: per-leg km + summed duration', () => {
         const t = globalThis.computeRouteTotals(OUT, RET, 5, 'round');
-        expect(t).toEqual({ outKm: 6, retKm: 5, totalWalkKm: 11, totalDuration: 6600 });
+        expect(t).toEqual({
+            outKm: 6, retKm: 5, totalWalkKm: 11, totalDuration: 6600, estimated: false,
+        });
     });
 
     // The bug fix: a one-way trip has no return leg, so retKm is 0 — NOT the
@@ -42,7 +44,57 @@ describe('computeRouteTotals', () => {
 
     test('both legs missing (round-trip): both fall back to straight-line', () => {
         const t = globalThis.computeRouteTotals(null, null, 5, 'round');
-        expect(t).toEqual({ outKm: 5, retKm: 5, totalWalkKm: 10, totalDuration: 0 });
+        expect(t).toEqual({
+            outKm: 5, retKm: 5, totalWalkKm: 10, totalDuration: 0, estimated: true,
+        });
+    });
+
+    // Idea #3807: the partial case — a round trip whose return leg alone failed
+    // — used to be indistinguishable from a fully measured one. Half the total
+    // is a crow-flies guess and totalDuration omits the missing leg entirely,
+    // so callers need to know before they render or persist it.
+    test('estimated is true when the round-trip return leg was substituted', () => {
+        expect(globalThis.computeRouteTotals(OUT, null, 5, 'round').estimated).toBe(true);
+    });
+
+    test('estimated is false for a one-way trip with an outbound leg', () => {
+        expect(globalThis.computeRouteTotals(OUT, null, 5, 'one-way').estimated).toBe(false);
+    });
+
+    test('estimated is true when only the outbound is missing', () => {
+        expect(globalThis.computeRouteTotals(null, RET, 5, 'round').estimated).toBe(true);
+    });
+});
+
+describe('isMeasuredWalk', () => {
+    const LEG = { coords: [[60, 24]], distance: 6000, duration: 3600 };
+
+    test('round trip with both legs drawn is measured', () => {
+        expect(globalThis.isMeasuredWalk(LEG, LEG, 'round')).toBe(true);
+    });
+
+    test('one-way needs only the outbound', () => {
+        expect(globalThis.isMeasuredWalk(LEG, null, 'one-way')).toBe(true);
+    });
+
+    // The persist rule this idea settles: a round trip missing its return leg
+    // is as unpersistable as one missing its outbound. Both totals are part
+    // crow-flies, and history / the cloud backup store them as measured km.
+    test('round trip missing the return leg is not measured', () => {
+        expect(globalThis.isMeasuredWalk(LEG, null, 'round')).toBe(false);
+    });
+
+    test('missing outbound is not measured', () => {
+        expect(globalThis.isMeasuredWalk(null, LEG, 'round')).toBe(false);
+    });
+
+    // Finding #7926's empty-coords stub is a failed route wearing a truthy
+    // object, at both gates this predicate replaces.
+    test('an empty-coords leg counts as absent', () => {
+        expect(globalThis.isMeasuredWalk({ coords: [], distance: 1, duration: 1 }, LEG, 'round'))
+            .toBe(false);
+        expect(globalThis.isMeasuredWalk(LEG, { coords: [], distance: 1, duration: 1 }, 'round'))
+            .toBe(false);
     });
 });
 

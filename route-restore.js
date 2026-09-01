@@ -31,10 +31,10 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         poiCategory: poiCategory ?? null,
     });
     session.junctions = r.junctions;
-    // Same gate as generateDestination: a dest with no outbound leg (or an
-    // empty-coords stub) is a dashed straight-line fallback, not a walkable
-    // route worth persisting (finding #7926).
-    if (r.outbound?.coords?.length) saveToHistory(session);
+    // Same gate as generateDestination, same owner: a trip missing a leg the
+    // mode expects has a crow-flies stand-in inside its total, and persisting
+    // that stores a guess as measured km (session.js isMeasuredWalk).
+    if (isMeasuredWalk(r.outbound, r.return, tripMode)) saveToHistory(session);
 }
 
 // Re-display a stored history/favorite entry. Lives here rather than in
@@ -62,7 +62,16 @@ function restoreResult(entry) {
         ? { coords: entry.returnRouteCoords,
             distance: (hasLegDist ? (entry.returnRouteDistance || 0) : 0) * 1000,
             duration: entry.returnRouteDuration || 0 }
-        : null;
+        // A round trip with an outbound but no return geometry still has a
+        // COMPLETE stored total — entry.distance already covers the whole walk.
+        // Passing null would make computeRouteTotals substitute the crow-flies
+        // distance on top of it, so the entry grew by a straight line every time
+        // it was opened (idea #3807). A zero-distance stub says "measured,
+        // contributes nothing". Only when the outbound exists: with neither leg
+        // stored, the straight-line double IS the intended display.
+        : (outbound && entry.tripMode !== 'one-way'
+            ? { coords: [], distance: 0, duration: 0 }
+            : null);
     // No saveToHistory here: re-displaying an existing history/favorite entry
     // must not create a new one (the old side effect in displayRoute did).
     displayRoute({
