@@ -9,6 +9,8 @@
 // exactly one home and a rename there can't silently fork. Reads and writes
 // delegate to storage.js's readStoredArray/writeStoredArray for the same reason —
 // the write side also buys quota recovery, which a raw setItem here would skip.
+//
+// Loaded after visit-shape.js — normalizeVisit gates every synced-down trip row.
 
 (function () {
     'use strict';
@@ -62,7 +64,50 @@
     // this a synced-down favorite stays {id, payload:{…}} and destLat is undefined
     // (#2065). The list renderer skips that row instead of throwing (#7307), but
     // the star button still needs the flat shape to match.
+    // visits and history are the trip shape visit-shape.js owns, so a synced-down
+    // row goes through the same gate an uploaded backup file does (importVisits).
+    // Without it, rows written before server-side validation existed (see
+    // server/src/lib/validate-rows.ts) land raw in localStorage, where
+    // renderVisitedLayer skips them on every render while updateVisitedCounter
+    // still counts them (#2735).
+    //
+    // A row normalizeVisit rejects is dropped rather than stored: it has no
+    // usable start/dest/distance, so nothing can ever draw it, and the cloud copy
+    // is untouched — mergeSection only writes localStorage, it never pushes
+    // deletes. Local rows are NOT normalized here; they enter mergeSection from
+    // readSection and stay as they are, so this can only ever discard a server
+    // row the device already could not use.
+    //
+    // Two fields survive outside normalizeVisit's fixed key set: `id`, because
+    // mergeSection keys on it (a row normalizeVisit cannot give a usable id is
+    // dropped, matching mergeSection's own `if (!row.id) return`), and
+    // `updatedAt`, because it drives last-write-wins — dropping it would make
+    // every synced-down row look like epoch 0 on the next merge and let a stale
+    // local row win forever.
+    function normalizeTripRows(section, serverRows) {
+        var normalizeVisit = globalThis.normalizeVisit;
+        if (typeof normalizeVisit !== 'function') { return serverRows; }
+        var nowIso = new Date().toISOString();
+        var out = [];
+        serverRows.forEach(function (row) {
+            var norm = normalizeVisit(row, nowIso);
+            if (!norm || !norm.id) { return; }
+            // history is snapshotSession's shape with no poiCategory; that key is
+            // the visits-only graft and has no column on the history table.
+            if (section === 'history') { delete norm.poiCategory; }
+            if (row && row.updatedAt !== undefined) { norm.updatedAt = row.updatedAt; }
+            out.push(norm);
+        });
+        return out;
+    }
+
     function normalizeServerRows(section, serverRows) {
+        if (section === 'visits' || section === 'history') {
+            return normalizeTripRows(section, serverRows);
+        }
+        // savedLocations is {label, value} and a favorite is a bookmark (dest
+        // only, no start, no distance) — neither is a trip row, and running
+        // either through the trip gate would delete the whole section.
         if (section !== 'favorites') { return serverRows; }
         return serverRows.map(function (row) {
             if (!row || typeof row.payload !== 'object' || row.payload === null) { return row; }

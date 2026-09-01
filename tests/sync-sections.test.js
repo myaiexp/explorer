@@ -11,7 +11,7 @@
 
 import { describe, test, expect, vi } from 'vitest';
 import {
-    installSyncLifecycle, loadSync, setLocation, setLocalStorage, mockFetch,
+    installSyncLifecycle, loadSync, setLocation, setLocalStorage, mockFetch, serverTrip,
 } from './helpers/sync-harness.js';
 
 installSyncLifecycle();
@@ -28,7 +28,9 @@ describe('#1566 mergeSection last-write-wins', () => {
         setLocation('/explorer/rugged-pine-42');
         setLocalStorage({
             walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
-            walk_visits: JSON.stringify([{ id: '1', updatedAt: '2024-06-01T00:00:00Z', name: 'local' }]),
+            walk_visits: JSON.stringify([
+                { id: '1', updatedAt: '2024-06-01T00:00:00Z', destName: 'local' },
+            ]),
         });
         mockFetch({
             '/explorer/api/rugged-pine-42': {
@@ -42,27 +44,27 @@ describe('#1566 mergeSection last-write-wins', () => {
 
     test('Branch A: server row older than local → local wins', async () => {
         const merged = await initCase2WithServerVisit(
-            { id: '1', updatedAt: '2024-01-01T00:00:00Z', name: 'server' }, // older
+            serverTrip({ updatedAt: '2024-01-01T00:00:00Z', destName: 'server' }), // older
         );
         expect(merged).toHaveLength(1);
-        expect(merged[0].name).toBe('local');
+        expect(merged[0].destName).toBe('local');
     });
 
     test('Branch B: server row updatedAt EQUAL to local → server wins (pins `>=`)', async () => {
         const merged = await initCase2WithServerVisit(
-            { id: '1', updatedAt: '2024-06-01T00:00:00Z', name: 'server' }, // equal
+            serverTrip({ updatedAt: '2024-06-01T00:00:00Z', destName: 'server' }), // equal
         );
         // PIN current behavior: mergeSection compares with `rt >= et`, so a server
         // row with an EQUAL timestamp overwrites the local row (server wins ties).
         // Mutating `>=` → `>` makes this assertion RED.
-        expect(merged[0].name).toBe('server');
+        expect(merged[0].destName).toBe('server');
     });
 
     test('Branch C: server row missing updatedAt → treated as epoch 0, local wins', async () => {
         const merged = await initCase2WithServerVisit(
-            { id: '1', name: 'server' }, // no updatedAt → rt = 0 < local's et
+            serverTrip({ destName: 'server' }), // no updatedAt → rt = 0 < local's et
         );
-        expect(merged[0].name).toBe('local');
+        expect(merged[0].destName).toBe('local');
     });
 
     test('geometry-omitted server row does not wipe local polylines (finding #7278)', async () => {
@@ -83,13 +85,7 @@ describe('#1566 mergeSection last-write-wins', () => {
         });
         mockFetch({
             '/explorer/api/rugged-pine-42': {
-                visits: [{
-                    id: '1',
-                    updatedAt: '2024-06-01T00:00:00Z',
-                    destName: 'server',
-                    routeCoords: null,
-                    returnRouteCoords: null,
-                }],
+                visits: [serverTrip({ updatedAt: '2024-06-01T00:00:00Z', destName: 'server' })],
                 favorites: [], savedLocations: [], history: [],
             },
         });
@@ -152,13 +148,12 @@ describe('#1566 mergeSection last-write-wins', () => {
         });
         mockFetch({
             '/explorer/api/rugged-pine-42': {
-                visits: [{
-                    id: '1',
+                visits: [serverTrip({
                     updatedAt: '2024-06-01T00:00:00Z',
                     destName: 'server',
                     routeCoords: coords,
                     returnRouteCoords: coords,
-                }],
+                })],
                 favorites: [], savedLocations: [], history: [],
             },
         });
@@ -183,7 +178,7 @@ describe('#1566 mergeSection last-write-wins', () => {
             // before populate, walk_history disappears; if it were skipped, the stale
             // local history row would survive — making this test the wipe discriminator.
             '/explorer/api/mossy-fern-7': {
-                visits: [{ id: 'server-v' }], favorites: [], savedLocations: [],
+                visits: [serverTrip({ id: 'server-v' })], favorites: [], savedLocations: [],
             },
         });
         loadSync();
@@ -191,7 +186,7 @@ describe('#1566 mergeSection last-write-wins', () => {
 
         expect(confirmSpy).toHaveBeenCalled();
         expect(confirmSpy.mock.calls[0][0]).toContain('Switching to account mossy-fern-7 from rugged-pine-42');
-        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'server-v' }]);
+        expect(JSON.parse(localStorage.getItem('walk_visits')).map((v) => v.id)).toEqual(['server-v']);
         // wiped by wipeSections() and never repopulated (server omitted `history`)
         expect(localStorage.getItem('walk_history')).toBeNull();
         expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'mossy-fern-7' });
@@ -308,14 +303,17 @@ describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
         expect(stored[0].payload).toBeUndefined();
     });
 
-    test('non-favorite sections (visits) are still stored verbatim (not unwrapped)', async () => {
+    test('non-favorite sections (visits) keep their flat fields — no payload unwrap', async () => {
+        // Visits arrive flat (typed columns), so the payload unwrap must not
+        // touch them. They do go through normalizeVisit (#2735), which is a
+        // field-level gate and leaves a valid row's values as they are.
         setLocation('/explorer/rugged-pine-42');
         setLocalStorage({
             walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
         });
         mockFetch({
             '/explorer/api/rugged-pine-42': {
-                visits: [{ id: 'v1', destLat: 61.0, updatedAt: '2024-06-01T00:00:00Z' }],
+                visits: [serverTrip({ id: 'v1', destLat: 61.0, updatedAt: '2024-06-01T00:00:00Z' })],
                 favorites: [], savedLocations: [], history: [],
             },
         });
@@ -323,6 +321,7 @@ describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
         await window.ExplorerSync.init();
         const stored = JSON.parse(localStorage.getItem('walk_visits'));
         expect(stored[0]).toMatchObject({ id: 'v1', destLat: 61.0 });
+        expect(stored[0].payload).toBeUndefined();
     });
 });
 
@@ -356,7 +355,10 @@ describe('quota-full sync-down', () => {
     }
 
     // Server rows padded well past the ceiling; local rows stay far under it.
-    const fatVisit = { id: 'server-v', note: 'x'.repeat(400) };
+    // The padding rides on destName, a field normalizeVisit keeps (truncating
+    // only past MAX_NAME_LEN) — a junk key would be stripped on the way in and
+    // the row would never reach the ceiling.
+    const fatVisit = serverTrip({ id: 'server-v', destName: 'x'.repeat(400) });
 
     test('Case 2 merge: a section that overflows quota is reported, not thrown', async () => {
         setLocation('/explorer/rugged-pine-42');
@@ -449,12 +451,116 @@ describe('isLocalStorageEmpty', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);   // Case 3 is consent-gated
         mockFetch({
             '/explorer/api/rugged-pine-42': {
-                visits: [{ id: 'server-1' }], favorites: [], savedLocations: [], history: [],
+                visits: [serverTrip({ id: 'server-1' })], favorites: [], savedLocations: [], history: [],
             },
         });
         loadSync();
         await window.ExplorerSync.init();
         expect(window.ExplorerSync.getState().state).toBe('accepted');
-        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'server-1' }]);
+        expect(JSON.parse(localStorage.getItem('walk_visits')).map((v) => v.id)).toEqual(['server-1']);
+    });
+});
+
+// ── #2735 — trip rows land normalized, never raw ─────────────────────────────
+// visit-shape.js owns what a usable trip row looks like, and importVisits
+// (visits-io.js) gates an uploaded backup file through it. The sync-down path
+// had no such gate: server rows went straight to writeStoredArray. Rows written
+// before server/src/lib/validate-rows.ts existed can therefore still land
+// malformed in localStorage, where renderVisitedLayer silently skips them on
+// every overlay render while updateVisitedCounter keeps counting them — an
+// inflated "N visited" for a walk that never appears on the map.
+
+describe('#2735 cloud-synced trip rows go through normalizeVisit', () => {
+    // Init Case 2: URL username matches the stored accepted account → GET →
+    // mergeSection per section. Local storage is empty of trip rows, so what
+    // lands in walk_visits / walk_history is exactly the normalized server rows.
+    async function syncDown(sections) {
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': Object.assign(
+                { visits: [], favorites: [], savedLocations: [], history: [] },
+                sections,
+            ),
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        return {
+            visits: JSON.parse(localStorage.getItem('walk_visits') || '[]'),
+            history: JSON.parse(localStorage.getItem('walk_history') || '[]'),
+        };
+    }
+
+    // The harness fixture plus what only a real GET row carries: the username
+    // column (server-side bookkeeping, not app data) and updatedAt.
+    function cloudTrip(over) {
+        return serverTrip({
+            id: 'v1',
+            username: 'rugged-pine-42',
+            updatedAt: '2024-06-01T00:00:00Z',
+            ...over,
+        });
+    }
+
+    test('an unrenderable legacy row is dropped, not stored', async () => {
+        // destLat 999 predates parseCoord's WGS-84 bounds. visitRenderParts
+        // returns null for it, so it can never be drawn — but it used to sit in
+        // walk_visits inflating the counter forever.
+        const { visits } = await syncDown({
+            visits: [cloudTrip({ id: 'bad', destLat: 999 }), cloudTrip()],
+        });
+        expect(visits.map((v) => v.id)).toEqual(['v1']);
+    });
+
+    test('a repairable row lands normalized, keeping id and updatedAt', async () => {
+        const { visits } = await syncDown({
+            // Coords as strings: normalizeVisit repairs rather than rejects, so
+            // the walk survives. `username` is a server column that has no
+            // business in localStorage (quota is finite).
+            visits: [cloudTrip({ startLat: '62.0', destLat: '62.01' })],
+        });
+        expect(visits).toHaveLength(1);
+        expect(visits[0].startLat).toBe(62.0);
+        expect(visits[0].destLat).toBe(62.01);
+        expect(visits[0].username).toBeUndefined();
+        // updatedAt is not part of normalizeVisit's shape but drives
+        // mergeSection's last-write-wins — dropping it would make every
+        // synced-down row look like epoch 0 on the next merge.
+        expect(visits[0].updatedAt).toBe('2024-06-01T00:00:00Z');
+        expect(visits[0].id).toBe('v1');
+    });
+
+    test('history gets the same gate, without a grafted poiCategory', async () => {
+        const { history } = await syncDown({
+            history: [cloudTrip({ id: 'bad', startLng: 'not a number' }), cloudTrip({ id: 'h1' })],
+        });
+        expect(history.map((h) => h.id)).toEqual(['h1']);
+        // history rows are snapshotSession's shape with no poiCategory —
+        // normalizeVisit's visits-only key must not be grafted onto them.
+        expect('poiCategory' in history[0]).toBe(false);
+    });
+
+    test('favorites and savedLocations are untouched by the trip gate', async () => {
+        // Neither is a trip row: a favorite is a bookmark (dest only, no start,
+        // no distance) and a saved location is {label, value}. Running either
+        // through normalizeVisit would delete the whole section.
+        setLocation('/explorer/rugged-pine-42');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42' }),
+        });
+        mockFetch({
+            '/explorer/api/rugged-pine-42': {
+                visits: [],
+                favorites: [{ id: 'f1', payload: { destLat: 62, destLng: 25, destName: 'Lake' } }],
+                savedLocations: [{ id: 's1', label: 'Home', value: '62,25' }],
+                history: [],
+            },
+        });
+        loadSync();
+        await window.ExplorerSync.init();
+        expect(JSON.parse(localStorage.getItem('walk_favorites'))).toHaveLength(1);
+        expect(JSON.parse(localStorage.getItem('walk_saved_locations'))).toHaveLength(1);
     });
 });

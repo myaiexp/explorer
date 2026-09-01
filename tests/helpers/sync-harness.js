@@ -179,3 +179,30 @@ export async function setupAccepted(username) {
     await window.ExplorerSync.init();
     global.fetch = vi.fn();
 }
+
+// ── Server row fixtures ──────────────────────────────────────────────────────
+
+/**
+ * A server visits/history row in the shape GET /:username really emits.
+ *
+ * validate-rows.ts guarantees finite in-range start/dest coords, a non-negative
+ * distance and an ISO date on every stored trip row, and sync-sections.js gates
+ * every synced-down row through visit-shape.js's normalizeVisit on exactly those
+ * (#2735) — so a fixture missing them is a row the API could not have stored,
+ * and it is dropped on the way in rather than merged. Build server trip rows
+ * here; overrides carry whatever field the test is actually about.
+ */
+export function serverTrip(over) {
+    return {
+        id: '1',
+        date: '2024-06-01T00:00:00Z',
+        startLat: 62.0,
+        startLng: 25.0,
+        destLat: 62.01,
+        destLng: 25.01,
+        distance: 1.5,
+        routeCoords: null,
+        returnRouteCoords: null,
+        ...over,
+    };
+}
