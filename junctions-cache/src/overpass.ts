@@ -14,6 +14,19 @@ export const OVERPASS_MAX_BYTES = 32 * 1024 * 1024;
 
 export type LatLng = { lat: number; lng: number };
 
+// Overpass reported its own timeout or out-of-memory inside a 200, as a `remark`
+// beside truncated or empty `elements`. Its own class because the retry loop has
+// to tell it apart from a connection failure: both arrive as a thrown Error with
+// no HTTP code in the message, and the code === null branch latches local down.
+// A too-big query is not an unhealthy instance, and it would fail identically on
+// the fallback (idea #3160).
+export class OverpassIncompleteError extends Error {
+    constructor(public readonly remark: string) {
+        super(`overpass incomplete: ${remark}`);
+        this.name = 'OverpassIncompleteError';
+    }
+}
+
 // Deliberately permissive: one shape for every query we run. Junctions read
 // `nodes`/`lat`/`lon`; the POI and road fetchers read `center` and `tags`.
 export type OverpassElement = {
@@ -142,11 +155,33 @@ export async function runOverpassQuery(query: string): Promise<OverpassElement[]
                 'overpass',
                 res.headers.get('content-length'),
             );
-            const data = JSON.parse(text) as { elements: OverpassElement[]; osm3s?: Osm3sHeader };
+            const data = JSON.parse(text) as {
+                elements: OverpassElement[];
+                osm3s?: Osm3sHeader;
+                remark?: string;
+            };
             // Free freshness reading: the answer already says how current its
             // OSM data is. Local only — a fallback answer describes
             // overpass-api.de, not the instance that might be wedged.
             if (target.local) recordLocalDataTimestamp(data.osm3s);
+            // Overpass reports its own timeout and out-of-memory failures INSIDE
+            // a 200, as a `remark` beside a truncated or empty `elements`. Taken
+            // at face value that is a silently partial pool — and a non-empty
+            // one would then sit in the cache for the full 30-day TTL. Treat it
+            // as a failed attempt so the retry budget applies and the caller
+            // sees a reason (idea #3160).
+            if (typeof data.remark === 'string' && data.remark.trim() !== '') {
+                log('WARN', {
+                    event: 'overpass_remark',
+                    attempt,
+                    local: target.local,
+                    elements: Array.isArray(data.elements) ? data.elements.length : 0,
+                    remark: data.remark,
+                });
+                // Thrown rather than `continue`d so it lands in lastErr and the
+                // remark reaches the caller once the budget is spent.
+                throw new OverpassIncompleteError(data.remark);
+            }
             return data.elements;
         } catch (e) {
             lastErr = e as Error;
@@ -156,6 +191,11 @@ export async function runOverpassQuery(query: string): Promise<OverpassElement[]
             // this precedes the latch: an oversized response is our bbox being
             // too big, not local being unhealthy.
             if (lastErr instanceof BodyTooLargeError) throw lastErr;
+            // Retry, but never latch: a remark means the query was too big for
+            // its timeout, not that the instance is unhealthy, and it would fail
+            // identically on the fallback. Skipping the code === null branch
+            // below is the whole reason this has its own class.
+            if (lastErr instanceof OverpassIncompleteError) continue;
             const m = lastErr.message.match(/^overpass http (\d+)$/);
             const code = m ? parseInt(m[1]!, 10) : null;
             // Local is down for connection failures/timeouts (code === null) and

@@ -662,3 +662,76 @@ describe('osm3s freshness recording', () => {
         });
     });
 });
+
+// ── Overpass `remark` = an incomplete answer (idea #3160) ────────────────────
+//
+// Overpass reports its own timeout and out-of-memory failures INSIDE a 200:
+// `remark: "runtime error: Query timed out in \"query\" at line 3 after 15
+// seconds."` alongside a truncated or empty `elements`. Read as a success it is
+// a silently partial pool — and since idea #4016 a non-empty one would then sit
+// in the cache for 30 days. So a remark is a failed attempt, retried like any
+// other, and surfaced in the thrown message rather than swallowed.
+
+describe('Overpass remark handling', () => {
+    const timedOut = () => okJson({
+        version: 0.6,
+        osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' },
+        elements: [],
+        remark: 'runtime error: Query timed out in "query" at line 3 after 15 seconds.',
+    });
+
+    // One Response per attempt, not one repeated: installFetch repeats the LAST
+    // queue entry, and a Response body can only be read once — a reused one
+    // fails the second read as a generic error, which would latch local down and
+    // quietly test something else entirely.
+    test('a remark on every attempt throws, carrying the remark text', async () => {
+        installFetch({ local: [timedOut(), timedOut(), timedOut()] });
+        const p = runOverpassQuery(QUERY);
+        // Attach the rejection handler BEFORE advancing timers, or the retry
+        // back-off fires with nothing waiting and the run reports an unhandled
+        // rejection alongside a passing test.
+        const assertion = expect(p).rejects.toThrow(/timed out/i);
+        await vi.runAllTimersAsync();
+        await assertion;
+    });
+
+    test('a remark is retried — a later clean answer wins', async () => {
+        const m = installFetch({
+            local: [timedOut(), okJson({ elements: [{ type: 'node', id: 1, lat: 60, lon: 24 }] })],
+        });
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+
+        await expect(p).resolves.toEqual([{ type: 'node', id: 1, lat: 60, lon: 24 }]);
+        expect(urlCalls(m)).toBe(2);
+    });
+
+    // A partial answer is not evidence the instance is unhealthy — the query was
+    // too big for its timeout, and it would fail the same way on the fallback.
+    // Latching would ship that query to a public server and cost five minutes of
+    // local for nothing (same reasoning as BodyTooLargeError).
+    test('a remark does not latch local down', async () => {
+        installFetch({ local: [timedOut(), timedOut(), timedOut()] });
+        const p = runOverpassQuery(QUERY);
+        const assertion = expect(p).rejects.toThrow();
+        await vi.runAllTimersAsync();
+        await assertion;
+        expect(isLocalDown()).toBe(false);
+    });
+
+    test('an answer with no remark is unaffected', async () => {
+        installFetch({ local: [okJson({ elements: [{ type: 'node', id: 7, lat: 61, lon: 25 }] })] });
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+        await expect(p).resolves.toHaveLength(1);
+    });
+
+    // An empty-but-clean answer is a real "nothing here", not a failure — the
+    // frontend's "nothing nearby, using a random point" path depends on it.
+    test('an empty answer with no remark still resolves as an empty pool', async () => {
+        installFetch({ local: [okJson({ elements: [] })] });
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+        await expect(p).resolves.toEqual([]);
+    });
+});
