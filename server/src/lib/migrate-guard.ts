@@ -1,13 +1,13 @@
 // May this `pnpm db:migrate` run? Pure — no I/O, no DB, no git, no clock.
 //
-// server/.env points DATABASE_URL at the production `explorer` database, and Helm copies
+// server/.env points DATABASE_URL at the production `wander` database, and Helm copies
 // that file verbatim into every worktree. So `drizzle-kit migrate` from a worktree
 // rewrites PROD's schema while prod still runs whatever is on master — a DROP applied
 // here breaks the deployed code and stays broken until that branch deploys. helm lived
 // this on 2026-08-22: four columns gone from a worktree, 25 minutes of HTTP 500.
 //
 // The fix is not a new pipeline: forgejo-deploy ALREADY runs `pnpm drizzle-kit migrate`
-// in ~/Projects/explorer/server the moment a push lands, straight after the build. So
+// in ~/Projects/wander/server the moment a push lands, straight after the build. So
 // the destructive half simply belongs there, and this guard's whole job is to send it
 // there. Additive DDL still applies straight from a worktree, because that is what a
 // session developing against a new column needs. Note forgejo-deploy calls the drizzle
@@ -25,7 +25,7 @@ export interface PendingMigration {
 
 export interface MigrateGuardInput {
   /**
-   * Is the CWD the repo's MAIN checkout (~/Projects/explorer, the tree forgejo-deploy
+   * Is the CWD the repo's MAIN checkout (~/Projects/wander, the tree forgejo-deploy
    * checks out and migrates)?
    *
    * `null` means git could not answer, which counts as "not the main checkout": the
@@ -73,7 +73,7 @@ export function renderRefusal(
   lines.push('');
   lines.push(`✖  pnpm db:migrate refused: pending migrations contain destructive DDL and ${where}.`);
   lines.push('');
-  lines.push("   server/.env aims DATABASE_URL at the PRODUCTION explorer database, and Helm copies");
+  lines.push("   server/.env aims DATABASE_URL at the PRODUCTION wander database, and Helm copies");
   lines.push('   it into every worktree — so migrating from here rewrites prod\'s schema while prod');
   lines.push('   still runs the code on master. The dropped surface goes out from under it and stays');
   lines.push('   that way until this branch deploys.');
@@ -89,10 +89,10 @@ export function renderRefusal(
 
   lines.push('   What to do:');
   lines.push('     • Nothing. Commit the .sql alongside the code and run `deploy` — forgejo-deploy');
-  lines.push('       runs drizzle-kit migrate in ~/Projects/explorer/server right after the push');
+  lines.push('       runs drizzle-kit migrate in ~/Projects/wander/server right after the push');
   lines.push('       lands, so the drop ships with the code that stopped using the surface.');
   lines.push('     • Need the new schema to develop against? `pnpm db:reset:test` rebuilds');
-  lines.push('       explorer_test from the migration chain — prod is not involved at all.');
+  lines.push('       wander_test from the migration chain — prod is not involved at all.');
   lines.push('     • Split expand from contract: the additive migration applies from a worktree');
   lines.push('       today, the destructive one ships with the code.');
   lines.push('     • Already deployed, or catching up a migration the deploy failed to apply?');

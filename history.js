@@ -30,7 +30,7 @@ function saveToHistory(session) {
     // the cloud (or claiming a save happened) would desync the two sides.
     if (!syncedPut(HISTORY_KEY, history, 'history', entry.id, entry)) return;
     // syncedDelete re-persists the already-capped array (idempotent) and enqueues
-    // the cloud delete; ExplorerSync.mutate no-ops for anonymous users, so an
+    // the cloud delete; WanderSync.mutate no-ops for anonymous users, so an
     // un-synced browser just gets the local cap, exactly as before.
     dropped.forEach(d => { if (d && d.id != null) syncedDelete(HISTORY_KEY, history, 'history', String(d.id)); });
     maybeRequestConsent();

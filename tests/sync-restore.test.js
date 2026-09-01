@@ -62,7 +62,7 @@ describe('restoreSections failure', () => {
             return real.call(this, k, v);
         });
 
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
 
         expect(restoreSpy).toHaveReturnedWith(false);
         expect(globalThis.showError).toHaveBeenCalledWith(
@@ -70,7 +70,7 @@ describe('restoreSections failure', () => {
         );
         // onFail → rollbackAdopt: the tentative mossy-fern token is dropped,
         // device stays on the account the (now unrestorable) data belonged to.
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
         delete globalThis.showError;

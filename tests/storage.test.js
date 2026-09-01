@@ -93,14 +93,14 @@ describe('writeStoredArray quota handling', () => {
     test('local trim of persisted visits is not a synced mutation (raw write only)', () => {
         // reclaimVisitGeometry must write straight to localStorage, never through a
         // synced path, so the cloud copy keeps full geometry. There is no
-        // ExplorerSync here; the trim still succeeds, proving it does not depend on
+        // WanderSync here; the trim still succeeds, proving it does not depend on
         // (or invoke) the sync layer.
         localStorage.setItem('walk_visits', JSON.stringify(visitsWithGeometry(55)));
-        globalThis.ExplorerSync = { mutate: vi.fn() };
+        globalThis.WanderSync = { mutate: vi.fn() };
         throwQuotaOnce();
         globalThis.writeStoredArray('walk_sync_outbox', [{ id: 'x' }]);
-        expect(globalThis.ExplorerSync.mutate).not.toHaveBeenCalled();
-        delete globalThis.ExplorerSync;
+        expect(globalThis.WanderSync.mutate).not.toHaveBeenCalled();
+        delete globalThis.WanderSync;
     });
 
     test('surfaces an error toast and returns false when quota cannot be reclaimed', () => {

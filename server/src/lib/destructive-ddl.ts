@@ -1,6 +1,6 @@
 // Which migration DDL breaks the code that predates it — pure, no I/O.
 //
-// server/.env aims DATABASE_URL at the production `explorer` database and Helm copies
+// server/.env aims DATABASE_URL at the production `wander` database and Helm copies
 // that file into every worktree, so `pnpm db:migrate` from a worktree writes PROD's
 // schema while prod still runs master. Additive DDL is safe by construction (the running
 // code ignores a column it doesn't know about); the statements below are not — they
@@ -10,7 +10,7 @@
 //
 // The scan is deliberately conservative in ONE direction only: a false positive costs a
 // migration nothing but a slightly later application (forgejo-deploy runs drizzle-kit
-// migrate in ~/Projects/explorer/server the moment the push lands), while a false
+// migrate in ~/Projects/wander/server the moment the push lands), while a false
 // negative is helm's 2026-08-22 incident — four columns dropped from a worktree, 25
 // minutes of HTTP 500 — reproduced here.
 //

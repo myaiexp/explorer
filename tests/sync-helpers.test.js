@@ -26,7 +26,7 @@ beforeEach(() => {
     localStorage.setItem(key, JSON.stringify(arr));
     return true;
   };
-  globalThis.ExplorerSync = {
+  globalThis.WanderSync = {
     mutate: (section, op, id, data) => mutations.push({ section, op, id, data }),
     getState: () => ({ state: 'anonymous' }),
     requestConsent: () => {},

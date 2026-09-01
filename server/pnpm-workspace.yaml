@@ -3,7 +3,7 @@
 # field). This file also keeps server/ its own pnpm root: without it, pnpm walks up to
 # the repo root's workspace file and `cd server && pnpm install` silently installs the
 # ROOT project's deps instead of this one — which would break the forgejo-deploy step
-# `cd $PROJECTS/explorer/server && pnpm install --frozen-lockfile && pnpm build`.
+# `cd $PROJECTS/wander/server && pnpm install --frozen-lockfile && pnpm build`.
 #
 # Unlike the root, this project has no `packageManager` pin, so a pnpm-11 host runs
 # pnpm 11 here rather than self-switching to 10 — the drift is live, not latent.

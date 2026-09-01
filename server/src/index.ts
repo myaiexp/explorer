@@ -12,5 +12,5 @@ const app = createApp(db);
 startBucketSweeper();
 
 serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, () => {
-  console.log(`Explorer API listening on 127.0.0.1:${port}`);
+  console.log(`Wander API listening on 127.0.0.1:${port}`);
 });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * Drift guard for the POI catalog, which exists in two independent deployables:
- *   - explorer/poi-types.js              (frontend, the dropdown the user picks from)
+ *   - wander/poi-types.js              (frontend, the dropdown the user picks from)
  *   - junctions-cache/src/poi-catalog.ts (shelly microservice, the query it runs)
  *
  * The frontend sends catalog KEYS; the server maps them to Overpass filters.

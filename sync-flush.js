@@ -171,7 +171,7 @@
                 if (res.status === 401 || res.status === 403) {
                     _backoffMs = 0;
                     _authBlocked = true;
-                    console.warn('[ExplorerSync] Auth failure (' + res.status + '); pausing outbox flush', entry);
+                    console.warn('[WanderSync] Auth failure (' + res.status + '); pausing outbox flush', entry);
                     if (!_authNotified) {
                         _authNotified = true;
                         if (typeof globalThis.showError === 'function') {
@@ -187,7 +187,7 @@
                 // entry itself is unrecoverable — drop it and continue.
                 if (res.status >= 400 && res.status < 500) {
                     _backoffMs = 0;
-                    console.warn('[ExplorerSync] Dropping outbox entry due to ' + res.status, entry);
+                    console.warn('[WanderSync] Dropping outbox entry due to ' + res.status, entry);
                     consumeOutboxHead();
                     return;
                 }

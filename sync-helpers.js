@@ -1,13 +1,13 @@
 // Persist-and-mirror wrappers — write a synced collection to localStorage and
 // replicate the change to the cloud outbox in one step.
 
-// ExplorerSync (sync.js) and writeStoredArray (storage.js) are loaded before this
+// WanderSync (sync.js) and writeStoredArray (storage.js) are loaded before this
 // in index.html's fixed defer order, so they are always defined by call time.
 
 // Prompt for cloud-backup consent the first time an anonymous user saves anything.
 function maybeRequestConsent() {
-    if (ExplorerSync.getState().state === 'anonymous') {
-        ExplorerSync.requestConsent();
+    if (WanderSync.getState().state === 'anonymous') {
+        WanderSync.requestConsent();
     }
 }
 
@@ -25,13 +25,13 @@ function maybeRequestConsent() {
 // Returns whether the local write (and therefore the mirror) happened.
 function syncedPut(key, arr, section, id, data) {
     if (!writeStoredArray(key, arr)) return false;
-    ExplorerSync.mutate(section, 'put', id, data);
+    WanderSync.mutate(section, 'put', id, data);
     return true;
 }
 
 function syncedDelete(key, arr, section, id) {
     if (!writeStoredArray(key, arr)) return false;
-    ExplorerSync.mutate(section, 'delete', id);
+    WanderSync.mutate(section, 'delete', id);
     return true;
 }
 

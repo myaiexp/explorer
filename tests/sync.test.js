@@ -15,15 +15,15 @@ import {
 } from './helpers/sync-harness.js';
 installSyncLifecycle();
 
-// ── ExplorerSync.init ─────────────────────────────────────────────────────────
+// ── WanderSync.init ─────────────────────────────────────────────────────────
 
-describe('ExplorerSync.init', () => {
+describe('WanderSync.init', () => {
     test('anonymous when no flag and no URL segment', async () => {
         setLocation('/wander/');
         setLocalStorage({});
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState().state).toBe('anonymous');
     });
 
     test('accepted when flag matches URL segment and merges server data', async () => {
@@ -33,8 +33,8 @@ describe('ExplorerSync.init', () => {
             '/wander/api/rugged-pine-42': { visits: [], favorites: [], savedLocations: [], history: [] },
         });
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
     });
 
     test('URL segment + token fragment with empty localStorage loads after consent', async () => {
@@ -50,13 +50,13 @@ describe('ExplorerSync.init', () => {
         // explicit consent even on an empty device (shared-link hijack guard).
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(confirmSpy).toHaveBeenCalled();
         expect(confirmSpy.mock.calls[0][0]).toContain('Load shared backup account rugged-pine-42');
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toHaveLength(1);
-        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expect(window.WanderSync.getState().state).toBe('accepted');
         // The token from the fragment is captured and persisted to the record.
-        expect(window.ExplorerSync.getState().token).toBe('tok-rp42');
+        expect(window.WanderSync.getState().token).toBe('tok-rp42');
         expect(JSON.parse(localStorage.getItem('walk_cloud_backup')).token).toBe('tok-rp42');
     });
 
@@ -72,11 +72,11 @@ describe('ExplorerSync.init', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(confirmSpy).toHaveBeenCalled();
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/wander/');
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
         expect(localStorage.getItem('walk_visits')).toBeNull();
         expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
     });
@@ -89,24 +89,24 @@ describe('ExplorerSync.init', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(fetchSpy).not.toHaveBeenCalled();
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(window.WanderSync.getState().state).toBe('anonymous');
         expect(localStorage.getItem('walk_visits')).toBeNull();
     });
 
     test('malformed percent-encoded token fragment does not throw; falls through to no-token path', async () => {
         // #t=% / #t=%ZZ throw URIError from decodeURIComponent unless caught —
-        // that used to abort ExplorerSync.init and skip first paint (finding #6222).
+        // that used to abort WanderSync.init and skip first paint (finding #6222).
         setLocation('/wander/rugged-pine-42', '#t=%');
         setLocalStorage({});
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         loadSync();
-        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        await expect(window.WanderSync.init()).resolves.toBeUndefined();
         expect(fetchSpy).not.toHaveBeenCalled();
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
-        expect(window.ExplorerSync.getState().token).toBeNull();
+        expect(window.WanderSync.getState().state).toBe('anonymous');
+        expect(window.WanderSync.getState().token).toBeNull();
     });
 
     test('corrupt walk_cloud_backup JSON stays anonymous without throwing or fetching', async () => {
@@ -119,9 +119,9 @@ describe('ExplorerSync.init', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         loadSync();
-        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
+        await expect(window.WanderSync.init()).resolves.toBeUndefined();
         expect(fetchSpy).not.toHaveBeenCalled();
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'anonymous', username: null, token: null,
         });
     });
@@ -132,11 +132,11 @@ describe('ExplorerSync.init', () => {
         const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
         const replaceSpy = vi.spyOn(history, 'replaceState');
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(confirmSpy).toHaveBeenCalled();
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/wander/');
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'old' }]);
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(window.WanderSync.getState().state).toBe('anonymous');
     });
 
     test('URL segment with non-empty localStorage prompts confirm; accept loads server data', async () => {
@@ -149,8 +149,8 @@ describe('ExplorerSync.init', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState().state).toBe('accepted');
         expect(JSON.parse(localStorage.getItem('walk_visits')).map((v) => v.id)).toEqual(['server-1']);
     });
 
@@ -158,8 +158,8 @@ describe('ExplorerSync.init', () => {
         setLocation('/wander/');
         setLocalStorage({ walk_cloud_backup: JSON.stringify({ state: 'declined' }) });
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState().state).toBe('declined');
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState().state).toBe('declined');
     });
 
     // init Case 1: accepted flag + no URL segment → silently restore
@@ -172,9 +172,9 @@ describe('ExplorerSync.init', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(fetchSpy).not.toHaveBeenCalled();
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
     });
@@ -190,8 +190,8 @@ describe('ExplorerSync.init', () => {
         });
         mockFetch({ '/wander/api/rugged-pine-42': { status: 500 } });
         loadSync();
-        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
+        await expect(window.WanderSync.init()).resolves.toBeUndefined();
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
         // merge runs only inside the res.ok branch → local row survives unchanged
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-1' }]);
     });
@@ -205,8 +205,8 @@ describe('ExplorerSync.init', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);   // consent to adopt, then fetch 500s
         mockFetch({ '/wander/api/rugged-pine-42': { status: 500 } });
         loadSync();
-        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
+        await expect(window.WanderSync.init()).resolves.toBeUndefined();
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
         expect(localStorage.getItem('walk_visits')).toBeNull();
         expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
     });
@@ -226,7 +226,7 @@ describe('ExplorerSync.init', () => {
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(confirmSpy).toHaveBeenCalled();
         expect(confirmSpy.mock.calls[0][0]).toContain('Switching to account mossy-fern-7 from rugged-pine-42');
         // cancel: URL reset, no GET issued, local data preserved
@@ -236,7 +236,7 @@ describe('ExplorerSync.init', () => {
         // …and the device stays bound to the account it already owned. Dropping to
         // 'anonymous' here (audit #5426) desynced the session from localStorage,
         // which still said accepted/rugged-pine-42.
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
     });
@@ -253,11 +253,11 @@ describe('ExplorerSync.init', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(false);
         mockFetch({});
         loadSync();
-        await window.ExplorerSync.init();
-        window.ExplorerSync.mutate('visits', 'upsert', 'v1', { id: 'v1' });
+        await window.WanderSync.init();
+        window.WanderSync.mutate('visits', 'upsert', 'v1', { id: 'v1' });
         // Synchronous assertion: enqueue schedules the flush on a microtask, so
         // the entry is still queued here regardless of what the pump does next.
-        expect(window.ExplorerSync.getState().outboxLength).toBe(1);
+        expect(window.WanderSync.getState().outboxLength).toBe(1);
     });
 
     // Same rule for a device whose stored decision is 'declined': cancelling a
@@ -271,8 +271,8 @@ describe('ExplorerSync.init', () => {
         });
         vi.spyOn(window, 'confirm').mockReturnValue(false);
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'declined', username: null, token: null,
         });
     });
@@ -280,7 +280,7 @@ describe('ExplorerSync.init', () => {
 
 // ── restored backup invisible until reload (audit) ────────────────────────────
 // init Case 2's own-device merge rewrites localStorage but historically fired no
-// explorer-sync-state-change event, so app.js never re-rendered the merged rows —
+// wander-sync-state-change event, so app.js never re-rendered the merged rows —
 // a restored backup stayed invisible until a manual reload. The merge path now
 // fires the event on success (via loadAccount's onSuccess = fireStateChange) so
 // the app.js refreshDataViews hook runs; a failed GET must NOT fire it.
@@ -294,40 +294,40 @@ describe('init Case 2 merge fires state-change so the UI re-renders', () => {
         mockFetch({ '/wander/api/rugged-pine-42': fetchConfig });
     }
 
-    test('own-device merge dispatches explorer-sync-state-change on success', async () => {
+    test('own-device merge dispatches wander-sync-state-change on success', async () => {
         setupCase2({
             visits: [serverTrip({ id: 'server-1', updatedAt: '2024-06-01T00:00:00Z' })],
             favorites: [], savedLocations: [], history: [],
         });
         const eventSpy = vi.fn();
-        window.addEventListener('explorer-sync-state-change', eventSpy);
+        window.addEventListener('wander-sync-state-change', eventSpy);
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(eventSpy).toHaveBeenCalled();
-        window.removeEventListener('explorer-sync-state-change', eventSpy);
+        window.removeEventListener('wander-sync-state-change', eventSpy);
     });
 
     test('a failed merge GET does NOT fire state-change (fires only on success)', async () => {
         setupCase2({ status: 500 });
         const eventSpy = vi.fn();
-        window.addEventListener('explorer-sync-state-change', eventSpy);
+        window.addEventListener('wander-sync-state-change', eventSpy);
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(eventSpy).not.toHaveBeenCalled();
-        window.removeEventListener('explorer-sync-state-change', eventSpy);
+        window.removeEventListener('wander-sync-state-change', eventSpy);
     });
 });
 
-// ── ExplorerSync.mutate — the accepted-state gate ─────────────────────────────
+// ── WanderSync.mutate — the accepted-state gate ─────────────────────────────
 // mutate's only job in this module is the gate; everything past it belongs to the
 // flush worker and is covered in sync-flush.test.js.
 
-describe('ExplorerSync.mutate gating', () => {
+describe('WanderSync.mutate gating', () => {
     test('no-op when anonymous', async () => {
         setupAnonymous();
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
         await drainFlushPump();
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(localStorage.getItem('walk_sync_outbox')).toBeNull();
@@ -337,18 +337,18 @@ describe('ExplorerSync.mutate gating', () => {
         setLocation('/wander/');
         setLocalStorage({ walk_cloud_backup: JSON.stringify({ state: 'declined' }) });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
         await drainFlushPump();
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 });
 
-// ── ExplorerSync.accept ───────────────────────────────────────────────────────
+// ── WanderSync.accept ───────────────────────────────────────────────────────
 
-describe('ExplorerSync.accept', () => {
+describe('WanderSync.accept', () => {
     test('generates UUID for legacy saved_locations missing id', async () => {
         setLocation('/wander/');
         setLocalStorage({ walk_saved_locations: JSON.stringify([{ label: 'home', value: 'Home St 1' }]) });
@@ -357,7 +357,7 @@ describe('ExplorerSync.accept', () => {
             'POST /wander/api/rugged-pine-42/import': { status: 204 },
         });
         loadSync();
-        await window.ExplorerSync.accept();
+        await window.WanderSync.accept();
         const stored = JSON.parse(localStorage.getItem('walk_saved_locations'));
         expect(stored[0]).toHaveProperty('id');
         expect(stored[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -372,15 +372,15 @@ describe('ExplorerSync.accept', () => {
         });
         const replaceSpy = vi.spyOn(history, 'replaceState');
         const eventSpy = vi.fn();
-        window.addEventListener('explorer-sync-state-change', eventSpy);
+        window.addEventListener('wander-sync-state-change', eventSpy);
         loadSync();
-        await window.ExplorerSync.accept();
+        await window.WanderSync.accept();
         // The secret token rides in the URL fragment so the link itself is the credential.
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/wander/rugged-pine-42#t=tok-rp42');
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' });
-        expect(window.ExplorerSync.getState().link).toBe('https://mase.fi/wander/rugged-pine-42#t=tok-rp42');
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' });
+        expect(window.WanderSync.getState().link).toBe('https://mase.fi/wander/rugged-pine-42#t=tok-rp42');
         expect(eventSpy).toHaveBeenCalled();
-        window.removeEventListener('explorer-sync-state-change', eventSpy);
+        window.removeEventListener('wander-sync-state-change', eventSpy);
     });
 
     test('does not write flag if import POST fails', async () => {
@@ -391,32 +391,32 @@ describe('ExplorerSync.accept', () => {
             'POST /wander/api/rugged-pine-42/import': { status: 500 },
         });
         loadSync();
-        await expect(window.ExplorerSync.accept()).rejects.toThrow();
+        await expect(window.WanderSync.accept()).rejects.toThrow();
         expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(window.WanderSync.getState().state).toBe('anonymous');
     });
 });
 
-// ── ExplorerSync.decline ─────────────────────────────────────────────────────
+// ── WanderSync.decline ─────────────────────────────────────────────────────
 
-describe('ExplorerSync.decline', () => {
+describe('WanderSync.decline', () => {
     test('sets declined flag and fires state-change event', () => {
         setLocation('/wander/');
         setLocalStorage({});
         loadSync();
         const eventSpy = vi.fn();
-        window.addEventListener('explorer-sync-state-change', eventSpy);
-        window.ExplorerSync.decline();
-        expect(window.ExplorerSync.getState().state).toBe('declined');
+        window.addEventListener('wander-sync-state-change', eventSpy);
+        window.WanderSync.decline();
+        expect(window.WanderSync.getState().state).toBe('declined');
         expect(JSON.parse(localStorage.getItem('walk_cloud_backup'))).toEqual({ state: 'declined' });
         expect(eventSpy).toHaveBeenCalled();
-        window.removeEventListener('explorer-sync-state-change', eventSpy);
+        window.removeEventListener('wander-sync-state-change', eventSpy);
     });
 });
 
-// ── ExplorerSync.deleteAccount ───────────────────────────────────────────────
+// ── WanderSync.deleteAccount ───────────────────────────────────────────────
 
-describe('ExplorerSync.deleteAccount', () => {
+describe('WanderSync.deleteAccount', () => {
     test('clears flag, outbox, strips URL, fires state-change', async () => {
         await setupAccepted('rugged-pine-42');
         localStorage.setItem('walk_sync_outbox', JSON.stringify([{ section: 'visits', op: 'put', id: 'x' }]));
@@ -425,37 +425,37 @@ describe('ExplorerSync.deleteAccount', () => {
         });
         const replaceSpy = vi.spyOn(history, 'replaceState');
         const eventSpy = vi.fn();
-        window.addEventListener('explorer-sync-state-change', eventSpy);
-        await window.ExplorerSync.deleteAccount();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
+        window.addEventListener('wander-sync-state-change', eventSpy);
+        await window.WanderSync.deleteAccount();
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'anonymous', username: null, token: null });
         expect(localStorage.getItem('walk_cloud_backup')).toBeNull();
         expect(localStorage.getItem('walk_sync_outbox')).toBeNull();
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/wander/');
         expect(eventSpy).toHaveBeenCalled();
-        window.removeEventListener('explorer-sync-state-change', eventSpy);
+        window.removeEventListener('wander-sync-state-change', eventSpy);
     });
 
     test('rejects on server 500 and does not clear local state', async () => {
         await setupAccepted('rugged-pine-42');
         mockFetch({ 'DELETE /wander/api/rugged-pine-42': { status: 500 } });
-        await expect(window.ExplorerSync.deleteAccount()).rejects.toThrow();
+        await expect(window.WanderSync.deleteAccount()).rejects.toThrow();
         expect(localStorage.getItem('walk_cloud_backup')).not.toBeNull();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'accepted', username: 'rugged-pine-42' });
     });
 
     test('resolves without fetching when anonymous', async () => {
         setupAnonymous();
         const fetchSpy = vi.fn();
         global.fetch = fetchSpy;
-        await expect(window.ExplorerSync.deleteAccount()).resolves.toBeUndefined();
+        await expect(window.WanderSync.deleteAccount()).resolves.toBeUndefined();
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 });
 
-// ── ExplorerSync.requestConsent ──────────────────────────────────────────────
+// ── WanderSync.requestConsent ──────────────────────────────────────────────
 
-describe('ExplorerSync.requestConsent', () => {
-    test('falls back to window.confirm when no ExplorerSyncUI hook', async () => {
+describe('WanderSync.requestConsent', () => {
+    test('falls back to window.confirm when no WanderSyncUI hook', async () => {
         setLocation('/wander/');
         setLocalStorage({});
         mockFetch({
@@ -464,19 +464,19 @@ describe('ExplorerSync.requestConsent', () => {
         });
         loadSync();
         vi.spyOn(window, 'confirm').mockReturnValue(true);
-        const result = await window.ExplorerSync.requestConsent();
+        const result = await window.WanderSync.requestConsent();
         expect(result).toBe('accepted');
     });
 
-    test('uses ExplorerSyncUI.showConsentToast when registered', async () => {
+    test('uses WanderSyncUI.showConsentToast when registered', async () => {
         setLocation('/wander/');
         setLocalStorage({});
         loadSync();
-        window.ExplorerSyncUI = {
+        window.WanderSyncUI = {
             showConsentToast: vi.fn(() => Promise.resolve('declined')),
         };
-        const result = await window.ExplorerSync.requestConsent();
-        expect(window.ExplorerSyncUI.showConsentToast).toHaveBeenCalled();
+        const result = await window.WanderSync.requestConsent();
+        expect(window.WanderSyncUI.showConsentToast).toHaveBeenCalled();
         expect(result).toBe('declined');
     });
 });
@@ -499,8 +499,8 @@ describe('legacy /explorer URLs', () => {
         });
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
     });
@@ -513,8 +513,8 @@ describe('legacy /explorer URLs', () => {
         });
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
     });
@@ -528,7 +528,7 @@ describe('legacy /explorer URLs', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         const replaceSpy = vi.spyOn(history, 'replaceState');
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/wander/rugged-pine-42#t=tok-rp42');
     });
 
@@ -544,7 +544,7 @@ describe('legacy /explorer URLs', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         const replaceSpy = vi.spyOn(history, 'replaceState');
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(replaceSpy).toHaveBeenCalledWith(null, '', '/wander/rugged-pine-42#r=abc123&t=tok-rp42');
     });
 
@@ -557,7 +557,7 @@ describe('legacy /explorer URLs', () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         const replaceSpy = vi.spyOn(history, 'replaceState');
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(replaceSpy).not.toHaveBeenCalled();
     });
 
@@ -569,9 +569,9 @@ describe('legacy /explorer URLs', () => {
         });
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         // Arrived on the old prefix; the link handed onward is the new one.
-        expect(window.ExplorerSync.getState().link)
+        expect(window.WanderSync.getState().link)
             .toBe('https://mase.fi/wander/rugged-pine-42#t=tok-rp42');
     });
 
@@ -586,10 +586,10 @@ describe('legacy /explorer URLs', () => {
             const fetchSpy = vi.fn();
             global.fetch = fetchSpy;
             loadSync();
-            await window.ExplorerSync.init();
+            await window.WanderSync.init();
             expect(confirmSpy).not.toHaveBeenCalled();
             expect(fetchSpy).not.toHaveBeenCalled();
-            expect(window.ExplorerSync.getState().state).toBe('anonymous');
+            expect(window.WanderSync.getState().state).toBe('anonymous');
         }
     );
 });

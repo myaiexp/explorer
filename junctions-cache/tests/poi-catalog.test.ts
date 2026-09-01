@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Tests for src/poi-catalog.ts — selector → filters resolution and the
-// cache-key fragment. Cross-repo drift against explorer/poi-types.js is a
-// separate guard: explorer/tests/poi-catalog-parity.test.js.
+// cache-key fragment. Cross-repo drift against wander/poi-types.js is a
+// separate guard: wander/tests/poi-catalog-parity.test.js.
 
 import { describe, test, expect } from 'vitest';
 import { POI_FILTERS, filtersForTypes } from '../src/poi-catalog.js';

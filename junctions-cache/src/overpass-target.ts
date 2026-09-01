@@ -1,7 +1,7 @@
 // Which Overpass instance the next request goes to: the self-hosted local one,
 // or the public fallback while local is latched down.
 //
-// TWIN of the frontend's isSelfHostedDown latch in explorer/osrm.js: after a
+// TWIN of the frontend's isSelfHostedDown latch in wander/osrm.js: after a
 // local failure we stop hammering a box we already know is unreachable and send
 // traffic to the public instance for LOCAL_DOWN_LATCH_MS, then probe local
 // again. Deliberately independent copies — separate deployables, no shared

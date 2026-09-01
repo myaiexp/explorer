@@ -5,17 +5,17 @@
  * sync.test.js stubs showConsentToast, so Decline / the 30s auto-timer /
  * Accept success-and-failure / the duplicate-toast guard never ran against
  * the real DOM. This file drives the production UI with fake timers and the
- * real ExplorerSync (via the sync harness) so decline() actually persists
+ * real WanderSync (via the sync harness) so decline() actually persists
  * walk_cloud_backup state=declined.
  *
  * Collaborators resolved at call time: showError/showSuccess and
  * closeOverflowMenuIfOpen are faked (toast.js / overflow-menu.js have their
- * own suites). ExplorerSync is the real one so persist + getState().link
+ * own suites). WanderSync is the real one so persist + getState().link
  * are the production paths.
  *
  * updateSyncMenu (finding #7587) is the only place that shows/hides Enable /
  * Copy backup link / Delete cloud data. Accept success already fires
- * explorer-sync-state-change; these tests assert the resulting visibility so a
+ * wander-sync-state-change; these tests assert the resulting visibility so a
  * regression cannot leave the private #t= link uncopyable or Delete visible
  * while anonymous.
  */
@@ -47,9 +47,9 @@ beforeEach(() => {
     globalThis.showError = (m) => errors.push(m);
     globalThis.showSuccess = (m) => successes.push(m);
     globalThis.closeOverflowMenuIfOpen = vi.fn();
-    // harness deletes ExplorerSyncUI each test so the toast hook doesn't
+    // harness deletes WanderSyncUI each test so the toast hook doesn't
     // intercept requestConsent in other suites; re-bind the real one.
-    window.ExplorerSyncUI = { showConsentToast: globalThis.showConsentToast };
+    window.WanderSyncUI = { showConsentToast: globalThis.showConsentToast };
     vi.useFakeTimers();
 });
 
@@ -99,8 +99,8 @@ function expectAnonymousMenu() {
 // ── showConsentToast ─────────────────────────────────────────────────────────
 
 describe('showConsentToast', () => {
-    test('load registers ExplorerSyncUI.showConsentToast', () => {
-        expect(window.ExplorerSyncUI.showConsentToast).toBe(globalThis.showConsentToast);
+    test('load registers WanderSyncUI.showConsentToast', () => {
+        expect(window.WanderSyncUI.showConsentToast).toBe(globalThis.showConsentToast);
     });
 
     test('second call while the toast is open resolves declined without a second node', async () => {
@@ -114,20 +114,20 @@ describe('showConsentToast', () => {
         await expect(first).resolves.toBe('declined');
     });
 
-    test('Decline calls ExplorerSync.decline() and persists declined', async () => {
-        const decline = vi.spyOn(window.ExplorerSync, 'decline');
+    test('Decline calls WanderSync.decline() and persists declined', async () => {
+        const decline = vi.spyOn(window.WanderSync, 'decline');
         const pending = globalThis.showConsentToast();
         button('Decline').click();
         await expect(pending).resolves.toBe('declined');
         expect(decline).toHaveBeenCalledTimes(1);
         expect(consentRecord()).toEqual({ state: 'declined' });
-        expect(window.ExplorerSync.getState().state).toBe('declined');
+        expect(window.WanderSync.getState().state).toBe('declined');
         expect(toastEl()).toBeNull();
         expectAnonymousMenu();
     });
 
     test('30s auto-timer calls decline() and persists declined', async () => {
-        const decline = vi.spyOn(window.ExplorerSync, 'decline');
+        const decline = vi.spyOn(window.WanderSync, 'decline');
         const pending = globalThis.showConsentToast();
         vi.advanceTimersByTime(29999);
         expect(toastEl()).not.toBeNull();
@@ -144,7 +144,7 @@ describe('showConsentToast', () => {
             'POST /wander/api/accounts': { username: 'rugged-pine-42', token: 'tok-rp42' },
             'POST /wander/api/rugged-pine-42/import': { status: 204 },
         });
-        const decline = vi.spyOn(window.ExplorerSync, 'decline');
+        const decline = vi.spyOn(window.WanderSync, 'decline');
         const pending = globalThis.showConsentToast();
         const acceptBtn = button('Accept');
         const declineBtn = button('Decline');
@@ -164,20 +164,20 @@ describe('showConsentToast', () => {
         // Timer must not fire decline() after a successful Accept.
         vi.advanceTimersByTime(30000);
         expect(decline).not.toHaveBeenCalled();
-        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expect(window.WanderSync.getState().state).toBe('accepted');
         expectAcceptedMenu('rugged-pine-42');
     });
 
-    test('Accept failure settles declined without calling ExplorerSync.decline()', async () => {
+    test('Accept failure settles declined without calling WanderSync.decline()', async () => {
         mockFetch({ 'POST /wander/api/accounts': { status: 500 } });
         vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const decline = vi.spyOn(window.ExplorerSync, 'decline');
+        const decline = vi.spyOn(window.WanderSync, 'decline');
         const pending = globalThis.showConsentToast();
         button('Accept').click();
         await expect(pending).resolves.toBe('declined');
         expect(decline).not.toHaveBeenCalled();
         expect(consentRecord()).toBeNull();
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(window.WanderSync.getState().state).toBe('anonymous');
         expect(errors).toEqual(['Could not enable cloud backup. Try again later.']);
         expect(toastEl()).toBeNull();
         // Accept-failure never fires a state change (state stays anonymous),
@@ -189,8 +189,8 @@ describe('showConsentToast', () => {
 
     test('timer does not decline() while Accept is in flight', async () => {
         let resolveAccept;
-        const decline = vi.spyOn(window.ExplorerSync, 'decline');
-        vi.spyOn(window.ExplorerSync, 'accept').mockImplementation(
+        const decline = vi.spyOn(window.WanderSync, 'decline');
+        vi.spyOn(window.WanderSync, 'accept').mockImplementation(
             () => new Promise((resolve) => { resolveAccept = resolve; }),
         );
         const pending = globalThis.showConsentToast();
@@ -250,22 +250,22 @@ describe('confirmDeleteCloudData', () => {
     test('cancel leaves the account in place', async () => {
         await setupAccepted('rugged-pine-42');
         vi.spyOn(window, 'confirm').mockReturnValue(false);
-        const del = vi.spyOn(window.ExplorerSync, 'deleteAccount');
+        const del = vi.spyOn(window.WanderSync, 'deleteAccount');
         globalThis.confirmDeleteCloudData();
         expect(globalThis.closeOverflowMenuIfOpen).toHaveBeenCalled();
         expect(del).not.toHaveBeenCalled();
-        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expect(window.WanderSync.getState().state).toBe('accepted');
     });
 
     test('confirm calls deleteAccount and toasts success', async () => {
         await setupAccepted('rugged-pine-42');
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         mockFetch({ 'DELETE /wander/api/rugged-pine-42': { status: 204 } });
-        const del = vi.spyOn(window.ExplorerSync, 'deleteAccount');
+        const del = vi.spyOn(window.WanderSync, 'deleteAccount');
         globalThis.confirmDeleteCloudData();
         expect(del).toHaveBeenCalledTimes(1);
         await del.mock.results[0].value;
-        expect(window.ExplorerSync.getState().state).toBe('anonymous');
+        expect(window.WanderSync.getState().state).toBe('anonymous');
         expect(consentRecord()).toBeNull();
         expect(successes).toEqual(['Cloud data deleted.']);
         expectAnonymousMenu();
@@ -276,7 +276,7 @@ describe('confirmDeleteCloudData', () => {
 
 describe('updateSyncMenu', () => {
     function stubState(state, username = null) {
-        vi.spyOn(window.ExplorerSync, 'getState').mockReturnValue({
+        vi.spyOn(window.WanderSync, 'getState').mockReturnValue({
             state, username, token: null, link: null,
         });
     }

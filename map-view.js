@@ -14,7 +14,7 @@ const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
     // warning squares and nothing throws. The per-<img> referrerpolicy
     // attribute overrides the document policy nginx sets, so the tiles keep
     // working even if that vhost drifts back to no-referrer. Origin only:
-    // OSM sees https://mase.fi/, never the /explorer/<username> path.
+    // OSM sees https://mase.fi/, never the /wander/<username> path.
     referrerPolicy: 'strict-origin'
 });
 

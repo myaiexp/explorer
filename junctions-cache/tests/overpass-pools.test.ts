@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Query building + element extraction for the POI and road pools.
 //
-// PORTED from explorer/tests/overpass-parse.test.js, which covered exactly this
+// PORTED from wander/tests/overpass-parse.test.js, which covered exactly this
 // logic while it lived in the browser (fetchPOIsInRadius / fetchRoadsInRadius).
 // That file is deleted with the frontend fetchers, so its 13 assertions land
 // here. The annulus cases go through fetch + filterToAnnulus together, because

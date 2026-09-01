@@ -1,6 +1,6 @@
 // The test DB must be at the same migration as the code under test.
 //
-// Idea #3615: explorer_test carried all five tables while drizzle's own
+// Idea #3615: wander_test carried all five tables while drizzle's own
 // __drizzle_migrations was EMPTY, so `drizzle-kit migrate` against it replayed
 // 0000 CREATE TABLE and died. Nothing noticed, because the suite never
 // migrates — it assumes the schema is already there. That silence is the real

@@ -6,9 +6,9 @@
 //   • sync-init.js     — the load-time consent/URL state machine (Cases 1–5)
 //
 // Consent-toast hook contract:
-//   Register: window.ExplorerSyncUI = { showConsentToast: function() { return Promise<'accepted'|'declined'> } }
+//   Register: window.WanderSyncUI = { showConsentToast: function() { return Promise<'accepted'|'declined'> } }
 //   showConsentToast() must return a Promise that resolves to 'accepted' or 'declined'.
-//   If window.ExplorerSyncUI?.showConsentToast is not set, requestConsent() falls back to window.confirm().
+//   If window.WanderSyncUI?.showConsentToast is not set, requestConsent() falls back to window.confirm().
 //
 // Load order: net.js (for fetchWithTimeout) + sync-flush.js + sync-sections.js
 // + sync-init.js BEFORE this; this BEFORE app.js.
@@ -77,7 +77,7 @@
 
     function fireStateChange() {
         try {
-            window.dispatchEvent(new CustomEvent('explorer-sync-state-change'));
+            window.dispatchEvent(new CustomEvent('wander-sync-state-change'));
         } catch (e) {
             // ignore in envs without CustomEvent
         }
@@ -153,7 +153,7 @@
 
     // ── Public API ───────────────────────────────────────────────────────────────
 
-    var ExplorerSync = {
+    var WanderSync = {
 
         // The consent/URL state machine, in sync-init.js. Kept on the public
         // object because init() below wraps it and the tests drive the five cases
@@ -172,7 +172,7 @@
             // hard-stop (401/403 paused the pump without dropping the queue) and
             // re-arms once consent/token is known good. Fresh workers have no
             // backoff to reset; flushHead no-ops when the queue is empty.
-            return ExplorerSync._runInit().then(function (result) {
+            return WanderSync._runInit().then(function (result) {
                 if (_state === 'accepted') { flushWorker.resume(); }
                 return result;
             });
@@ -192,10 +192,10 @@
         },
 
         requestConsent: function () {
-            if (window.ExplorerSyncUI && typeof window.ExplorerSyncUI.showConsentToast === 'function') {
-                return window.ExplorerSyncUI.showConsentToast();
+            if (window.WanderSyncUI && typeof window.WanderSyncUI.showConsentToast === 'function') {
+                return window.WanderSyncUI.showConsentToast();
             }
-            // Fallback when no ExplorerSyncUI.showConsentToast hook is registered
+            // Fallback when no WanderSyncUI.showConsentToast hook is registered
             var ok = window.confirm(
                 'Save your walks to the cloud?\n\n' +
                 'Your visits, favourites, and saved locations will be backed up ' +
@@ -203,9 +203,9 @@
                 'OK = Back up  |  Cancel = No thanks'
             );
             if (ok) {
-                return ExplorerSync.accept().then(function () { return 'accepted'; });
+                return WanderSync.accept().then(function () { return 'accepted'; });
             } else {
-                ExplorerSync.decline();
+                WanderSync.decline();
                 return Promise.resolve('declined');
             }
         },
@@ -300,6 +300,6 @@
         }
     };
 
-    window.ExplorerSync = ExplorerSync;
+    window.WanderSync = WanderSync;
 
 }());

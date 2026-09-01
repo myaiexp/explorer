@@ -2,10 +2,10 @@
 /**
  * Tests for app.js — the composition root. No other suite loads this file,
  * so three wirings were unguarded (finding #7583):
- *   • explorer-sync-state-change → refreshDataViews (own-device merge used
+ *   • wander-sync-state-change → refreshDataViews (own-device merge used
  *     to stay invisible until reload; sync.test.js only asserts the event
  *     is dispatched, not that lists/visited/favorites re-render)
- *   • ExplorerSync.init().finally(updateSyncMenu)
+ *   • WanderSync.init().finally(updateSyncMenu)
  *   • restoreSettings() after poi-types has filled #locationTypeSelect
  *
  * Collaborators the composition root only *calls* are faked; poi-types and
@@ -55,7 +55,7 @@ beforeAll(() => {
     initPromise = new Promise((resolve) => {
         initDeferred = { resolve };
     });
-    globalThis.ExplorerSync = { init: vi.fn(() => initPromise) };
+    globalThis.WanderSync = { init: vi.fn(() => initPromise) };
 
     loadScripts('poi-types', 'settings');
     vi.spyOn(globalThis, 'restoreSettings');
@@ -99,12 +99,12 @@ describe('app.js composition root', () => {
     });
 
     test('init() is kicked off and updateSyncMenu runs immediately, before init settles', () => {
-        expect(ExplorerSync.init).toHaveBeenCalledTimes(1);
+        expect(WanderSync.init).toHaveBeenCalledTimes(1);
         expect(menuCallsAtLoad).toBe(1);
         expect(restoreFromHash).toHaveBeenCalledTimes(1);
     });
 
-    test('explorer-sync-state-change re-renders visited, favorites, history, saved locations', () => {
+    test('wander-sync-state-change re-renders visited, favorites, history, saved locations', () => {
         const snapshot = Object.fromEntries(
             [
                 'renderVisitedLayer',
@@ -120,7 +120,7 @@ describe('app.js composition root', () => {
             expect(snapshot[name], name).toBeGreaterThanOrEqual(1);
         }
 
-        window.dispatchEvent(new CustomEvent('explorer-sync-state-change'));
+        window.dispatchEvent(new CustomEvent('wander-sync-state-change'));
 
         for (const [name, before] of Object.entries(snapshot)) {
             expect(globalThis[name].mock.calls.length, name).toBe(before + 1);
@@ -138,7 +138,7 @@ describe('app.js composition root', () => {
         // .then(updateSyncMenu) would skip the menu refresh on a rejected GET.
         // Runtime resolve() can't tell them apart, so pin the chain in source.
         expect(readScript('app')).toMatch(
-            /ExplorerSync\.init\(\)\s*\.finally\(\s*updateSyncMenu\s*\)/,
+            /WanderSync\.init\(\)\s*\.finally\(\s*updateSyncMenu\s*\)/,
         );
     });
 });

@@ -4,7 +4,7 @@ Frontend suite at repo root; backend suite under `server/`. Junctions-cache has 
 
 ```bash
 pnpm test              # frontend: vitest run over tests/**/*.test.js
-cd server && pnpm test # backend: vitest against explorer_test, never prod
+cd server && pnpm test # backend: vitest against wander_test, never prod
 ```
 
 ## pnpm layout
@@ -17,7 +17,7 @@ Overrides live in those `pnpm-workspace.yaml` files rather than a `pnpm` key in 
 
 ## Test DB safety
 
-The server suite calls `truncateAll()` in `beforeEach`, so it must never touch the prod `explorer` DB. `server/tests/test-db.ts` resolves the connection: it derives the DB name from `.env`'s `DATABASE_URL` (or an explicit `TEST_DATABASE_URL`), forces the name to `*_test`, and **hard-throws** unless it ends in `_test` — so a prod-pointing `.env` (Helm copies it into worktrees) can never be truncated. `server/vitest.config.ts` sets `fileParallelism: false` because every DB-backed file shares the one `explorer_test` DB and would otherwise race on truncate. That only serializes files inside one vitest process — two *worktrees* running the suite at once still collide on the same `explorer_test`, which reads as scattered FK violations and deadlocks (idea #4042).
+The server suite calls `truncateAll()` in `beforeEach`, so it must never touch the prod `wander` DB. `server/tests/test-db.ts` resolves the connection: it derives the DB name from `.env`'s `DATABASE_URL` (or an explicit `TEST_DATABASE_URL`), forces the name to `*_test`, and **hard-throws** unless it ends in `_test` — so a prod-pointing `.env` (Helm copies it into worktrees) can never be truncated. `server/vitest.config.ts` sets `fileParallelism: false` because every DB-backed file shares the one `wander_test` DB and would otherwise race on truncate. That only serializes files inside one vitest process — two *worktrees* running the suite at once still collide on the same `wander_test`, which reads as scattered FK violations and deadlocks (idea #4042).
 
 ### Migrating the test DB
 
@@ -25,9 +25,9 @@ The server suite calls `truncateAll()` in `beforeEach`, so it must never touch t
 cd server && pnpm db:reset:test   # drop, replay every migration, stamp the journal
 ```
 
-The suite never migrates — it assumes the schema is already there. `tests/migrations.test.ts` is what stops that assumption going stale: it compares `drizzle.__drizzle_migrations` in the live test DB against `drizzle/meta/_journal.json` (same tags, same order, same sha256 per `.sql`), so a migration you generated but never applied to `explorer_test` fails the suite instead of silently letting it assert against last month's columns.
+The suite never migrates — it assumes the schema is already there. `tests/migrations.test.ts` is what stops that assumption going stale: it compares `drizzle.__drizzle_migrations` in the live test DB against `drizzle/meta/_journal.json` (same tags, same order, same sha256 per `.sql`), so a migration you generated but never applied to `wander_test` fails the suite instead of silently letting it assert against last month's columns.
 
-`db:reset:test` is the fix in both directions — after `pnpm db:generate`, and on a fresh box after `createdb explorer_test` (owner `explorer`). It goes through `resolveTestDatabaseUrl()`, so the same `_test`-suffix hard-throw that protects `truncateAll` protects the DROP. Plain `pnpm db:migrate` targets `.env`'s `DATABASE_URL` — **production** — and is the deploy chain's job, not a test step.
+`db:reset:test` is the fix in both directions — after `pnpm db:generate`, and on a fresh box after `createdb wander_test` (owner `wander`). It goes through `resolveTestDatabaseUrl()`, so the same `_test`-suffix hard-throw that protects `truncateAll` protects the DROP. Plain `pnpm db:migrate` targets `.env`'s `DATABASE_URL` — **production** — and is the deploy chain's job, not a test step.
 
 ## localStorage is jsdom's, not Node's
 
@@ -41,7 +41,7 @@ The suite never migrates — it assumes the schema is already there. `tests/migr
 
 Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, geometry, loop-quality]`, `elevation → [net, geo-utils]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
 
-`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check. `app.js` is the same shape in `app.test.js` (faked render*/ExplorerSync collaborators; poi-types + settings loaded explicitly for the restore-order pin) — adding it as a key would pull the composition root into any suite that named it. `elevation` is a key (its tests load it for real, with net + geo-utils); route-view's Loaded-after sentence lists only the real-load collaborators so the same check does not pull elevation.js into those fakes.
+`map-view.js` is loaded for real in `map-view.test.js` against a Leaflet stub, but it is not a SCRIPT_DEPS key: route-view tests fake it, and adding the key would force those tests to pull the real module via the reverse-completeness check. `app.js` is the same shape in `app.test.js` (faked render*/WanderSync collaborators; poi-types + settings loaded explicitly for the restore-order pin) — adding it as a key would pull the composition root into any suite that named it. `elevation` is a key (its tests load it for real, with net + geo-utils); route-view's Loaded-after sentence lists only the real-load collaborators so the same check does not pull elevation.js into those fakes.
 
 ### Transform-before-eval
 
@@ -71,14 +71,14 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 
 ## Sync harness
 
-`helpers/sync-harness.js` builds on the loader: it runs the three non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `ExplorerSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
+`helpers/sync-harness.js` builds on the loader: it runs the three non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `WanderSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
 
 ## Backend layout
 
 Dominant convention, not a hard rule:
 
 - Colocated **`src/**/*.unit.test.ts`** — pure / fake-Db unit tests (no Postgres).
-- **`server/tests/*.test.ts`** — mostly real-DB integration tests that truncate `explorer_test`.
+- **`server/tests/*.test.ts`** — mostly real-DB integration tests that truncate `wander_test`.
 
 The `.unit.` marker keeps same-named unit/integration pairs distinct at a glance (`sections.unit.test.ts` vs `sections.test.ts`). Import's unit file is `src/routes/import-validators.unit.test.ts`, not `import.unit.test.ts` — it covers the extracted validators, while `server/tests/import.test.ts` is the real-DB route.
 

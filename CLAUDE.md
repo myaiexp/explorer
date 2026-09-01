@@ -6,15 +6,17 @@
 
 UI design system (colors, typography, components, layout) is documented in `DESIGN.md`.
 
+The project was called `explorer` everywhere below the UI until 2026-09-01 — repo, checkout, systemd unit, system user, webroot, Postgres, URL. All of that is now `wander`. Two things deliberately still say `explorer`: **`docs/plans/`**, which records what was built under the name it had at the time and is never rewritten, and the **`/explorer` public URL**, which serves permanently alongside `/wander` because a cloud-backup bearer travels between devices as `/explorer/<username>#t=<token>`. The app reads either prefix and writes only `/wander/` (`parseUrlAccount` / `canonicalisePath` in `sync-init.js`).
+
 ## Architecture
 
-Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/explorer`. Script load order in `index.html` is dependency-significant (`defer`d). Dependency-bearing files declare that order in their header comment; `tests/helpers/load.js` `SCRIPT_DEPS` is the single ordered graph — don't reorder the script tags without checking it.
+Frontend is a vanilla static app, no build step. Source files served as-is from `/var/www/html/wander`. Script load order in `index.html` is dependency-significant (`defer`d). Dependency-bearing files declare that order in their header comment; `tests/helpers/load.js` `SCRIPT_DEPS` is the single ordered graph — don't reorder the script tags without checking it.
 
 Dependencies run one way: `app.js` is the composition root and owns no feature — it wires modules and paints the first frame. Nothing calls back into it. The route on screen lives in `session-state.js` behind `getCurrentSession()`/`setCurrentSession()`, and every build runs through `withLoading` in `loading.js`, which is also the one-build-at-a-time mutex — the entry points (Enter, Ctrl+Enter, surprise, pick-on-map, the spread slider) bypass the disabled generate button, so overlap is prevented there, not per-button.
 
-Backend (cloud backup) lives in `server/` — Node 24 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/explorer/api/*`. systemd unit `explorer-api.service` (runs as the `explorer` system user, `ProtectHome` + `MemoryMax=512M`). DB `explorer` (user `explorer`). Migrations under `server/drizzle/`. Frontend tests: `pnpm test` at repo root; backend: `cd server && pnpm test`. **`tests/helpers/load.js` is the only way a test loads a repo-root browser script.** Loader, naming, sync harness, and the backend unit vs integration split: `tests/README.md`.
+Backend (cloud backup) lives in `server/` — Node 24 + Hono + Drizzle + Postgres on port 3700, exposed via nginx at `/wander/api/*`. systemd unit `wander-api.service` (runs as the `wander` system user, `ProtectHome` + `MemoryMax=512M`). DB `wander` (user `wander`). Migrations under `server/drizzle/`. Frontend tests: `pnpm test` at repo root; backend: `cd server && pnpm test`. **`tests/helpers/load.js` is the only way a test loads a repo-root browser script.** Loader, naming, sync harness, and the backend unit vs integration split: `tests/README.md`.
 
-`junctions-cache/` is a separate Hono microservice and **the app's only Overpass client** — the browser never queries an Overpass instance directly. It serves three cached, start-anchored lookups: road junctions (`/junctions`, the smart-routing via snapping), POI candidates (`/pois`) and road candidates (`/roads`). The two pool endpoints do the annulus filtering and 45-candidate capping the frontend used to do, so a generate ships kilobytes instead of the 5.2 MB a 3.85 km road query used to put on the wire. Listens on `127.0.0.1:5001` (prod: `HOST=100.69.160.113`, `PORT=5001`), systemd unit `wander-junctions.service` (dedicated `wander-junctions` nologin user, `ProtectHome` + `MemoryMax=512M`). Deployed on **shelly** (not the VPS) at `/home/shelly/Projects/explorer/junctions-cache` via the `shelly` git remote (`ssh://shelly/home/shelly/explorer.git`); cache snapshot at `/var/lib/wander-junctions/cache.json`. VPS nginx proxies `https://mase.fi/api/junctions/` to it. Has its own `package.json`/tests — see `junctions-cache/README.md` for endpoints, cache modes, and deploy details. Unit install: `deploy/install-wander-junctions.sh`.
+`junctions-cache/` is a separate Hono microservice and **the app's only Overpass client** — the browser never queries an Overpass instance directly. It serves three cached, start-anchored lookups: road junctions (`/junctions`, the smart-routing via snapping), POI candidates (`/pois`) and road candidates (`/roads`). The two pool endpoints do the annulus filtering and 45-candidate capping the frontend used to do, so a generate ships kilobytes instead of the 5.2 MB a 3.85 km road query used to put on the wire. Listens on `127.0.0.1:5001` (prod: `HOST=100.69.160.113`, `PORT=5001`), systemd unit `wander-junctions.service` (dedicated `wander-junctions` nologin user, `ProtectHome` + `MemoryMax=512M`). Deployed on **shelly** (not the VPS) at `/home/shelly/Projects/wander/junctions-cache` via the `shelly` git remote (`ssh://shelly/home/shelly/wander.git`); cache snapshot at `/var/lib/wander-junctions/cache.json`. VPS nginx proxies `https://mase.fi/api/junctions/` to it. Has its own `package.json`/tests — see `junctions-cache/README.md` for endpoints, cache modes, and deploy details. Unit install: `deploy/install-wander-junctions.sh`.
 
 Its Overpass upstream is `wander-overpass.service`, a pinned `wiktorn/overpass-api` container on shelly holding the Geofabrik Finland extract on `127.0.0.1:5002`, refreshed hourly from Geofabrik diffs. Public `overpass-api.de` is a fallback only, reached behind a 5-minute local-down latch. See `deploy/shelly-overpass/README.md`.
 
@@ -48,12 +50,12 @@ Backend:
 cd server
 pnpm install
 pnpm dev               # tsx watch
-pnpm test              # vitest (runs against explorer_test, never prod)
-pnpm db:reset:test     # rebuild explorer_test from the migration chain
+pnpm test              # vitest (runs against wander_test, never prod)
+pnpm db:reset:test     # rebuild wander_test from the migration chain
 pnpm db:migrate        # PROD — guarded: refuses destructive DDL from a worktree
 pnpm build             # tsc → dist/
 ```
 
 Four independent pnpm lockfiles (root, `server/`, `junctions-cache/`, `tools/`) so pnpm does not hoist — layout, the silent-absorb trap, and the `*_test` hard-throw: `tests/README.md`. Only `server/` (forgejo-deploy) and `junctions-cache/` (shelly hook) are `pnpm install`ed on deploy; root and `tools/` are local/dev only.
 
-Deploy with `deploy` (push → forgejo-deploy builds the server, migrates, copies frontend; local script restarts `explorer-api`). Canonical nginx/systemd files, unit-install caveat, and `ProtectHome=tmpfs`: `deploy/README.md`. Junctions-cache deploys separately (`junctions-cache/README.md`).
+Deploy with `deploy` (push → forgejo-deploy builds the server, migrates, copies frontend; local script restarts `wander-api`). Canonical nginx/systemd files, unit-install caveat, and `ProtectHome=tmpfs`: `deploy/README.md`. Junctions-cache deploys separately (`junctions-cache/README.md`).

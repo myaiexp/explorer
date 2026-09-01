@@ -38,7 +38,7 @@ describe('#1566 mergeSection last-write-wins', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         return JSON.parse(localStorage.getItem('walk_visits'));
     }
 
@@ -90,7 +90,7 @@ describe('#1566 mergeSection last-write-wins', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const merged = JSON.parse(localStorage.getItem('walk_visits'));
         expect(merged[0].destName).toBe('server');
         expect(merged[0].routeCoords).toEqual(coords);
@@ -127,7 +127,7 @@ describe('#1566 mergeSection last-write-wins', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const merged = JSON.parse(localStorage.getItem('walk_favorites'));
         expect(merged[0].destName).toBe('server');
         expect(merged[0].routeCoords).toEqual(coords);
@@ -158,7 +158,7 @@ describe('#1566 mergeSection last-write-wins', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const merged = JSON.parse(localStorage.getItem('walk_visits'));
         expect(merged[0].destName).toBe('server');
         expect(merged[0].routeCoords).toEqual(coords);
@@ -182,14 +182,14 @@ describe('#1566 mergeSection last-write-wins', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
 
         expect(confirmSpy).toHaveBeenCalled();
         expect(confirmSpy.mock.calls[0][0]).toContain('Switching to account mossy-fern-7 from rugged-pine-42');
         expect(JSON.parse(localStorage.getItem('walk_visits')).map((v) => v.id)).toEqual(['server-v']);
         // wiped by wipeSections() and never repopulated (server omitted `history`)
         expect(localStorage.getItem('walk_history')).toBeNull();
-        expect(window.ExplorerSync.getState()).toMatchObject({ state: 'accepted', username: 'mossy-fern-7' });
+        expect(window.WanderSync.getState()).toMatchObject({ state: 'accepted', username: 'mossy-fern-7' });
     });
 });
 
@@ -224,7 +224,7 @@ describe('account switch: a failed download after confirm preserves local data',
         // to only null the token, leaving the session 'anonymous' while
         // localStorage still said accepted — the audit #5426 defect reached
         // through the failure path instead of the cancel path.)
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
         expect(JSON.parse(localStorage.getItem('walk_cloud_backup')).username).toBe('rugged-pine-42');
@@ -232,13 +232,13 @@ describe('account switch: a failed download after confirm preserves local data',
 
     test('non-ok response (500) after confirm: local sections survive, token rolled back', async () => {
         setupSwitch({ status: 500 });
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expectLocalDataSurvived();
     });
 
     test('network error after confirm: local sections survive, token rolled back', async () => {
         setupSwitch('OFFLINE');
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expectLocalDataSurvived();
     });
 });
@@ -271,7 +271,7 @@ describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const stored = JSON.parse(localStorage.getItem('walk_favorites'));
         expect(stored).toHaveLength(1);
         // Flat shape the renderer reads — NOT {payload:{…}}
@@ -296,7 +296,7 @@ describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const stored = JSON.parse(localStorage.getItem('walk_favorites'));
         expect(stored).toHaveLength(1);
         expect(stored[0].destLat).toBe(60.1);
@@ -318,7 +318,7 @@ describe('#2065 favorites round-trip (sync-down unwraps payload)', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         const stored = JSON.parse(localStorage.getItem('walk_visits'));
         expect(stored[0]).toMatchObject({ id: 'v1', destLat: 61.0 });
         expect(stored[0].payload).toBeUndefined();
@@ -376,10 +376,10 @@ describe('quota-full sync-down', () => {
         quotaCeiling(200);
 
         const rendered = vi.fn();
-        window.addEventListener('explorer-sync-state-change', rendered);
+        window.addEventListener('wander-sync-state-change', rendered);
         // A raw setItem would reject this await with QuotaExceededError.
-        await expect(window.ExplorerSync.init()).resolves.toBeUndefined();
-        window.removeEventListener('explorer-sync-state-change', rendered);
+        await expect(window.WanderSync.init()).resolves.toBeUndefined();
+        window.removeEventListener('wander-sync-state-change', rendered);
 
         // storage.js surfaced the full-storage toast rather than failing silently.
         expect(globalThis.showError).toHaveBeenCalled();
@@ -388,7 +388,7 @@ describe('quota-full sync-down', () => {
         expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
         // Still 'accepted', and the UI is still told to re-render: the sections that
         // did land must not be stranded behind a missing state-change event.
-        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        expect(window.WanderSync.getState().state).toBe('accepted');
         expect(rendered).toHaveBeenCalled();
         delete globalThis.showError;
     });
@@ -410,7 +410,7 @@ describe('quota-full sync-down', () => {
         loadSync();
         quotaCeiling(200);
 
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
 
         // wipeSections() ran before the failed populate; without the rollback the
         // device would be left erased holding only part of the new account.
@@ -418,7 +418,7 @@ describe('quota-full sync-down', () => {
         expect(JSON.parse(localStorage.getItem('walk_history'))).toEqual([{ id: 'local-h' }]);
         // The switch did not happen: no foreign account is bound, and the device
         // is rolled back onto the account its restored data belongs to.
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
         expect(globalThis.showError).toHaveBeenCalledWith(
@@ -455,8 +455,8 @@ describe('isLocalStorageEmpty', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
-        expect(window.ExplorerSync.getState().state).toBe('accepted');
+        await window.WanderSync.init();
+        expect(window.WanderSync.getState().state).toBe('accepted');
         expect(JSON.parse(localStorage.getItem('walk_visits')).map((v) => v.id)).toEqual(['server-1']);
     });
 });
@@ -486,7 +486,7 @@ describe('#2735 cloud-synced trip rows go through normalizeVisit', () => {
             ),
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         return {
             visits: JSON.parse(localStorage.getItem('walk_visits') || '[]'),
             history: JSON.parse(localStorage.getItem('walk_history') || '[]'),
@@ -559,7 +559,7 @@ describe('#2735 cloud-synced trip rows go through normalizeVisit', () => {
             },
         });
         loadSync();
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         expect(JSON.parse(localStorage.getItem('walk_favorites'))).toHaveLength(1);
         expect(JSON.parse(localStorage.getItem('walk_saved_locations'))).toHaveLength(1);
     });

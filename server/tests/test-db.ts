@@ -52,7 +52,7 @@ export function guardedTestUrl(
 }
 
 // The URL the test suite connects to. An explicit TEST_DATABASE_URL (e.g. CI) is
-// used verbatim; otherwise the explorer db name from .env is suffixed with _test.
+// used verbatim; otherwise the wander db name from .env is suffixed with _test.
 // Either way a hard `_test`-suffix guard makes it impossible to run the destructive
 // suite (truncateAll) against a production db, even with a misconfigured / copied .env.
 export function resolveTestDatabaseUrl(): string {

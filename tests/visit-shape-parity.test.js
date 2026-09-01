@@ -4,7 +4,7 @@
  * deployables:
  *   - visit-shape.js                         (static frontend; no build step)
  *   - server/src/lib/validate-fields.ts
- *     + server/src/lib/route-coords.ts       (VPS explorer-api)
+ *     + server/src/lib/route-coords.ts       (VPS wander-api)
  *
  * Both sides carry reciprocal TWIN comments: MAX_ROUTE_COORDS, the label/name/
  * date length caps, MAX_ID_LEN / SAFE_ID / the dot-segment reject, and the
