@@ -13,6 +13,13 @@ Environment=HOST=100.69.160.113
 Environment=CACHE_PATH=/var/lib/wander-junctions/cache.json
 Environment=NODE_ENV=production
 Environment=TRUSTED_PROXIES=100.117.202.73
+# Overpass targets. Both match the code defaults — they are set explicitly so
+# the unit says where this service sends traffic, rather than making a reader
+# go find overpass-target.ts. Local is wander-overpass.service on loopback
+# (deploy/shelly-overpass/); the public instance is reached only while the
+# 5-minute local-down latch is live.
+Environment=OVERPASS_URL=http://127.0.0.1:5002/api/interpreter
+Environment=OVERPASS_FALLBACK_URL=https://overpass-api.de/api/interpreter
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
