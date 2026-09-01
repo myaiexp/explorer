@@ -57,7 +57,9 @@ beforeEach(() => {
     };
   };
 
-  loadScripts('route-restore');
+  // session.js for real: buildAndDisplay's persist gate is its isMeasuredWalk,
+  // a pure predicate with no collaborators of its own to clobber.
+  loadScripts('session', 'route-restore');
 });
 
 function sampleEntry(over = {}) {
@@ -130,6 +132,38 @@ describe('restoreResult — re-display must not persist', () => {
     expect(saveToHistoryCalls).toHaveLength(0);
   });
 
+  // Idea #3807, the restore half. computeRouteTotals substitutes the crow-flies
+  // distance for an absent return leg on a round trip, so re-displaying a stored
+  // round trip that has an outbound but no return geometry added a straight line
+  // ON TOP of a total that already covered the whole walk — the entry grew every
+  // time it was opened. A zero-distance return stub says "measured, contributes
+  // nothing" and leaves the stored total alone.
+  test('a round-trip entry with no return geometry does not re-add the straight line', () => {
+    restoreResult(sampleEntry({
+      returnRouteCoords: null,
+      returnRouteDistance: undefined,
+      returnRouteDuration: undefined,
+    }));
+
+    const args = displayRouteCalls[0];
+    expect(args.outbound.distance).toBe(3000);
+    expect(args.ret).not.toBeNull();
+    expect(args.ret.distance).toBe(0);
+    expect(args.ret.duration).toBe(0);
+    expect(args.ret.coords).toEqual([]);
+  });
+
+  test('a one-way entry with no return geometry keeps a null return leg', () => {
+    restoreResult(sampleEntry({
+      tripMode: 'one-way',
+      returnRouteCoords: null,
+      returnRouteDistance: undefined,
+      returnRouteDuration: undefined,
+    }));
+
+    expect(displayRouteCalls[0].ret).toBeNull();
+  });
+
   test('entries with no stored coords still re-display without persisting', () => {
     restoreResult(sampleEntry({
       routeCoords: null,
@@ -187,6 +221,27 @@ describe('buildAndDisplay — successful build persists', () => {
     // Pick-on-map / share-link have no category of their own; passing null
     // (not omitting the field) is what stops displayRoute inheriting the form.
     expect(displayRouteCalls[0].poiCategory).toBeNull();
+  });
+
+  // Same rule as generate.js's gate (idea #3807): a round trip missing its
+  // return leg is a part-fabricated total, so pick-on-map and shared-link
+  // restores must not persist it either.
+  test('does not persist a round trip whose return leg failed', async () => {
+    globalThis.buildRouteForMode = async (...args) => {
+      buildRouteCalls.push(args);
+      return {
+        outbound: { coords: [[62.1, 25.7], [62.2, 25.8]], distance: 3000, duration: 2000 },
+        return: null,
+        junctions: null,
+      };
+    };
+
+    await buildAndDisplay(62.1, 25.7, 62.2, 25.8, {
+      tripMode: 'round', locationInput: 'x', destName: 'y', onProgress: () => {},
+    });
+
+    expect(displayRouteCalls).toHaveLength(1);
+    expect(saveToHistoryCalls).toHaveLength(0);
   });
 
   test('forwards an explicit poiCategory option through to displayRoute', async () => {

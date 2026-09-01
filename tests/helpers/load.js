@@ -60,7 +60,7 @@ export const SCRIPT_DEPS = {
     'elevation':    ['net', 'geo-utils'],
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
     'osrm':         ['net', 'geometry', 'loop-quality'],
-    // fetchWithTimeout only: bboxAround/haversineKm moved server-side with the
+    // fetchWithTimeout only: the bbox/distance math moved server-side with the
     // Overpass queries, so overpass.js no longer touches geo-utils.
     'overpass':     ['net'],
     'result-panel': ['session-state'],

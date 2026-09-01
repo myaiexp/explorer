@@ -1,0 +1,20 @@
+{
+  // The emit config, used only by `pnpm build` (and so by forgejo-deploy).
+  //
+  // The BASE tsconfig is deliberately the wide, no-emit one: `tsc --noEmit` with no
+  // -p is what a session actually types before committing, and until idea #4045 it
+  // silently covered src/ alone — 25 test files and every script went unchecked while
+  // the command looked satisfied. Widening the default and narrowing the build is the
+  // way round that leaves no way to hold it wrong.
+  //
+  // Only src/ is emitted: rootDir pins dist/index.js at the path
+  // deploy/explorer-api.service's ExecStart names.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true
+  },
+  "include": ["src/**/*"]
+}

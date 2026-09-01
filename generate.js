@@ -108,12 +108,12 @@ async function generateDestination() {
                 poiCategory: rawLocationType,
             });
             session.junctions = junctions;
-            // Missing outbound means routing built nothing. displayRoute still
-            // draws the dest (dashed straight-line fallback), but persisting
-            // would store a fake walk in history and the cloud backup. Empty
-            // coords is the same failure (tryOsrm used to return a truthy
-            // {coords:[]} for a malformed OSRM 200 — finding #7926).
-            if (outboundRoute?.coords?.length) saveToHistory(session);
+            // Only a walk that routed end to end gets persisted. displayRoute
+            // still draws whatever it has, but history and the cloud backup
+            // store a plain km number with nothing marking it as part guess —
+            // see isMeasuredWalk in session.js for the two ways a leg goes
+            // missing and why a round trip needs both.
+            if (isMeasuredWalk(outboundRoute, returnRoute, tripMode)) saveToHistory(session);
 
             // Re-read the latch AFTER the build, not just before. Two different
             // questions: `degraded` above decided how much work to attempt and

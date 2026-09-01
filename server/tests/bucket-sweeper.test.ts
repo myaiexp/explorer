@@ -40,7 +40,9 @@ app.put(
 );
 const PROXY_ENV = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
 
-function write(username: string, ip: string): Promise<Response> {
+// async, not a bare `Promise<Response>` return type: app.request is overloaded to
+// `Response | Promise<Response>`, which does not assign to the narrower annotation.
+async function write(username: string, ip: string): Promise<Response> {
   return app.request(
     `/${username}/write`,
     { method: 'PUT', headers: { 'x-forwarded-for': ip } },
