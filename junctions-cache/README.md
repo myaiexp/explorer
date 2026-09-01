@@ -66,6 +66,24 @@ GET  /logs?n=<count>
 
 Start/radius used to travel on the GET query string and land in nginx access logs at full JS precision (often home). They now go in the POST body so the request line has no coordinates (finding #7559). GET is bbox-only: any of `startLat`/`startLng`/`maxKm` on the query string 400s with "must be sent in the POST body".
 
+`/health` reports the two ways this service degrades without failing — both keep answering 200s otherwise:
+
+```json
+{
+    "ok": true,
+    "cacheEntries": 20,
+    "overpass": {
+        "local": true,                              // false ⇒ serving the public fallback (latch live)
+        "dataTimestamp": "2026-09-01T11:00:00Z",    // osm3s.timestamp_osm_base from the local instance
+        "dataAgeSec": 3600,                         // climbing past a day ⇒ the Geofabrik updater has wedged
+        "observedAt": "2026-09-01T12:00:00.000Z",   // when that reading was taken…
+        "observedAgeSec": 0                         // …so old news reads differently from stale data
+    }
+}
+```
+
+The reading is recorded off the queries the service already makes, never probed: `/health` is publicly reachable through the VPS proxy, so querying Overpass from it would let any caller drive outbound load and — since every query latches the target on failure — let a health check reroute production traffic to the fallback. The four freshness fields are `null` until the first local answer after a restart.
+
 POST body:
 
 ```json

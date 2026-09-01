@@ -36,6 +36,10 @@ import {
     FALLBACK_URL,
     STATUS_URL,
 } from '../src/overpass-target.js';
+import {
+    _resetFreshness,
+    getFreshness,
+} from '../src/overpass-freshness.js';
 import { log } from '../src/log.js';
 
 // Mock log so we can read the per-retry wait_sec (= getStatusWaitSec()'s return)
@@ -568,5 +572,93 @@ describe('getStatusWaitSec (via overpass_retry wait_sec, public path)', () => {
     test('falls back to 15s when the status fetch throws', async () => {
         const wait = await firstRetryWait({ statusThrows: true });
         expect(wait).toBe(15);
+    });
+});
+
+// ── osm3s data-freshness recording (idea #4011) ──────────────────────────────
+//
+// wander-overpass applies Geofabrik diffs hourly; the classic failure is the
+// updater wedging while the instance keeps serving, so data rots invisibly.
+// Every answer carries osm3s.timestamp_osm_base, and recording it off the
+// queries we already make makes that observable on /health. Local answers only:
+// a fallback answer's timestamp describes overpass-api.de, not our instance.
+
+describe('osm3s freshness recording', () => {
+    beforeEach(() => {
+        _resetFreshness();
+    });
+
+    async function query(opts: Parameters<typeof installFetch>[0]) {
+        installFetch(opts);
+        const p = runOverpassQuery(QUERY);
+        await vi.runAllTimersAsync();
+        return p;
+    }
+
+    test('records timestamp_osm_base from a local answer', async () => {
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        await query({
+            local: [okJson({
+                version: 0.6,
+                osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' },
+                elements: [],
+            })],
+        });
+
+        const f = getFreshness();
+        expect(f.dataTimestamp).toBe('2026-09-01T11:00:00Z');
+        expect(f.dataAgeSec).toBe(3600);
+        expect(f.observedAt).toBe('2026-09-01T12:00:00.000Z');
+        expect(f.observedAgeSec).toBe(0);
+    });
+
+    test('does NOT record a public-fallback answer — that timestamp is not ours', async () => {
+        usePublic();
+        await query({
+            fallback: [okJson({
+                osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' },
+                elements: [],
+            })],
+        });
+
+        expect(getFreshness().dataTimestamp).toBeNull();
+    });
+
+    test('an answer with no osm3s header leaves the previous reading intact', async () => {
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        await query({
+            local: [
+                okJson({ osm3s: { timestamp_osm_base: '2026-09-01T11:00:00Z' }, elements: [] }),
+                okJson({ elements: [] }),                       // no header at all
+                okJson({ osm3s: { timestamp_osm_base: 'not a date' }, elements: [] }),
+            ],
+        });
+        await query({ local: [okJson({ elements: [] })] });
+        await query({ local: [okJson({ osm3s: { timestamp_osm_base: 'not a date' }, elements: [] })] });
+
+        // Unknown is no evidence about freshness — better a stale-but-true
+        // reading with an old observedAt than a null that reads as "never asked".
+        expect(getFreshness().dataTimestamp).toBe('2026-09-01T11:00:00Z');
+    });
+
+    test('a later local answer replaces the earlier reading', async () => {
+        vi.setSystemTime(new Date('2026-09-01T12:00:00Z'));
+        await query({ local: [okJson({ osm3s: { timestamp_osm_base: '2026-09-01T09:00:00Z' }, elements: [] })] });
+        vi.setSystemTime(new Date('2026-09-01T13:00:00Z'));
+        await query({ local: [okJson({ osm3s: { timestamp_osm_base: '2026-09-01T12:30:00Z' }, elements: [] })] });
+
+        const f = getFreshness();
+        expect(f.dataTimestamp).toBe('2026-09-01T12:30:00Z');
+        expect(f.dataAgeSec).toBe(1800);
+    });
+
+    test('reports nulls before any local answer, not a fabricated zero age', () => {
+        const f = getFreshness();
+        expect(f).toEqual({
+            dataTimestamp: null,
+            dataAgeSec: null,
+            observedAt: null,
+            observedAgeSec: null,
+        });
     });
 });

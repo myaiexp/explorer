@@ -3,6 +3,7 @@
 import { log } from './log.js';
 import { BodyTooLargeError, readTextCapped } from './lib/read-capped.js';
 import { currentTarget, markLocalDown, STATUS_URL } from './overpass-target.js';
+import { recordLocalDataTimestamp, type Osm3sHeader } from './overpass-freshness.js';
 
 const ATTEMPT_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
@@ -141,7 +142,11 @@ export async function runOverpassQuery(query: string): Promise<OverpassElement[]
                 'overpass',
                 res.headers.get('content-length'),
             );
-            const data = JSON.parse(text) as { elements: OverpassElement[] };
+            const data = JSON.parse(text) as { elements: OverpassElement[]; osm3s?: Osm3sHeader };
+            // Free freshness reading: the answer already says how current its
+            // OSM data is. Local only — a fallback answer describes
+            // overpass-api.de, not the instance that might be wedged.
+            if (target.local) recordLocalDataTimestamp(data.osm3s);
             return data.elements;
         } catch (e) {
             lastErr = e as Error;
