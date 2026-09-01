@@ -71,7 +71,10 @@ export const SCRIPT_DEPS = {
     // list it via the reverse-completeness check and clobber those stubs.
     'route-view':   ['session-state', 'geometry', 'result-panel'],
     'visits-io':    ['visit-shape'],
-    'sync':         ['sync-flush', 'sync-sections'],
+    'sync':         ['sync-flush', 'sync-sections', 'sync-init'],
+    // The state machine reads the section helpers directly (mergeSection /
+    // populateSection / wipeSections), so it needs them loaded too.
+    'sync-init':    ['sync-sections'],
     // restoreFromHash gates on inFinland so a shared Stockholm link never
     // hits OSRM-foot. Tests load share-link for real; bbox is the one
     // collaborator that is not faked.
