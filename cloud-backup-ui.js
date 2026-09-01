@@ -1,6 +1,6 @@
 // Cloud-backup UI — consent toast plus the overflow-menu sync controls.
 
-// ExplorerSync lives in sync.js; showError/showSuccess in toast.js — both loaded
+// WanderSync lives in sync.js; showError/showSuccess in toast.js — both loaded
 // before this and used as globals.
 
 function showConsentToast() {
@@ -44,7 +44,7 @@ function showConsentToast() {
         };
 
         declineBtn.addEventListener('click', () => {
-            ExplorerSync.decline();
+            WanderSync.decline();
             settle('declined');
         });
         acceptBtn.addEventListener('click', () => {
@@ -56,7 +56,7 @@ function showConsentToast() {
             acceptBtn.disabled = true;
             declineBtn.disabled = true;
             acceptBtn.textContent = 'Saving…';
-            ExplorerSync.accept().then(() => {
+            WanderSync.accept().then(() => {
                 showSuccess('Cloud backup enabled.');
                 settle('accepted');
             }).catch((err) => {
@@ -72,7 +72,7 @@ function showConsentToast() {
 
         autoTimer = setTimeout(() => {
             if (!settled) {
-                ExplorerSync.decline();
+                WanderSync.decline();
                 settle('declined');
             }
         }, 30000);
@@ -80,16 +80,16 @@ function showConsentToast() {
     });
 }
 
-window.ExplorerSyncUI = { showConsentToast };
+window.WanderSyncUI = { showConsentToast };
 
 function enableCloudBackup() {
     closeOverflowMenuIfOpen();
-    ExplorerSync.requestConsent();
+    WanderSync.requestConsent();
 }
 
 function copyBackupLink() {
     closeOverflowMenuIfOpen();
-    const link = ExplorerSync.getState().link;
+    const link = WanderSync.getState().link;
     if (!link) { showError('No backup link available.'); return; }
     navigator.clipboard.writeText(link).then(
         () => showSuccess('Backup link copied — open it on any device to restore your data.'),
@@ -100,7 +100,7 @@ function copyBackupLink() {
 function confirmDeleteCloudData() {
     closeOverflowMenuIfOpen();
     if (!confirm('Delete your cloud data permanently? Your local data will be kept.')) return;
-    ExplorerSync.deleteAccount().then(() => {
+    WanderSync.deleteAccount().then(() => {
         showSuccess('Cloud data deleted.');
     }).catch((err) => {
         console.warn('Delete cloud data failed', err);
@@ -112,7 +112,7 @@ function confirmDeleteCloudData() {
 // open state); called here as a global after acting on a menu item.
 
 function updateSyncMenu() {
-    const s = ExplorerSync.getState();
+    const s = WanderSync.getState();
     const status = document.getElementById('syncStatus');
     const usernameEl = document.getElementById('syncUsername');
     const enableBtn = document.getElementById('enableCloudBackupBtn');
@@ -133,7 +133,7 @@ function updateSyncMenu() {
     }
 }
 
-window.addEventListener('explorer-sync-state-change', updateSyncMenu);
+window.addEventListener('wander-sync-state-change', updateSyncMenu);
 
 globalThis.showConsentToast = showConsentToast;
 globalThis.enableCloudBackup = enableCloudBackup;

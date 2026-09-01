@@ -2,7 +2,7 @@
 /**
  * Drift guard for the token-bucket rate-limiter core that exists in two
  * independent deployables:
- *   - server/src/middleware/rate-limit.ts     (VPS explorer-api)
+ *   - server/src/middleware/rate-limit.ts     (VPS wander-api)
  *   - junctions-cache/src/rate-limit.ts        (shelly microservice)
  *
  * Both files carry reciprocal TWIN comments spelling out which parts MUST stay

@@ -8,7 +8,7 @@
   // way round that leaves no way to hold it wrong.
   //
   // Only src/ is emitted: rootDir pins dist/index.js at the path
-  // deploy/explorer-api.service's ExecStart names.
+  // deploy/wander-api.service's ExecStart names.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,

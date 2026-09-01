@@ -36,12 +36,27 @@
 
         // ── URL parsing ─────────────────────────────────────────────────────────
 
-        function parseUrlUsername() {
-            // Matches /explorer/<username> anywhere in pathname
-            var m = location.pathname.match(/\/explorer\/([^/?#]+)/);
+        // Matches /wander/<username> or /explorer/<username> anywhere in
+        // pathname, and reports WHICH prefix matched so the address bar can be
+        // canonicalised below. The old prefix is read forever: a share link is
+        // how a bearer token travels between devices, and one handed out before
+        // the rename must keep working. This is the ONLY place the old name is
+        // accepted — every write produces /wander/. The alternation keeps its
+        // slashes deliberately: a bare substring test would read /explorers/foo
+        // and /wanderlust/foo as account links.
+        function parseUrlAccount() {
+            var m = location.pathname.match(/\/(wander|explorer)\/([^/?#]+)/);
             if (!m) { return null; }
-            var candidate = m[1];
-            return usernamePattern.test(candidate) ? candidate : null;
+            return usernamePattern.test(m[2]) ? { prefix: m[1], username: m[2] } : null;
+        }
+
+        // Rewrite an old-prefix path to /wander/<username>, leaving the hash
+        // untouched: it carries the #t=<token> credential AND may carry a
+        // share-link route, so only the path may be rewritten. replaceState, not
+        // assign — the page must not reload mid-init.
+        function canonicalisePath(account) {
+            if (account.prefix === 'wander') { return; }
+            history.replaceState(null, '', '/wander/' + account.username + (location.hash || ''));
         }
 
         function parseUrlToken() {
@@ -166,7 +181,8 @@
         // caller kicks the flush pump off that.
         function run() {
             var consent = readConsentRecord();
-            var urlUser = parseUrlUsername();
+            var urlAccount = parseUrlAccount();
+            var urlUser = urlAccount ? urlAccount.username : null;
             var urlToken = parseUrlToken();
 
             // Adopting a URL-sourced account (Cases 3 & 4/5): on a successful
@@ -187,6 +203,11 @@
                 restoreFromConsent(consent);
                 return Promise.resolve();
             }
+
+            // Every path below either keeps the URL or replaces it with a
+            // /wander/ one, so canonicalise here — once, before the case
+            // dispatch — rather than at each of the five outcomes.
+            canonicalisePath(urlAccount);
 
             // ── Cases with URL segment ──────────────────────────────────────────
 
@@ -227,7 +248,7 @@
                     '[Continue / Cancel]'
                 );
                 if (!adoptConfirmed) {
-                    history.replaceState(null, '', '/explorer/');
+                    history.replaceState(null, '', '/wander/');
                     restoreFromConsent(consent);
                     return Promise.resolve();
                 }
@@ -247,7 +268,7 @@
 
             var confirmed = window.confirm(msg + '\n\n[Continue / Cancel]');
             if (!confirmed) {
-                history.replaceState(null, '', '/explorer/');
+                history.replaceState(null, '', '/wander/');
                 restoreFromConsent(consent);
                 return Promise.resolve();
             }

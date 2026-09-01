@@ -52,7 +52,7 @@ function isPlausibleIp(value: string): boolean {
  * Client IP for the rate-limit key. Trust forwarding headers only when the TCP
  * peer is a known reverse proxy — otherwise a caller who reaches this service
  * directly (tailnet, misconfigured firewall) can cycle XFF / X-Real-IP values
- * to bypass the per-IP bucket (audit #1342; mirrored from explorer-api
+ * to bypass the per-IP bucket (audit #1342; mirrored from wander-api
  * lib/client-ip.ts). Behind a trusted proxy prefer X-Real-IP (nginx overwrites
  * it with $remote_addr), then the last X-Forwarded-For hop — never the
  * client-supplied first hop (finding #7895).

@@ -1,4 +1,4 @@
-// Drizzle table definitions for explorer cloud-backup tables
+// Drizzle table definitions for wander cloud-backup tables
 import {
   pgTable,
   text,

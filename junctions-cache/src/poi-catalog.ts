@@ -1,12 +1,12 @@
 // POI catalog — the Overpass filters behind the frontend's destination-type
 // dropdown, keyed by the same catalog keys the dropdown uses.
 //
-// TWIN: explorer/poi-types.js carries the same key → filter pairs in its
+// TWIN: wander/poi-types.js carries the same key → filter pairs in its
 // POI_CATEGORIES list. Deliberately independent — separate deployables (this
 // ships to shelly, that serves as a raw static asset), so there is no build
 // step to share a constant through. The filter strings MUST stay byte-identical
 // or a POI search returns a different set than the frontend's catalog claims to
-// offer. explorer/tests/poi-catalog-parity.test.js fails RED if the two copies
+// offer. wander/tests/poi-catalog-parity.test.js fails RED if the two copies
 // drift, in both directions.
 //
 // The server owns this copy because /pois takes catalog KEYS, never filter

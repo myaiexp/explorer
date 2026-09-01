@@ -10,7 +10,7 @@
 // overflow-menu.js and form-controls.js. Each states what it is loaded after in
 // its own header.
 
-// Re-render every localStorage-backed view. Fired on explorer-sync-state-change
+// Re-render every localStorage-backed view. Fired on wander-sync-state-change
 // so a cloud sync that lands AFTER the initial paint — the own-device merge or
 // adopting a backup link, both of which rewrite localStorage once init's GET
 // resolves — becomes visible immediately instead of waiting for a manual reload.
@@ -22,7 +22,7 @@ function refreshDataViews() {
     renderHistorySection();
     renderSavedLocations();
 }
-window.addEventListener('explorer-sync-state-change', refreshDataViews);
+window.addEventListener('wander-sync-state-change', refreshDataViews);
 
 // Settings restore runs after poi-types.js has populated the destination select,
 // otherwise the saved destination type has no option to select.
@@ -30,7 +30,7 @@ restoreSettings();
 initSettingsListeners();
 renderSavedLocations();
 updateSaveLocationBtn();
-ExplorerSync.init().finally(updateSyncMenu);
+WanderSync.init().finally(updateSyncMenu);
 updateSyncMenu();
 renderVisitedLayer();
 updateVisitedCounter();

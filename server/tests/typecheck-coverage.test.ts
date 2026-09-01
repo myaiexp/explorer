@@ -52,7 +52,7 @@ describe('tsconfig.build.json — what deploy compiles', () => {
   });
 
   // rootDir: 'src' with include: ['src/**/*'] is what puts the entry point at
-  // dist/index.js — the path deploy/explorer-api.service's ExecStart names.
+  // dist/index.js — the path deploy/wander-api.service's ExecStart names.
   test('emits only src, rooted so the entry lands at dist/index.js', () => {
     expect(build.include).toEqual(['src/**/*']);
     expect(build.compilerOptions?.rootDir).toBe('src');

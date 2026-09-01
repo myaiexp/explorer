@@ -1,6 +1,6 @@
 // Ported from helm's src/db/migrate-guard.test.ts (idea #3965). The refusal
-// copy differs — explorer migrates from forgejo-deploy, not from `deploy` — so
-// the renderRefusal cases assert explorer's own resolution path.
+// copy differs — wander migrates from forgejo-deploy, not from `deploy` — so
+// the renderRefusal cases assert wander's own resolution path.
 import { describe, it, expect } from 'vitest';
 import { decideMigrate, renderRefusal, type PendingMigration } from './migrate-guard.js';
 
@@ -77,7 +77,7 @@ describe('renderRefusal', () => {
   });
 
   it('names db:reset:test as the way to get the schema locally', () => {
-    // explorer, unlike helm, HAS a dev database: explorer_test. A session that only
+    // wander, unlike helm, HAS a dev database: wander_test. A session that only
     // needs to develop against the new shape never has to touch prod at all, and a
     // refusal that did not say so would push people straight to --force.
     expect(renderRefusal([destructive('0004_x')], { mainCheckout: false })).toContain('db:reset:test');

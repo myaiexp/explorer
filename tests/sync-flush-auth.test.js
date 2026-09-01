@@ -30,8 +30,8 @@ describe('auth hard-stop (audit #6223)', () => {
             });
         });
 
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-a', { id: 'uuid-a' });
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-b', { id: 'uuid-b' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-a', { id: 'uuid-a' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-b', { id: 'uuid-b' });
         await drainFlushPump();
 
         // Only the head was attempted; both entries remain queued.
@@ -42,7 +42,7 @@ describe('auth hard-stop (audit #6223)', () => {
         expect(warnSpy).toHaveBeenCalled();
 
         // A later enqueue must not re-arm the pump while auth is still broken.
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-c', { id: 'uuid-c' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-c', { id: 'uuid-c' });
         await drainFlushPump();
         expect(callCount).toBe(1);
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(3);
@@ -58,9 +58,9 @@ describe('auth hard-stop (audit #6223)', () => {
         const errors = [];
         globalThis.showError = (msg) => { errors.push(msg); };
         mockFetch({
-            'PUT /explorer/api/rugged-pine-42/visits/uuid-f': { status: 403 },
+            'PUT /wander/api/rugged-pine-42/visits/uuid-f': { status: 403 },
         });
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-f', { id: 'uuid-f' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-f', { id: 'uuid-f' });
         await drainFlushPump();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
         expect(errors).toHaveLength(1);
@@ -100,13 +100,13 @@ describe('auth hard-stop (audit #6223)', () => {
             });
         });
 
-        window.ExplorerSync.mutate('visits', 'put', 'uuid-resume', { id: 'uuid-resume' });
+        window.WanderSync.mutate('visits', 'put', 'uuid-resume', { id: 'uuid-resume' });
         await drainFlushPump();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox'))).toHaveLength(1);
         expect(putAttempts).toBe(1);
 
         // Rebind: init on accepted consent calls resume() and re-arms flush.
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
         await drainFlushPump();
         expect(JSON.parse(localStorage.getItem('walk_sync_outbox') || '[]')).toEqual([]);
         expect(putAttempts).toBe(2);

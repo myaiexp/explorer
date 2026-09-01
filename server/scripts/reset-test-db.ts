@@ -1,6 +1,6 @@
-// Rebuild explorer_test from the migration chain — schema AND drizzle journal.
+// Rebuild wander_test from the migration chain — schema AND drizzle journal.
 //
-// Idea #3615: explorer_test had every table but zero rows in
+// Idea #3615: wander_test had every table but zero rows in
 // drizzle.__drizzle_migrations, so `drizzle-kit migrate` against it replayed
 // 0000 CREATE TABLE and died. That state is unreachable from here: the script
 // drops the schema and replays the whole chain through drizzle-orm's migrator,

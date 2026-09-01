@@ -1,14 +1,14 @@
-# explorer-api
+# wander-api
 
 Cloud-backup API for Wander. Hono + Drizzle + Postgres, served on port 3700
-and exposed via nginx at `/explorer/api/*`. Production runs Node 24
-(`/usr/bin/node` in `deploy/explorer-api.service`).
+and exposed via nginx at `/wander/api/*`. Production runs Node 24
+(`/usr/bin/node` in `deploy/wander-api.service`).
 
 ```bash
 pnpm install
 pnpm dev               # tsx watch src/index.ts
-pnpm test              # vitest against explorer_test, never prod
-pnpm db:reset:test     # rebuild explorer_test from the migration chain
+pnpm test              # vitest against wander_test, never prod
+pnpm db:reset:test     # rebuild wander_test from the migration chain
 pnpm build             # tsc → dist/
 ```
 
@@ -16,7 +16,7 @@ pnpm build             # tsc → dist/
 guarded (`scripts/db-migrate.ts`): from a worktree it **refuses** a pending
 migration containing destructive DDL (drop, rename, truncate, `SET NOT NULL`,
 a type change) and points at `deploy`, which runs drizzle-kit from
-`~/Projects/explorer` moments after the push lands. Additive DDL still applies
+`~/Projects/wander` moments after the push lands. Additive DDL still applies
 straight from a worktree. `--force` overrides. The policy is two pure modules,
 `src/lib/migrate-guard.ts` and `src/lib/destructive-ddl.ts`, both unit-tested
 against this repo's own migrations.
@@ -103,21 +103,21 @@ Caps and validators live in `src/lib/validate-fields.ts` /
 ## Client contract
 
 `sync.js` stores the token in the `walk_cloud_backup` consent record and
-carries it in the URL **fragment** (`/explorer/<username>#t=<token>`) so the
+carries it in the URL **fragment** (`/wander/<username>#t=<token>`) so the
 private link works cross-device while keeping the secret out of server
 logs/Referer. The overflow menu's "Copy backup link" button
 (`copyBackupLink` in `cloud-backup-ui.js`) copies that full link.
 
 `localStorage` is origin-scoped (`https://mase.fi`), not path-scoped, so any
 script running on this origin (`/games`, `/porssi`, the site root, …) can
-read `walk_cloud_backup`. `/explorer`'s CSP does not apply to those
+read `walk_cloud_backup`. `/wander`'s CSP does not apply to those
 responses. That is the browser same-origin trust boundary, not a gap in the
 token design: the client must hold the plaintext so "Copy backup link" can
 put it in the fragment, and the API stores only a SHA-256 digest so it
-cannot re-issue. A `Path=/explorer` cookie would keep sibling tabs from
-*reading* the token but would send it on every `/explorer/*` request (access
+cannot re-issue. A `Path=/wander` cookie would keep sibling tabs from
+*reading* the token but would send it on every `/wander/*` request (access
 logs) and is still writable from the rest of the origin (cookie tossing). A
-dedicated origin (`explorer.mase.fi`) would isolate storage, but personal
+dedicated origin (`wander.mase.fi`) would isolate storage, but personal
 apps stay on `mase.fi/<name>/` by policy. Treat XSS anywhere on
 `https://mase.fi` as full cloud-backup takeover.
 

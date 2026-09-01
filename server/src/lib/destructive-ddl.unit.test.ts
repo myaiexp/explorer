@@ -1,5 +1,5 @@
 // Ported from helm's src/db/destructive-ddl.test.ts (idea #3965), with the
-// corpus half re-pointed at explorer's own drizzle/ — the scan is only worth
+// corpus half re-pointed at wander's own drizzle/ — the scan is only worth
 // having if it is right about THIS repo's migrations.
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -146,7 +146,7 @@ describe('findDestructiveDdl — reporting', () => {
   });
 });
 
-describe('findDestructiveDdl — against explorer\'s own migrations', () => {
+describe('findDestructiveDdl — against wander\'s own migrations', () => {
   // The false-NEGATIVE half. 0002 is the destructive one in this repo: it swaps the
   // per-table username indexes and primary keys, so a classifier that stopped
   // recognising DROP INDEX / DROP CONSTRAINT goes red here rather than quietly

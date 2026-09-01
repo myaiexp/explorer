@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Iconography contract for inline SVGs in index.html — fleet stroke weight + grid.
 // Spec: mase.fi docs/design-cards/iconography (viewBox 20|24, stroke 1.5, round caps).
-// idea #2472: explorer icons drifted to mixed 16-grid / stroke-2 weights.
+// idea #2472: wander icons drifted to mixed 16-grid / stroke-2 weights.
 // Node env required: fs/path under the suite default (jsdom) can leave Node
 // builtins externalized, aborting collection before any test runs (audit #5712).
 
@@ -32,7 +32,7 @@ describe('index.html inline SVG iconography contract', () => {
 
     test('every stroked icon uses stroke-width 1.5 and round caps/joins', () => {
         for (const tag of svgOpens) {
-            // Filled-only glyphs (none currently) would skip; all explorer icons stroke.
+            // Filled-only glyphs (none currently) would skip; all wander icons stroke.
             expect(tag, tag).toMatch(/stroke-width="1\.5"/);
             expect(tag, tag).toMatch(/stroke-linecap="round"/);
             expect(tag, tag).toMatch(/stroke-linejoin="round"/);

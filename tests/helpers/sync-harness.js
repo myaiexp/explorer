@@ -4,7 +4,7 @@
  * sync-sections.test.js (merge/normalize/wipe of the four synced sections).
  *
  * The four source modules are non-module IIFEs that register globals, so every
- * suite that drives ExplorerSync needs the same realm setup: run the scripts in
+ * suite that drives WanderSync needs the same realm setup: run the scripts in
  * the jsdom global context, seed location + localStorage, stub fetch. That setup
  * lives here so each suite's bootstrap is `installSyncLifecycle()` plus whatever
  * it actually asserts.
@@ -23,7 +23,7 @@ loadScripts('storage', 'net');
 // ── Loading the sync scripts ─────────────────────────────────────────────────
 
 /**
- * Retire the currently-loaded ExplorerSync instance, if any.
+ * Retire the currently-loaded WanderSync instance, if any.
  *
  * sync.js binds a window 'online' listener and owns a flush worker with its own
  * backoff timer. Both outlive the instance unless explicitly detached, and every
@@ -32,8 +32,8 @@ loadScripts('storage', 'net');
  * flushing one shared queue to their own stale usernames (audit #5399).
  */
 export function destroySync() {
-    if (window.ExplorerSync && typeof window.ExplorerSync._destroy === 'function') {
-        window.ExplorerSync._destroy();
+    if (window.WanderSync && typeof window.WanderSync._destroy === 'function') {
+        window.WanderSync._destroy();
     }
 }
 
@@ -46,7 +46,7 @@ export function destroySync() {
  */
 export function loadSync() {
     destroySync();
-    delete window.ExplorerSync;
+    delete window.WanderSync;
     loadScripts('sync');
 }
 
@@ -55,8 +55,8 @@ export function installSyncLifecycle() {
     beforeEach(() => {
         localStorage.clear();
         vi.restoreAllMocks();
-        delete window.ExplorerSyncUI;
-        setLocation('/explorer/');
+        delete window.WanderSyncUI;
+        setLocation('/wander/');
         loadSync();
     });
 
@@ -164,19 +164,19 @@ export async function flushMicrotasks(n = 3) {
 // ── Common starting states ───────────────────────────────────────────────────
 
 export function setupAnonymous() {
-    setLocation('/explorer/');
+    setLocation('/wander/');
     setLocalStorage({});
     loadSync();
 }
 
 export async function setupAccepted(username) {
-    setLocation('/explorer/' + username);
+    setLocation('/wander/' + username);
     setLocalStorage({ walk_cloud_backup: JSON.stringify({ state: 'accepted', username, token: 'tok-' + username }) });
     mockFetch({
-        ['/explorer/api/' + username]: { visits: [], favorites: [], savedLocations: [], history: [] },
+        ['/wander/api/' + username]: { visits: [], favorites: [], savedLocations: [], history: [] },
     });
     loadSync();
-    await window.ExplorerSync.init();
+    await window.WanderSync.init();
     global.fetch = vi.fn();
 }
 

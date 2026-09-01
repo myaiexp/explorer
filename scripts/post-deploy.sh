@@ -2,7 +2,7 @@
 # Post-deploy hook — run by `deploy` from the main worktree after push, service
 # restart and the health gate.
 #
-# Wander's deployed artifacts span three places (VPS nginx + explorer-api, shelly
+# Wander's deployed artifacts span three places (VPS nginx + wander-api, shelly
 # osrm-foot + wander-overpass + wander-junctions), and `deploy` restarts units it
 # never installs. That gap hid the #7755 hardening on shelly for months while its
 # test passed against the repo copy. So the one thing this hook does is say

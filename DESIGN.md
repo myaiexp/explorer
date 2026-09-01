@@ -1,4 +1,4 @@
-# Design System — Wander / Explorer
+# Design System — Wander
 
 A minimal dark-mode UI designed for tool-like apps: data-dense, keyboard-friendly, no decorative chrome.
 

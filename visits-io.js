@@ -1,6 +1,6 @@
 // Visits JSON backup — export the visits collection to a file and import it back.
 
-// getVisits/VISITS_KEY/writeStoredArray live in storage.js; ExplorerSync in
+// getVisits/VISITS_KEY/writeStoredArray live in storage.js; WanderSync in
 // sync.js; maybeRequestConsent in sync-helpers.js; showError/showSuccess/
 // showWarning in toast.js; triggerDownload in export.js; normalizeVisit in
 // visit-shape.js; updateVisitedCounter in visited.js; renderVisitedLayer in
@@ -86,7 +86,7 @@ function applyImportedVisits(parsed) {
     // this, imported visits live only in localStorage and silently never
     // replicate to the cloud backup when sync is active.
     for (const v of newEntries) {
-        ExplorerSync.mutate('visits', 'put', v.id, v);
+        WanderSync.mutate('visits', 'put', v.id, v);
     }
     maybeRequestConsent();
 

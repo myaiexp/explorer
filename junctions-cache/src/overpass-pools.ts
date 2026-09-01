@@ -1,6 +1,6 @@
 // Overpass queries + element extraction for the POI and road candidate pools.
 //
-// TWIN: explorer/overpass.js carried fetchPOIsInRadius / fetchRoadsInRadius with
+// TWIN: wander/overpass.js carried fetchPOIsInRadius / fetchRoadsInRadius with
 // exactly these queries and exactly this extraction — this is that logic moved
 // server-side so a generate ships kilobytes of candidates instead of megabytes
 // of OSM elements. The queries MUST stay equivalent to the frontend's or a

@@ -40,7 +40,7 @@ describe('restoreSections failure', () => {
         // sync-sections.test.js, but every section write throws — apply fails
         // (so the wipe must roll back) AND restoreSections's raw setItem fails
         // too. That is the remaining data-loss path.
-        setLocation('/explorer/mossy-fern-7', '#t=tok-mf7');
+        setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({
             walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
             walk_visits: JSON.stringify([{ id: 'local-v' }]),
@@ -48,7 +48,7 @@ describe('restoreSections failure', () => {
         });
         vi.spyOn(window, 'confirm').mockReturnValue(true);
         mockFetch({
-            '/explorer/api/mossy-fern-7': {
+            '/wander/api/mossy-fern-7': {
                 visits: [{ id: 'server-v' }], favorites: [], savedLocations: [], history: [],
             },
         });
@@ -62,7 +62,7 @@ describe('restoreSections failure', () => {
             return real.call(this, k, v);
         });
 
-        await window.ExplorerSync.init();
+        await window.WanderSync.init();
 
         expect(restoreSpy).toHaveReturnedWith(false);
         expect(globalThis.showError).toHaveBeenCalledWith(
@@ -70,7 +70,7 @@ describe('restoreSections failure', () => {
         );
         // onFail → rollbackAdopt: the tentative mossy-fern token is dropped,
         // device stays on the account the (now unrestorable) data belonged to.
-        expect(window.ExplorerSync.getState()).toMatchObject({
+        expect(window.WanderSync.getState()).toMatchObject({
             state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
         });
         delete globalThis.showError;

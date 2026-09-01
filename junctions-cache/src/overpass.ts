@@ -39,15 +39,15 @@ export type OverpassElement = {
     tags?: Record<string, string>;
 };
 
-// The road-filter presets. NO LONGER A TWIN: explorer/overpass.js used to carry
+// The road-filter presets. NO LONGER A TWIN: wander/overpass.js used to carry
 // byte-identical HIGHWAY_EXCLUDE_DEFAULT / _WINTER copies plus its own
 // status-parse + retry loop, kept in lockstep by
-// explorer/tests/overpass-exclude-parity.test.js. The frontend now POSTs /pois
+// wander/tests/overpass-exclude-parity.test.js. The frontend now POSTs /pois
 // and /roads and names a preset by keyword ('default' | 'winter'), so this is
 // the single copy and that parity test is gone with its twin. Do not
 // reintroduce a client-side copy: a client that can only name a preset cannot
 // inject a filter into our own Overpass instance. (The live twin that remains
-// is poi-catalog.ts ↔ explorer/poi-types.js.)
+// is poi-catalog.ts ↔ wander/poi-types.js.)
 export type ExcludePreset = 'default' | 'winter';
 export const HIGHWAY_EXCLUDE: Record<ExcludePreset, string> = {
     default: 'motorway|motorway_link|trunk|trunk_link|service|steps',

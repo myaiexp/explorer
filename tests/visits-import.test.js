@@ -37,7 +37,7 @@ beforeEach(() => {
     localStorage.setItem(key, JSON.stringify(arr));
     return true;
   };
-  globalThis.ExplorerSync = {
+  globalThis.WanderSync = {
     mutate: (section, op, id, data) => mutations.push({ section, op, id, data }),
   };
   globalThis.maybeRequestConsent = vi.fn();
@@ -239,7 +239,7 @@ describe('applyImportedVisits — failures are not relabeled', () => {
   });
 
   test('a cloud-mirror throw propagates too', () => {
-    globalThis.ExplorerSync = { mutate: () => { throw new Error('outbox full'); } };
+    globalThis.WanderSync = { mutate: () => { throw new Error('outbox full'); } };
     expect(() => applyImportedVisits([validRow()])).toThrow('outbox full');
   });
 });
