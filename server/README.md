@@ -56,6 +56,31 @@ failed-auth probing is throttled before the Postgres lookup.
   (`GET_SNAPSHOT_MAX_BYTES`); otherwise 413, so Node never JSON-encodes a
   fill above the dump cap.
 
+## Archive recovery
+
+`GET /:username/archive/:section` walks an account too big for
+`?geometry=full` one bounded page at a time — the 413 stays as the
+unbounded-dump backstop. Archive recovery only; the frontend never calls it.
+
+```
+GET /api/<username>/archive/<visits|history|favorites|savedLocations>
+    ?limit=<1..1000, default 100>&cursor=<opaque>
+→ 200 { section, rows: [...], nextCursor: string|null }
+```
+
+Rows come back newest-first with stored geometry intact, keyset-paged on
+(sort column, id) — `date` for visits/history, `updatedAt` for the other two.
+Follow `nextCursor` until it is null; a cursor is opaque and only valid as
+returned (a hand-built one 400s rather than reaching the `::timestamptz` cast).
+
+A page is cut by whichever of two bounds binds first, and both are needed:
+rows alone do not bound memory (import's 5 MiB body cap lets one visit carry
+megabytes of `routeCoords`), and bytes alone do not either (`saved_locations`
+holds no jsonb, so only the row count stops a 10k-row dump). The byte total is
+summed in Postgres — the row that would blow `ARCHIVE_PAGE_MAX_BYTES` (2 MiB)
+is never serialized into Node. A page always returns at least one row, so a
+single row above the budget is still retrievable instead of stalling the walk.
+
 Caps and validators live in `src/lib/validate-fields.ts` /
 `src/lib/validate-rows.ts`. Trip-row scalar coords (`startLat` / `startLng` /
 `destLat` / `destLng`) must be finite and inside the same WGS-84 bounds as
