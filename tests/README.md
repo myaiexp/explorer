@@ -19,6 +19,10 @@ Overrides live in those `pnpm-workspace.yaml` files rather than a `pnpm` key in 
 
 The server suite calls `truncateAll()` in `beforeEach`, so it must never touch the prod `explorer` DB. `server/tests/test-db.ts` resolves the connection: it derives the DB name from `.env`'s `DATABASE_URL` (or an explicit `TEST_DATABASE_URL`), forces the name to `*_test`, and **hard-throws** unless it ends in `_test` — so a prod-pointing `.env` (Helm copies it into worktrees) can never be truncated. `server/vitest.config.ts` sets `fileParallelism: false` because every DB-backed file shares the one `explorer_test` DB and would otherwise race on truncate. To recreate the test DB on a fresh box: `createdb explorer_test` (owner `explorer`), then apply migrations against it (`DATABASE_URL=postgresql://explorer:…@localhost:5432/explorer_test pnpm db:migrate`).
 
+## localStorage is jsdom's, not Node's
+
+`setup/jsdom-storage.js` (a vitest `setupFiles` entry) rebinds `localStorage`, `sessionStorage` and `Storage` onto globals from one jsdom realm. Node ships Web Storage as a getter-only `globalThis.localStorage` — behind `--experimental-webstorage` on 24, on by default from 25 — which vitest's jsdom environment cannot assign over, so the ambient one wins and the suite quietly stops testing browser storage: `Storage.prototype` spies never intercept a write, so every quota-recovery assertion passes vacuously, and with no `--localstorage-file` the getter itself throws. It is a no-op on a host Node without Web Storage, so nothing changes on the VPS's Node 24. `localstorage-binding.test.js` is the guard; reproduce the hostile ambient with `NODE_OPTIONS=--experimental-webstorage npx vitest run`.
+
 ## Frontend loader
 
 **`helpers/load.js` is the only way a test loads a repo-root browser script.** `loadScripts('screening')` evaluates it and its dependencies in the current realm, in order. Don't hand-roll a bootstrap — the suite previously carried three idioms (`readFileSync`+`vm.Script`, `?raw`+`new Function`, side-effect ESM import) and a load-order fix applied to one silently missed the others.
