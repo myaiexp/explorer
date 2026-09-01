@@ -1,7 +1,9 @@
 # Renaming explorer → wander
 
 **Date:** 2026-09-01
-**Status:** approved, not yet implemented
+**Status:** implemented 2026-09-01. Two things shipped differently from the
+design below — see **As built** at the end before treating any of this as
+current.
 
 The app has called itself **Wander** in the UI since it was built (`<title>`, the
 brand span). Every layer underneath it is still called `explorer`: the Forgejo
@@ -369,3 +371,74 @@ Manual, after step 7:
    homepage card reads "Wander"
 7. Re-run the containment scan from step 5 and confirm the only remaining
    `explorer` hits are the prose columns it deliberately leaves alone
+
+## As built
+
+Two corrections, both found by verifying live rather than by review.
+
+### The legacy prefix is a rewrite, not a second static block
+
+Component 1 above describes two `location` blocks — `/wander` and `/explorer` —
+each `alias`ing `/var/www/html/wander` and each `include`ing the header snippet.
+That shipped, and it was broken: `https://mase.fi/explorer/` returned 200 with
+the right title and the right headers, while every `/explorer/*.js` and `*.css`
+under it 404'd. The page was an empty shell — no scripts, no map, no sync — and
+nothing errored anywhere.
+
+**A regex location outranks a prefix location.** The vhost ends with
+`location ~* \.(css|js|woff2?|…)$` blocks that set the `$asset_cc` cache header
+and carry no root of their own, so they matched `/explorer/sync.js` and served
+it from the server-level `root /var/www/html` — never from the `/explorer`
+block's alias at all. The old config worked for years only because
+`/var/www/html/explorer` existed; the moment step 1 renamed the webroot, the
+same match resolved to a path that was gone. `/wander/*.js` kept working through
+the identical route, because that directory really is named `wander`.
+
+So the legacy prefix owns nothing:
+
+```
+location = /explorer   { return 301 /wander/; }
+location ^~ /explorer/ { rewrite ^/explorer/(.*)$ /wander/$1 last; }
+```
+
+Everything under `/explorer/` is re-matched by the canonical blocks — SPA
+fallback, header snippet, and the API proxy with its rate limit and XFF
+overwrite. The `^~` is what stops the regex search so the rewrite runs first.
+An *internal* rewrite, not a redirect, so the `#t=<token>` fragment and the
+username in the path reach the SPA exactly as sent; bare `/explorer` carries
+neither and can redirect. This also deletes the duplicate `/explorer/api/`
+proxy, and with it the last place the two prefixes could drift apart — a
+stronger version of what the shared header snippet was for.
+
+Verified live on both prefixes: assets 200 with real bytes, POST/PUT/GET/DELETE
+round-trips, byte-identical security headers, and a headless render reporting
+51 scripts, `WanderSync` bound and a live Leaflet container.
+
+### Canonicalisation had to be written, not just renamed
+
+The design says the app "reads either prefix and writes only `/wander/`, so an
+old link works forever and the address bar canonicalises to the new name on
+arrival". The write sites listed in Component 1 are the *cancel* paths. On a
+**successful** adopt nothing rewrote the URL at all, so a device arriving on the
+old prefix stayed there and re-shared it. `canonicalisePath` in `sync-init.js`
+is new: it runs once before the case dispatch and rewrites the path only —
+the hash carries both the credential and, via `share-link.js`, a whole encoded
+route, so rebuilding it from the token alone would destroy a shared route on
+load.
+
+### Step 5 addition: `host_size_snapshots.parent_key`
+
+The table lists `parent_key` as holding `'explorer'`, and the plan's statement
+rewrote only that exact value. `parent_key` also carries the composite form —
+`explorer:tests` (1397 rows), `explorer:server/tests` (436), and so on — which
+names a `key` in the same table. Rewriting `key` on the anchored regex while
+rewriting `parent_key` only on equality would have orphaned every child from the
+parent it names. Both columns use the same `^explorer(:|$)` anchor. 5530 `key`
+rows and 5422 `parent_key` rows.
+
+An independent equality scan across every `text`/`varchar` column confirmed the
+rest of the identity list exactly, and confirmed that nothing operational was
+missed: no `gotchas.glob`/`contains` pattern names a path, and no
+`scheduled_wakes` row was pending. `gotchas.note` for the two project-scoped
+notes was rewritten as an exception to the prose rule — a gotcha note is a live
+instruction delivered to future sessions, not a record of what happened.
