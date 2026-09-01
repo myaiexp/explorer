@@ -1,0 +1,50 @@
+# Self-hosted Overpass API for Finland (Wander's junctions-cache upstream).
+#
+# Loopback-only: junctions-cache runs natively on this host and is the sole
+# consumer, so nothing needs the tailnet. Port 5002 — 5000 is osrm-foot,
+# 5001 is wander-junctions.
+#
+# The image tag is PINNED. Never move it to :latest — the /srv/overpass/db
+# volume holds a multi-hour import, and a tag that changes the on-disk DB
+# format on a restart turns that restart into a re-import.
+#
+# The quoting below is load-bearing. systemd only recognises a quote that
+# opens an item (start of line or after unquoted whitespace), so
+# `-e VAR='a b'` would keep the quotes literally and hand docker a broken
+# env value. `-e "VAR=a b"` is the form that parses.
+[Unit]
+Description=Overpass API (Finland extract) for Wander
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+# A crash or an unclean host shutdown leaves the named container behind, and
+# `docker run --name` then fails forever with "name already in use". Clear it
+# first; `-` so a missing container is not a start failure.
+ExecStartPre=-/usr/bin/docker rm -f wander-overpass
+ExecStart=/usr/bin/docker run --rm --name wander-overpass \
+    -p 127.0.0.1:5002:80 \
+    -v /srv/overpass/db:/db \
+    -e OVERPASS_MODE=init \
+    -e OVERPASS_META=no \
+    -e OVERPASS_USE_AREAS=false \
+    -e OVERPASS_STOP_AFTER_INIT=false \
+    -e OVERPASS_COMPRESSION=gz \
+    -e OVERPASS_UPDATE_SLEEP=3600 \
+    -e OVERPASS_PLANET_URL=https://download.geofabrik.de/europe/finland-latest.osm.pbf \
+    -e OVERPASS_DIFF_URL=https://download.geofabrik.de/europe/finland-updates/ \
+    -e "OVERPASS_PLANET_PREPROCESS=mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf" \
+    wiktorn/overpass-api:v0.7.62.11
+ExecStop=/usr/bin/docker stop wander-overpass
+# The initial import writes for hours; give the container room to flush its
+# indexes rather than being SIGKILLed mid-write into a corrupt DB.
+TimeoutStopSec=300
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
