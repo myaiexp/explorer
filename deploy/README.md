@@ -19,14 +19,24 @@ The project was renamed `explorer` → `wander` (2026-09-01). `helm`'s `forgejo-
 - `wander-junctions.service` — shelly unit for junctions-cache (dedicated `wander-junctions` user, cache under `/var/lib/wander-junctions`).
 - `install-wander-junctions.sh` — idempotent shelly installer for that unit + user (finding #7755 / #7754).
 - `check-unit-drift.sh` — diffs every committed unit against the copy installed on its `# deploy-host:`. Run by `scripts/post-deploy.sh`; pinned by `tests/unit-drift.test.js`.
+- `check-nginx-drift.sh` — the same check for the nginx snippets, whose comparison differs enough to be its own script (see **Config drift** below). Run by `scripts/post-deploy.sh`; pinned by `tests/nginx-drift.test.js`.
 - `shelly-osrm/` — self-hosted OSRM-foot service, refresh timer, and install script for the shelly box.
 - `shelly-overpass/` — self-hosted Overpass API (pinned `wiktorn/overpass-api` container over the Geofabrik Finland extract) on shelly's `127.0.0.1:5002`, the upstream `wander-junctions` queries before falling back to public Overpass. Unit + installer + its own README. Loopback-only: junctions-cache runs natively on that host and is the sole consumer.
 
-## Unit install
+## Config drift
 
 **A unit change is not deployed until you install it, and `check-unit-drift.sh` is what tells you.** `wander-junctions.service` ran on shelly for months as the old pre-#7755 unit — no dedicated user, cache still under `/home/shelly` — while `junctions-cache/tests/wander-junctions-service.test.ts` asserted the hardened shape and passed every run. Both were true: the test reads the *repo* copy, and `deploy` restarts a unit but never installs it. A test that reads a repo file proves the intent, never the deployment (idea #4018).
 
 So `scripts/post-deploy.sh` runs `check-unit-drift.sh` on every deploy: it diffs each `*.service`/`*.timer` under `deploy/` against `/etc/systemd/system/` on the host that unit's own `# deploy-host:` header names (`local` = VPS, otherwise an ssh destination). A unit added later joins the check automatically; one with no header **fails** rather than being skipped, since opt-in would reproduce the same silence. DRIFT and MISSING fail the hook; an unreachable host only warns, because ssh being down is not evidence about drift. It reports — installing stays deliberate, since a unit change usually wants its installer (users, state migration).
+
+The nginx snippets have the same gap and get the same treatment from `check-nginx-drift.sh`, which the hook runs straight after (both always run, then one combined exit, so neither report hides behind the other). The check on 2026-09-01 found `nginx-wander.conf` **had** drifted — live carried `https://tile.openstreetmap.org` in the CSP `img-src` that the repo copy lacked (idea #4047). The comparison is different enough to be its own script: a unit is a whole file, while most of these are *fragments* embedded in `sites-enabled/default`, a vhost shared with every other project on the box. So each conf declares its host and its install path, and the **verb names the comparison**:
+
+| header | shape | comparison |
+| --- | --- | --- |
+| `# deploy-into: <path>` | a fragment of a bigger file | contiguous containment |
+| `# deploy-as: <path>` | the repo owns that whole file | equality |
+
+Exactly one, and neither-or-both **fails**. The two are not interchangeable: containment alone would wave through an `add_header` appended live to `wander-headers.conf`, which is the silent CSP hole that file exists to prevent. Both sides are normalized first — comments dropped, whitespace collapsed, blank lines removed — since a snippet sits one indent level deeper inside `server { }`. The cost is that **comment drift is not reported**: the live vhost's comments still said `/explorer` after the rename and the check stays quiet about it. Behaviour is what it guards.
 
 `deploy` restarts `wander-api` but does not install the unit — after editing `wander-api.service`, `sudo cp` it to `/etc/systemd/system/` and `daemon-reload`. The `wander` system user (`nologin`, no home) is required; `ProtectHome` must stay `tmpfs` (not `yes`) so `BindReadOnlyPaths` of the server tree remains reachable. Isolation is pinned by `server/tests/wander-api-service.test.ts`.
 
