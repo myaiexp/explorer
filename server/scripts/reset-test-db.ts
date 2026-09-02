@@ -18,12 +18,19 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { resolveTestDatabaseUrl, dbNameOf } from '../tests/test-db.js';
+import { openSuiteLock } from '../tests/suite-lock.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function main(): Promise<void> {
   const url = resolveTestDatabaseUrl();
   const name = dbNameOf(url);
+
+  // Same lock the suite holds (idea #4042). Every worktree resolves to this one
+  // database, and dropping the schema out from under a sibling session's running
+  // suite is the worst case of that contention — worse than the truncate races,
+  // because the tables come back empty AND the journal is rewritten.
+  const lock = await openSuiteLock(url);
   console.log(`Resetting test database "${name}" …`);
 
   const pool = new pg.Pool({ connectionString: url });
@@ -44,6 +51,7 @@ async function main(): Promise<void> {
     console.log(`Applied ${rows[0].n} migration(s). "${name}" is at head.`);
   } finally {
     await pool.end();
+    await lock.release();
   }
 }
 

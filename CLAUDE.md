@@ -50,7 +50,8 @@ Backend:
 cd server
 pnpm install
 pnpm dev               # tsx watch
-pnpm test              # vitest (runs against wander_test, never prod)
+pnpm test              # vitest (runs against wander_test, never prod; waits for
+                       # a sibling session's run — every worktree shares that DB)
 pnpm db:reset:test     # rebuild wander_test from the migration chain
 pnpm db:migrate        # PROD — guarded: refuses destructive DDL from a worktree
 pnpm build             # tsc → dist/
