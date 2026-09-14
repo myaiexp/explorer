@@ -41,8 +41,9 @@ The store is bounded so neither memory nor the JSON snapshot grows without limit
 ## Tests
 
 ```bash
-pnpm test        # vitest (environment: 'node' in vitest.config.ts)
-pnpm typecheck   # tsc over src + tests via tsconfig.test.json
+pnpm test            # vitest (environment: 'node' in vitest.config.ts)
+pnpm test:coverage   # the same, and fails under the coverage floor in vitest.config.ts
+pnpm typecheck       # tsc over src + tests via tsconfig.test.json
 ```
 
 `pnpm build` only compiles `src/**` (the base `tsconfig.json` include), so it never type-checks the test files — `pnpm typecheck` uses `tsconfig.test.json` to close that gap and catch unsafe casts/mocks in tests.

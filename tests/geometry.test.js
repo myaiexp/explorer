@@ -59,6 +59,37 @@ describe('envelopeOffsetPoint', () => {
         expect((left.lat + right.lat) / 2).toBeCloseTo(60, 6);
         expect((left.lng + right.lng) / 2).toBeCloseTo(25.1, 6);
     });
+    // The two tests above also pass when the envelope term is dropped and both
+    // sides return the plain interpolated point — which collapses every round
+    // trip onto the start→dest line (finding #10113). These pin the offset itself.
+    test('t=0.5 sits maxOffsetKm off the segment, on opposite sides for ±1', () => {
+        // East-west segment, so the perpendicular runs due north/south.
+        const [midLat, midLng] = [60, 25.1];
+        const left  = globalThis.envelopeOffsetPoint(60, 25, 60, 25.2, 0.5, 1, +1);
+        const right = globalThis.envelopeOffsetPoint(60, 25, 60, 25.2, 0.5, 1, -1);
+        // kmToDegLat is the flat 111 km/deg projection while haversineKm uses
+        // R=6371, so 1 km out comes back as ~1.002 km.
+        expect(globalThis.haversineKm(midLat, midLng, left.lat, left.lng)).toBeCloseTo(1, 1);
+        expect(globalThis.haversineKm(midLat, midLng, right.lat, right.lng)).toBeCloseTo(1, 1);
+        expect(Math.sign(left.lat - midLat)).not.toBe(0);
+        expect(Math.sign(left.lat - midLat)).toBe(-Math.sign(right.lat - midLat));
+        expect(globalThis.haversineKm(left.lat, left.lng, right.lat, right.lng)).toBeCloseTo(2, 1);
+    });
+    test('displacement is perpendicular to A→B and scales with sin(πt)', () => {
+        const [aLat, aLng, bLat, bLng] = [60, 25, 60.1, 25.1];
+        const along = globalThis.bearingRad(aLat, aLng, bLat, bLng);
+        for (const t of [0.25, 0.5, 0.75]) {
+            // The point on the A→B segment the envelope displaces sideways.
+            const lat0 = aLat + t * (bLat - aLat);
+            const lng0 = aLng + t * (bLng - aLng);
+            const p = globalThis.envelopeOffsetPoint(aLat, aLng, bLat, bLng, t, 1, -1);
+            expect(globalThis.haversineKm(lat0, lng0, p.lat, p.lng))
+                .toBeCloseTo(Math.sin(Math.PI * t), 1);
+            const off = globalThis.bearingRad(lat0, lng0, p.lat, p.lng) - along;
+            const rel = Math.atan2(Math.sin(off), Math.cos(off)); // wrap to (-π, π]
+            expect(Math.abs(rel)).toBeCloseTo(Math.PI / 2, 1);
+        }
+    });
 });
 
 describe('generateRandomPointAnnulus', () => {

@@ -52,6 +52,8 @@ pnpm install
 pnpm dev               # tsx watch
 pnpm test              # vitest (runs against wander_test, never prod; waits for
                        # a sibling session's run — every worktree shares that DB)
+pnpm test:coverage     # the same, and fails under the coverage floor (root and
+                       # junctions-cache have one too — tests/README.md)
 pnpm db:reset:test     # rebuild wander_test from the migration chain
 pnpm db:migrate        # PROD — guarded: refuses destructive DDL from a worktree
 pnpm build             # tsc → dist/

@@ -3,9 +3,17 @@
 Frontend suite at repo root; backend suite under `server/`. Junctions-cache has its own (`cd junctions-cache && pnpm test`).
 
 ```bash
-pnpm test              # frontend: vitest run over tests/**/*.test.js
-cd server && pnpm test # backend: vitest against wander_test, never prod
+pnpm test                        # frontend: vitest run over tests/**/*.test.js
+pnpm test:coverage               # the same, and fails under the coverage floor
+cd server && pnpm test           # backend: vitest against wander_test, never prod
+cd server && pnpm test:coverage
 ```
+
+## Coverage floors
+
+Each suite's vitest config (root, `server/`, `junctions-cache/`) carries a `coverage.thresholds` block, enforced only by `pnpm test:coverage` (`vitest run --coverage`) in that directory. A plain `pnpm test` or a path-filtered `vitest run <substring>` never measures coverage, because a filtered run exercises a fraction of the code and would always miss the floor. There is no CI (origin is Forgejo, nothing runs on push), so run the coverage command before landing a change that deletes or rewrites tests. Each floor sits just under the baseline measured when it was set. A drop fails the run; a gain is a reason to raise the floor.
+
+Frontend coverage counts only the deployed repo-root `*.js`. The count is real only because of how `helpers/load.js` evaluates them (see the Frontend loader section): under the `?raw` + `new Function` loader it replaced, every root script reported 100%, loaded or not.
 
 ## pnpm layout
 
@@ -41,6 +49,8 @@ The suite never migrates — it assumes the schema is already there. `tests/migr
 
 **`helpers/load.js` is the only way a test loads a repo-root browser script.** `loadScripts('screening')` evaluates it and its dependencies in the current realm, in order. Don't hand-roll a bootstrap — the suite previously carried three idioms (`readFileSync`+`vm.Script`, `?raw`+`new Function`, side-effect ESM import) and a load-order fix applied to one silently missed the others.
 
+It evaluates with `vm.compileFunction` under the script's `file://` name, so v8 coverage and stack traces land on the real file and line. The source text comes from the `virtual:wander-root-scripts` module (`helpers/root-scripts-plugin.js`, registered in `vitest.config.js`), not a `?raw` glob: v8 keys coverage by path with the query stripped, so each `?raw` string module was reported as its script's own coverage. `new Function` is out for the same reason — its `(function anonymous(` prefix shifts every coverage offset.
+
 `SCRIPT_DEPS` is the single copy of index.html's load-order graph. Direct dependencies only — `loadScripts` walks transitively. A module that gains a real dependency is one edit here rather than a hunt through every test that loads it. `helpers/load.test.js` fails RED if an edge contradicts index.html's `<script>` order.
 
 Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, geometry, loop-quality]`, `elevation → [net, geo-utils]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
@@ -49,7 +59,7 @@ Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm �
 
 ### Transform-before-eval
 
-`readScript(name)` returns source text. One test transforms it before evaluating: **fit-encoder** string-injects an `_internals` export, then `evalScript`s the patched source (side-effect load; return value unused). Every other suite loads through `loadScripts` and reads the module's exports off `globalThis` — `corridor-junctions` drives osrm.js's `fetchCorridorJunctions` after `loadScripts('osrm')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
+`readScript(name)` returns source text. One test transforms it before evaluating: **fit-encoder** string-injects an `_internals` export, then `evalScript`s the patched source (side-effect load; return value unused). It passes no filename — the patched text is not the file on disk, so naming it would misplace coverage — which leaves fit-encoder.js at 0% in the frontend report. Every other suite loads through `loadScripts` and reads the module's exports off `globalThis` — `corridor-junctions` drives osrm.js's `fetchCorridorJunctions` after `loadScripts('osrm')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
 
 ### File naming
 
