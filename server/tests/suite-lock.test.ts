@@ -147,7 +147,15 @@ describe('openSuiteLock — against the real database', () => {
     const other = new pg.Client({ connectionString: url });
     await other.connect();
     try {
-      await other.query('select pg_terminate_backend($1)', [held.backendPid]);
+      // The timeout argument makes the call wait for the backend to exit. Without
+      // it pg_terminate_backend returns once the signal is SENT, and the probe
+      // below can beat the exit and still see the lock held — which is how this
+      // test failed under a full `--coverage` run's load.
+      const killed = await other.query<{ ok: boolean }>(
+        'select pg_terminate_backend($1, 5000) as ok',
+        [held.backendPid],
+      );
+      expect(killed.rows[0].ok).toBe(true);
       const taken = await other.query<{ ok: boolean }>('select pg_try_advisory_lock($1) as ok', [
         PROBE_KEY,
       ]);
