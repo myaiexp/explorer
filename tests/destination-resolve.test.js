@@ -519,6 +519,32 @@ describe('buildRouteForDestination', () => {
         expect(built.return).toEqual({ coords: ['lr'] });
     });
 
+    // destination-resolve.js keeps the wider envelope on the degraded path — it
+    // costs no extra request, and a rough public-OSRM loop is where retracing
+    // hurts most. Every other degraded test leaves the flag at its default.
+    test('a degraded round trip still forwards avoidBacktracking', async () => {
+        globalThis.buildRouteForMode.mockResolvedValue({
+            outbound: { coords: ['lo'] }, return: { coords: ['lr'] }, junctions: null });
+        await globalThis.buildRouteForDestination(60, 24, {
+            candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
+            maxKm: 5, tripMode: 'round', spread: {}, winterMode: false,
+            onProgress: vi.fn(), degraded: true, avoidBacktracking: true });
+        expect(globalThis.buildRouteForMode).toHaveBeenCalledWith(60, 24, 61, 25, expect.objectContaining({
+            degraded: true, avoidBacktracking: true }));
+    });
+
+    test('a healthy round trip forwards avoidBacktracking through findBestLoop', async () => {
+        globalThis.buildJunctionLoop.mockResolvedValue({
+            outbound: { coords: ['o'], distance: 2500 }, return: { coords: ['r'], distance: 2500 },
+            overlap: 0.1, junctions: [{ j: 1 }],
+        });
+        await globalThis.buildRouteForDestination(60, 24, {
+            candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
+            maxKm: 5, tripMode: 'round', spread: {}, winterMode: false,
+            onProgress: vi.fn(), avoidBacktracking: true });
+        expect(globalThis.buildJunctionLoop.mock.calls[0][4].avoidBacktracking).toBe(true);
+    });
+
     test('degraded never enters findBestLoop (one build attempt for a 3-candidate pool)', async () => {
         const pool = [
             { lat: 1, lng: 1, name: 'a' },

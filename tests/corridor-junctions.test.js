@@ -2,12 +2,11 @@
  * Tests for fetchCorridorJunctions (osrm.js) — the start-anchored junction
  * cache fetch.
  *
- * fetchCorridorJunctions lives inside osrm.js, which can't be imported wholesale
- * (its other functions reference cross-module globals like haversineKm).
- * The function is self-contained — it only uses Math / Number / JSON / fetch
- * and an optional onProgress callback — so we pull osrm.js's source via
- * helpers/load.js's readScript('osrm'), extract just this one function's
- * text, and instantiate it in the current realm with a faked global `fetch`.
+ * Loading: loadScripts('osrm') evaluates the production module with its real
+ * SCRIPT_DEPS (net, geometry, loop-quality → geo-utils), the same way
+ * osrm.test.js does, and the tests drive the globalThis.fetchCorridorJunctions
+ * it exports. fetchWithTimeout is the real one: it calls the per-test fake
+ * `fetch` and clears its abort timer once the fake resolves.
  *
  * Guards two invariants:
  *   - audit #1268: maxKm is an explicit parameter, NOT read from the DOM.
@@ -16,46 +15,14 @@
  */
 
 import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
-import { loadScripts, readScript } from './helpers/load.js';
+import { loadScripts } from './helpers/load.js';
 import { jsonResponse, installCannedFetch, requestOf } from './helpers/fetch-stub.js';
-
-const OSRM_SRC = readScript('osrm');
-
-// Pull out the `async function fetchCorridorJunctions(...) { ... }` block by
-// brace-matching from the signature. Template literals here are brace-balanced
-// (`${...}`) and no string literal contains a stray brace, so a naive counter
-// is correct for this function.
-function extractFn(name) {
-    const start = OSRM_SRC.indexOf(`async function ${name}(`);
-    if (start === -1) throw new Error(`${name} not found in osrm.js`);
-    let i = OSRM_SRC.indexOf('{', start);
-    let depth = 0;
-    for (; i < OSRM_SRC.length; i++) {
-        if (OSRM_SRC[i] === '{') depth++;
-        else if (OSRM_SRC[i] === '}' && --depth === 0) { i++; break; }
-    }
-    return OSRM_SRC.slice(start, i);
-}
 
 let fetchCorridorJunctions;
 
 beforeAll(() => {
-    // fetchCorridorJunctions pads its bbox via geo-utils.js's kmToDegLat/kmToDegLng
-    // globals and fetches through net.js's fetchWithTimeout; load both real
-    // sources so they resolve through the new Function scope. fetchWithTimeout
-    // internally calls the faked global `fetch`, so the per-test installJunctionsFetch still
-    // observes the request (and its timer is cleared once the fake resolves).
-    loadScripts('net', 'geo-utils');
-    const src = extractFn('fetchCorridorJunctions');
-    // Evaluate the declaration and hand back a reference. new Function() bootstraps
-    // the extracted source in the global scope (static local file content, not
-    // user input); `fetch` resolves to globalThis.fetch (faked per test) through
-    // the scope chain. evalScript() doesn't fit here — it discards its return
-    // value, and we need the extracted function's reference back — so this one
-    // stays an explicit new Function.
-    fetchCorridorJunctions = new Function( // eslint-disable-line no-new-func
-        `${src}\n return fetchCorridorJunctions;`
-    )();
+    loadScripts('osrm');
+    fetchCorridorJunctions = globalThis.fetchCorridorJunctions;
 });
 
 afterEach(() => {

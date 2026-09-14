@@ -160,7 +160,7 @@ describe('rerouteWithCurrentSpread', () => {
         setCurrentSession(session);
         readRouteBuildOptions.mockReturnValue({
             tripMode: 'round', smartRouting: true, winterMode: true,
-            maxKm: 5, spread: SPREAD,
+            maxKm: 5, spread: SPREAD, avoidBacktracking: true,
         });
 
         await rerouteWithCurrentSpread();
@@ -175,6 +175,7 @@ describe('rerouteWithCurrentSpread', () => {
         expect(opts.winterMode).toBe(true);
         expect(opts.spread).toBe(SPREAD);
         expect(opts.maxKm).toBe(5);
+        expect(opts.avoidBacktracking).toBe(true);
         expect(clearRouteLines).toHaveBeenCalledTimes(1);
 
         const next = getCurrentSession();

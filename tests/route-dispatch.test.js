@@ -191,3 +191,50 @@ describe('degraded round trips never reach the junctions path', () => {
         expect(buildLoop).not.toHaveBeenCalled();
     });
 });
+
+describe('avoidBacktracking reaches every loop builder', () => {
+    // spread-control.js and route-restore.js spread readRouteBuildOptions
+    // straight into buildRouteForMode, so this dispatcher is all that stands
+    // between the #avoidBacktracking checkbox and the loop geometry for a spread
+    // reroute, a pick-on-map build and a shared-link restore. Every test above
+    // expects the default false; these pin the true path on each branch.
+    const SPREAD = { offsetMult: 0.5, viaTs: [0.25, 0.5, 0.75] };
+
+    test('smart round trip → buildJunctionLoop receives it', async () => {
+        await globalThis.buildRouteForMode(60, 24, 61, 25, {
+            tripMode: 'round', smartRouting: true, winterMode: false,
+            maxKm: 5, spread: SPREAD, avoidBacktracking: true,
+        });
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25,
+            expect.objectContaining({ spread: SPREAD, avoidBacktracking: true }));
+        expect(buildLoop).not.toHaveBeenCalled();
+    });
+
+    test('plain round trip → buildLoop receives it', async () => {
+        await globalThis.buildRouteForMode(60, 24, 61, 25, {
+            tripMode: 'round', smartRouting: false, winterMode: false,
+            spread: SPREAD, avoidBacktracking: true,
+        });
+        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, SPREAD,
+            { degraded: false, avoidBacktracking: true });
+    });
+
+    test('degraded round trip → buildLoop receives it alongside degraded', async () => {
+        await globalThis.buildRouteForMode(60, 24, 61, 25, {
+            tripMode: 'round', smartRouting: true, winterMode: false,
+            maxKm: 5, spread: SPREAD, degraded: true, avoidBacktracking: true,
+        });
+        expect(buildJunctionLoop).not.toHaveBeenCalled();
+        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, SPREAD,
+            { degraded: true, avoidBacktracking: true });
+    });
+
+    test('one-way ignores it — there is no envelope to widen', async () => {
+        await globalThis.buildRouteForMode(60, 24, 61, 25, {
+            tripMode: 'one-way', smartRouting: false, avoidBacktracking: true,
+        });
+        expect(buildOneWay).toHaveBeenCalledWith(60, 24, 61, 25);
+        expect(buildJunctionLoop).not.toHaveBeenCalled();
+        expect(buildLoop).not.toHaveBeenCalled();
+    });
+});

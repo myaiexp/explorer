@@ -154,6 +154,15 @@ describe('readRouteBuildOptions', () => {
         setModes({ winter: false });
         expect(readRouteBuildOptions('round').winterMode).toBe(false);
     });
+
+    // Every other case here leaves the box unchecked, so a readRouteBuildOptions
+    // that hardcoded avoidBacktracking: false would pass all of them.
+    test('avoidBacktracking follows the #avoidBacktracking checkbox', () => {
+        document.getElementById('avoidBacktracking').checked = true;
+        expect(readRouteBuildOptions('round').avoidBacktracking).toBe(true);
+        document.getElementById('avoidBacktracking').checked = false;
+        expect(readRouteBuildOptions('round').avoidBacktracking).toBe(false);
+    });
 });
 
 describe('syncDistanceLabel', () => {
@@ -243,6 +252,15 @@ describe('buildDirectionsUrl', () => {
         expect(loopVias).toHaveBeenCalledWith(
             START.lat, START.lng, DEST.lat, DEST.lng, getSpreadParams(),
             { avoidBacktracking: false },
+        );
+    });
+
+    test('round-trip link follows the #avoidBacktracking checkbox', () => {
+        document.getElementById('avoidBacktracking').checked = true;
+        buildDirectionsUrl(START.lat, START.lng, DEST.lat, DEST.lng, 'round');
+        expect(loopVias).toHaveBeenCalledWith(
+            START.lat, START.lng, DEST.lat, DEST.lng, getSpreadParams(),
+            { avoidBacktracking: true },
         );
     });
 });

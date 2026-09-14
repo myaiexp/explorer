@@ -298,7 +298,7 @@ describe('buildAndDisplay — successful build persists', () => {
   test('spreads readRouteBuildOptions into buildRouteForMode', async () => {
     const blob = {
       tripMode: 'round', smartRouting: true, winterMode: true,
-      maxKm: 9, spread: { offsetKm: 2 },
+      maxKm: 9, spread: { offsetKm: 2 }, avoidBacktracking: true,
     };
     readRouteBuildOptions.mockReturnValue(blob);
 

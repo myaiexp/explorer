@@ -429,6 +429,26 @@ describe('buildLoop', () => {
         await globalThis.buildLoop(START.lat, START.lng, DEST.lat, DEST.lng, spread, { degraded: true });
         expect(fetch).toHaveBeenCalledTimes(2);
     });
+
+    // loopVias is module-internal to osrm.js, so a dropped flag cannot be seen
+    // by spying on it — only by the vias the builder actually routes through.
+    // Degraded skips the snap, so the envelope vias reach /route verbatim.
+    test('avoidBacktracking routes through the widened envelope, not the legacy one', async () => {
+        const spread = SPREAD();
+        const wide = globalThis.loopVias(
+            START.lat, START.lng, DEST.lat, DEST.lng, spread, { avoidBacktracking: true },
+        );
+        const legacy = globalThis.loopVias(START.lat, START.lng, DEST.lat, DEST.lng, spread);
+        expect(wide.rightVias).not.toEqual(legacy.rightVias); // precondition
+        const fetch = installOsrmKindFetch();
+        await globalThis.buildLoop(
+            START.lat, START.lng, DEST.lat, DEST.lng, spread, { degraded: true, avoidBacktracking: true },
+        );
+
+        const urls = routeUrls(fetch);
+        expect(parseRouteWaypoints(urls[0])).toEqual([wide.A, ...wide.rightVias, wide.B]);
+        expect(parseRouteWaypoints(urls[1])).toEqual([wide.B, ...wide.leftVias.slice().reverse(), wide.A]);
+    });
 });
 
 // ── buildJunctionLoop ────────────────────────────────────────────────────────
@@ -524,5 +544,66 @@ describe('buildJunctionLoop', () => {
         );
         expect(onProgress.mock.calls.filter(([msg]) => msg === 'Searching for junctions…')).toHaveLength(1);
         expect(onProgress).toHaveBeenCalledWith('Building both chiralities…');
+    });
+
+    // buildJunctionLoop shapes the loop at three sites — its own loopVias call
+    // and both buildLoop fallbacks. A flag dropped at any one of them hands the
+    // user the legacy geometry the toggle exists to replace, so each is pinned
+    // by the vias that reach OSRM.
+    describe('avoidBacktracking', () => {
+        const WIDE = () => globalThis.loopVias(
+            START.lat, START.lng, DEST.lat, DEST.lng, SPREAD(), { avoidBacktracking: true },
+        );
+        const OPTS = () => ({ ...LOOP_OPTS(), avoidBacktracking: true });
+        const routed = (fetch) => routeUrls(fetch).map(parseRouteWaypoints);
+
+        test('the junction path starts from the widened vias', async () => {
+            // An empty pool snaps nothing, so each via reaches /route as loopVias made it.
+            const { A, B, rightVias, leftVias } = WIDE();
+            const fetch = installOsrmKindFetch();
+            await globalThis.buildJunctionLoop(
+                START.lat, START.lng, DEST.lat, DEST.lng, { ...OPTS(), cachedJunctions: [] },
+            );
+            expect(routed(fetch)).toContainEqual([A, ...rightVias, B]);
+            expect(routed(fetch)).toContainEqual([B, ...leftVias.slice().reverse(), A]);
+        });
+
+        test('the Overpass-failure fallback builds the widened loop', async () => {
+            const { A, B, rightVias, leftVias } = WIDE();
+            const fetch = installOsrmKindFetch({
+                junctions: () => jsonResponse({}, { status: 503 }),
+            });
+            const out = await globalThis.buildJunctionLoop(
+                START.lat, START.lng, DEST.lat, DEST.lng, OPTS(),
+            );
+            expect(out.junctions).toBeNull();
+            // echoNearest snaps every via onto itself.
+            expect(routed(fetch)).toEqual([
+                [A, ...rightVias, B],
+                [B, ...leftVias.slice().reverse(), A],
+            ]);
+        });
+
+        test('the both-chiralities-failed fallback builds the widened loop', async () => {
+            // A 200 with no route is a legitimate "no path" answer: it fails the
+            // chirality without tripping the self-hosted-down latch, so the
+            // fallback's own calls stay on the stubbed self-hosted backend.
+            const { A, B, rightVias, leftVias } = WIDE();
+            let routeCalls = 0;
+            const fetch = installOsrmKindFetch({
+                route: (url) => (++routeCalls <= 4
+                    ? jsonResponse({ code: 'NoRoute', routes: [] })
+                    : echoRoute(url)),
+            });
+            const out = await globalThis.buildJunctionLoop(
+                START.lat, START.lng, DEST.lat, DEST.lng, { ...OPTS(), cachedJunctions: [] },
+            );
+            expect(out.overlap).toBeNull();
+            expect(out.outbound).toBeTruthy();
+            expect(routed(fetch).slice(4)).toEqual([
+                [A, ...rightVias, B],
+                [B, ...leftVias.slice().reverse(), A],
+            ]);
+        });
     });
 });

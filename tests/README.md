@@ -49,10 +49,7 @@ Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm �
 
 ### Transform-before-eval
 
-`readScript(name)` returns source text. Two tests must transform it before evaluating:
-
-- **fit-encoder** — string-inject an `_internals` export, then `evalScript` the patched source (side-effect load; return value unused).
-- **corridor-junctions** — extract `fetchCorridorJunctions` from osrm.js, then a returning `new Function(...)()` wrapper. `evalScript` does not fit: it discards its return value, and the test needs the extracted function back. Pins finding #7559: start/radius travel in the POST body, never the query string.
+`readScript(name)` returns source text. One test transforms it before evaluating: **fit-encoder** string-injects an `_internals` export, then `evalScript`s the patched source (side-effect load; return value unused). Every other suite loads through `loadScripts` and reads the module's exports off `globalThis` — `corridor-junctions` drives osrm.js's `fetchCorridorJunctions` after `loadScripts('osrm')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
 
 ### File naming
 

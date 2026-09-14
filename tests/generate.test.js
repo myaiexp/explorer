@@ -323,6 +323,23 @@ describe('pipeline wiring', () => {
     }));
   });
 
+  // The toggle's other half: the 3.4 divisor only picks a closer destination.
+  // The wider envelope is built downstream, so the flag has to reach
+  // buildRouteForDestination too — dropping it would shrink the walk while the
+  // loop kept the legacy geometry.
+  test('avoidBacktracking from the helper reaches buildRouteForDestination', async () => {
+    readRouteBuildOptions.mockReturnValue({
+      tripMode: 'round', winterMode: false,
+      maxKm: 5.2, spread: SPREAD, avoidBacktracking: true,
+    });
+
+    await generate();
+
+    expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
+      avoidBacktracking: true,
+    }));
+  });
+
   test('getAllExistingDestinations maps visits to [lat, lng] pairs', () => {
     expect(globalThis.getAllExistingDestinations()).toEqual([[62, 26]]);
   });
@@ -377,6 +394,32 @@ describe('real route-view.js wiring (no #smartRouting element anywhere)', () => 
     expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
       tripMode: 'round', degraded: false,
     }));
+  });
+
+  // The checkbox end to end: route-view.js reads #avoidBacktracking, and
+  // generate.js has to both widen the divisor and forward the flag.
+  test('a checked #avoidBacktracking widens the divisor and reaches the route build', async () => {
+    document.getElementById('roundTrip').checked = true;
+    document.getElementById('oneWay').checked = false;
+    document.getElementById('avoidBacktracking').checked = true;
+
+    await generate();
+
+    expect(resolveOpts().straightMax).toBeCloseTo(5.2 / 3.4);
+    expect(buildRouteForDestination).toHaveBeenCalledWith(60, 24, expect.objectContaining({
+      tripMode: 'round', avoidBacktracking: true,
+    }));
+  });
+
+  test('an unchecked #avoidBacktracking keeps the 2.6 divisor and forwards false', async () => {
+    document.getElementById('roundTrip').checked = true;
+    document.getElementById('oneWay').checked = false;
+    document.getElementById('avoidBacktracking').checked = false;
+
+    await generate();
+
+    expect(resolveOpts().straightMax).toBeCloseTo(5.2 / 2.6);
+    expect(buildRouteForDestination.mock.calls[0][2].avoidBacktracking).toBe(false);
   });
 
   test('one-way builds are unchanged', async () => {
