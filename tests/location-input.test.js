@@ -10,6 +10,7 @@
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
 
 loadScripts('bbox', 'location-input');
 
@@ -19,10 +20,6 @@ const STO = { lat: 59.3293, lng: 18.0686 };       // Stockholm — outside (lng 
 
 let errors;
 let fetchWithTimeout;
-
-function jsonResponse(data, { ok = true, status = 200 } = {}) {
-    return { ok, status, json: async () => data };
-}
 
 beforeEach(() => {
     errors = [];

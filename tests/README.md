@@ -77,6 +77,12 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 
 `helpers/sync-harness.js` builds on the loader: it runs the three non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `WanderSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
 
+## Fetch stubs
+
+`helpers/fetch-stub.js` holds the three generic pieces: `jsonResponse(body, {status})` (`ok` derived from `status`, as on a real Response), `installCannedFetch(reply)` (one reply for every call, or `{ throw: err }`), and `requestOf(fetchMock)` (the single request as `{url, init, body}`, body parsed). `helpers/osrm-fetch.js` holds the OSRM wire fixtures — `routeBody`, `parseRouteWaypoints`, `echoRoute`, `echoNearest` — so a change to the `/foot/` URL layout or the GeoJSON body lands once, not once per OSRM suite.
+
+A suite that routes by URL keeps its own installer, named for what it keys on: `installOsrmKindFetch` (`osrm.test.js`, endpoint kind) and `installOsrmBackendFetch` (`osrm-fallback.test.js`, self-hosted vs public base). Don't name a new one plain `installFetch` — three same-named installers with three argument shapes is what finding #9762 untangled. Every installer goes through `vi.stubGlobal`, so the suite's `afterEach` calls `vi.unstubAllGlobals()`; a bare `globalThis.fetch =` in such a suite survives into the next test. The sync suites are separate: `sync-harness.js` owns their fetch stub.
+
 ## Backend layout
 
 Dominant convention, not a hard rule:

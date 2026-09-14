@@ -15,6 +15,7 @@
 
 import { describe, test, expect, afterEach, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
 
 // SCRIPT_DEPS.elevation → net (fetchWithTimeout) + geo-utils (haversineM).
 loadScripts('elevation');
@@ -53,10 +54,7 @@ describe('fetchElevations', () => {
     });
 
     test('passes an AbortSignal — the discriminator against a bare fetch', async () => {
-        global.fetch = vi.fn(() => Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ elevation: [10, 20, 30] }),
-        }));
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({ elevation: [10, 20, 30] })));
 
         await expect(fetchElevations(coords)).resolves.toEqual([10, 20, 30]);
         const [url, init] = global.fetch.mock.calls[0];
@@ -65,7 +63,7 @@ describe('fetchElevations', () => {
     });
 
     test('a non-OK response yields null (unchanged contract for both callers)', async () => {
-        global.fetch = vi.fn(() => Promise.resolve({ ok: false, status: 503 }));
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({}, { status: 503 })));
         await expect(fetchElevations(coords)).resolves.toBeNull();
     });
 
@@ -77,12 +75,9 @@ describe('fetchElevations', () => {
         const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
         global.fetch = vi.fn((url) => {
             const nLats = new URL(url).searchParams.get('latitude').split(',').length;
-            return Promise.resolve({
-                ok: true,
-                json: () => Promise.resolve({
-                    elevation: Array.from({ length: nLats }, (_, i) => 100 + i),
-                }),
-            });
+            return Promise.resolve(jsonResponse({
+                elevation: Array.from({ length: nLats }, (_, i) => 100 + i),
+            }));
         });
 
         const result = await fetchElevations(long);
@@ -108,12 +103,9 @@ describe('fetchElevations', () => {
             const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
             global.fetch = vi.fn((url) => {
                 const nLats = new URL(url).searchParams.get('latitude').split(',').length;
-                return Promise.resolve({
-                    ok: true,
-                    json: () => Promise.resolve({
-                        elevation: Array.from({ length: nLats }, () => 100),
-                    }),
-                });
+                return Promise.resolve(jsonResponse({
+                    elevation: Array.from({ length: nLats }, () => 100),
+                }));
             });
 
             await fetchElevations(long);
@@ -132,12 +124,9 @@ describe('fetchElevations', () => {
         const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
         global.fetch = vi.fn((url) => {
             const nLats = new URL(url).searchParams.get('latitude').split(',').length;
-            return Promise.resolve({
-                ok: true,
-                json: () => Promise.resolve({
-                    elevation: Array.from({ length: nLats }, (_, i) => 100 + i),
-                }),
-            });
+            return Promise.resolve(jsonResponse({
+                elevation: Array.from({ length: nLats }, (_, i) => 100 + i),
+            }));
         });
 
         const result = await fetchElevations(long);

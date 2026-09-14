@@ -10,6 +10,7 @@
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
 
 loadScripts('export');
 
@@ -249,12 +250,9 @@ describe('confirmFITExport', () => {
         globalThis.getCurrentSession = () => sessionWith(coordsOut);
         globalThis.fetch = vi.fn((url) => {
             const nLats = new URL(url).searchParams.get('latitude').split(',').length;
-            return Promise.resolve({
-                ok: true,
-                json: () => Promise.resolve({
-                    elevation: Array.from({ length: nLats }, (_, i) => 50 + i),
-                }),
-            });
+            return Promise.resolve(jsonResponse({
+                elevation: Array.from({ length: nLats }, (_, i) => 50 + i),
+            }));
         });
 
         await confirmFITExport();

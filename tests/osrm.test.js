@@ -14,6 +14,8 @@
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { jsonResponse, installCannedFetch } from './helpers/fetch-stub.js';
+import { routeBody, parseRouteWaypoints, echoNearest, echoRoute } from './helpers/osrm-fetch.js';
 
 beforeAll(() => {
     loadScripts('osrm');
@@ -30,50 +32,18 @@ beforeEach(() => {
 
 afterEach(() => {
     vi.restoreAllMocks();
-    delete globalThis.fetch;
+    vi.unstubAllGlobals();
 });
 
 const START = { lat: 60, lng: 24 };
 const DEST = { lat: 60.1, lng: 24.1 };
 const SPREAD = () => globalThis.computeSpreadParams(50);
 
-function jsonResponse(body, { ok = true, status = 200 } = {}) {
-    return { ok, status, json: async () => body };
-}
-
-function routeBody(coordsLngLat, { duration = 60, distance = 1000, legs } = {}) {
-    return {
-        routes: [{
-            geometry: { coordinates: coordsLngLat },
-            duration,
-            distance,
-            legs,
-        }],
-    };
-}
-
-function coordPath(url) {
-    return String(url).split('/foot/')[1].split('?')[0];
-}
-
-function parseRouteWaypoints(url) {
-    return coordPath(url).split(';').map((pair) => {
-        const [lng, lat] = pair.split(',').map(Number);
-        return { lat, lng };
-    });
-}
-
-function echoNearest(url) {
-    const [lng, lat] = coordPath(url).split(',').map(Number);
-    return jsonResponse({ waypoints: [{ location: [lng, lat] }] });
-}
-
-function echoRoute(url) {
-    const wps = parseRouteWaypoints(url);
-    return jsonResponse(routeBody(wps.map((p) => [p.lng, p.lat])));
-}
-
-function installFetch(overrides = {}) {
+// Keyed on the endpoint KIND in the URL path (/table/, /nearest/, /route/,
+// /junctions) — `overrides` replaces the default handler per kind. It never
+// tells the self-hosted and public backends apart; osrm-fallback.test.js's
+// installOsrmBackendFetch keys on the backend base instead.
+function installOsrmKindFetch(overrides = {}) {
     const handlers = {
         table: () => jsonResponse({ code: 'Ok', destinations: [{ distance: 0 }], distances: [[0]] }),
         nearest: echoNearest,
@@ -91,7 +61,7 @@ function installFetch(overrides = {}) {
         if (!kind) throw new Error(`unexpected fetch: ${u}`);
         return handlers[kind](u);
     });
-    globalThis.fetch = fetch;
+    vi.stubGlobal('fetch', fetch);
     return fetch;
 }
 
@@ -118,7 +88,7 @@ describe('tryOsrm', () => {
     const suffix = '24,60;24.1,60.1';
 
     test('maps geojson [lng,lat] → [lat,lng] and flattens leg steps', async () => {
-        installFetch({
+        installOsrmKindFetch({
             route: () => jsonResponse(routeBody(
                 [[24, 60], [24.1, 60.1]],
                 { duration: 42, distance: 900, legs: [{ steps: [{ name: 'a' }] }, { steps: [{ name: 'b' }] }] },
@@ -133,77 +103,70 @@ describe('tryOsrm', () => {
     });
 
     test('composes the suffix onto OSRM_FI_BASE while self-hosted is healthy', async () => {
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         await globalThis.tryOsrm(suffix);
         expect(String(fetch.mock.calls[0][0])).toBe(`${globalThis.OSRM_FI_BASE}/${suffix}`);
     });
 
     test('a fetch throw latches self-hosted and falls back to public (still null if both fail)', async () => {
-        const fetch = vi.fn(async () => { throw new Error('net'); });
-        globalThis.fetch = fetch;
+        const fetch = installCannedFetch({ throw: new Error('net') });
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(2); // self-hosted attempt, then public retry
         expect(globalThis.isSelfHostedDown()).toBe(true);
     });
 
     test('a non-ok response latches self-hosted and falls back to public (still null if both fail)', async () => {
-        const fetch = vi.fn(async () => jsonResponse({}, { ok: false, status: 500 }));
-        globalThis.fetch = fetch;
+        const fetch = installCannedFetch(jsonResponse({}, { status: 500 }));
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(2);
         expect(globalThis.isSelfHostedDown()).toBe(true);
     });
 
     test('a malformed self-hosted body (json() throws) latches and falls back to public', async () => {
-        const fetch = vi.fn(async () => ({
+        const fetch = installCannedFetch({
             ok: true,
+            status: 200,
             json: async () => { throw new Error('bad json'); },
-        }));
-        globalThis.fetch = fetch;
+        });
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(2);
         expect(globalThis.isSelfHostedDown()).toBe(true);
     });
 
     test('returns null when routes is missing or empty, and does NOT latch or ask public', async () => {
-        const fetch = vi.fn(async () => jsonResponse({}));
-        globalThis.fetch = fetch;
+        const fetch = installCannedFetch(jsonResponse({}));
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(1);
         expect(globalThis.isSelfHostedDown()).toBe(false);
 
-        const fetch2 = vi.fn(async () => jsonResponse({ routes: [] }));
-        globalThis.fetch = fetch2;
+        const fetch2 = installCannedFetch(jsonResponse({ routes: [] }));
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch2).toHaveBeenCalledTimes(1);
         expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 
     test('returns null on a 200 whose route has no geometry (finding #7785), and does NOT latch', async () => {
-        const fetch = vi.fn(async () => jsonResponse({
+        const fetch = installCannedFetch(jsonResponse({
             routes: [{ duration: 1, distance: 1 }],
         }));
-        globalThis.fetch = fetch;
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(1);
         expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 
     test('returns null when geometry.coordinates is not an array, and does NOT latch', async () => {
-        const fetch = vi.fn(async () => jsonResponse({
+        const fetch = installCannedFetch(jsonResponse({
             routes: [{ duration: 1, distance: 1, geometry: { coordinates: null } }],
         }));
-        globalThis.fetch = fetch;
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(1);
         expect(globalThis.isSelfHostedDown()).toBe(false);
     });
 
     test('returns null when geometry.coordinates is an empty array (finding #7926), and does NOT latch', async () => {
-        const fetch = vi.fn(async () => jsonResponse({
+        const fetch = installCannedFetch(jsonResponse({
             routes: [{ duration: 1, distance: 1, geometry: { coordinates: [] } }],
         }));
-        globalThis.fetch = fetch;
         await expect(globalThis.tryOsrm(suffix)).resolves.toBeNull();
         expect(fetch).toHaveBeenCalledTimes(1);
         expect(globalThis.isSelfHostedDown()).toBe(false);
@@ -217,14 +180,14 @@ describe('snapToRoad', () => {
 
     test('returns the snapped point when nearest is within snapRadius', async () => {
         // ~11 m north — well inside the 0.5 km default.
-        installFetch({
+        installOsrmKindFetch({
             nearest: () => jsonResponse({ waypoints: [{ location: [24, 60.0001] }] }),
         });
         await expect(globalThis.snapToRoad(via, 0.5)).resolves.toEqual({ lat: 60.0001, lng: 24 });
     });
 
     test('keeps the original via when nearest is missing', async () => {
-        installFetch({
+        installOsrmKindFetch({
             nearest: () => jsonResponse({ waypoints: [] }),
         });
         const out = await globalThis.snapToRoad(via, 0.5);
@@ -233,7 +196,7 @@ describe('snapToRoad', () => {
 
     test('keeps the original via when nearest is beyond snapRadius', async () => {
         // 60,24 → 60.1,24.1 is ~13 km.
-        installFetch({
+        installOsrmKindFetch({
             nearest: () => jsonResponse({ waypoints: [{ location: [24.1, 60.1] }] }),
         });
         const out = await globalThis.snapToRoad(via, 0.5);
@@ -250,7 +213,7 @@ describe('screeningTableFn', () => {
     test('maps candidate i onto destinations[i+1] / distances[0][i+1]', async () => {
         // dests[0] / dists[0][0] are the SOURCE. A regression that reads index i
         // would hand candidate 0 the source snap (9999) instead of 12.
-        const fetch = installFetch({
+        const fetch = installOsrmKindFetch({
             table: () => jsonResponse({
                 code: 'Ok',
                 destinations: [
@@ -273,21 +236,21 @@ describe('screeningTableFn', () => {
     });
 
     test('empty candidates short-circuit to [] without fetching', async () => {
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         await expect(globalThis.screeningTableFn(START, [])).resolves.toEqual([]);
         expect(fetch).not.toHaveBeenCalled();
     });
 
     test('throws on a non-ok HTTP response', async () => {
-        installFetch({
-            table: () => jsonResponse({}, { ok: false, status: 503 }),
+        installOsrmKindFetch({
+            table: () => jsonResponse({}, { status: 503 }),
         });
         await expect(globalThis.screeningTableFn(START, [c0]))
             .rejects.toThrow('osrm table http 503');
     });
 
     test('throws when OSRM code is not Ok', async () => {
-        installFetch({
+        installOsrmKindFetch({
             table: () => jsonResponse({ code: 'NoRoute' }),
         });
         await expect(globalThis.screeningTableFn(START, [c0]))
@@ -295,7 +258,7 @@ describe('screeningTableFn', () => {
     });
 
     test('throws when destinations or distances[0] is not an array', async () => {
-        installFetch({
+        installOsrmKindFetch({
             table: () => jsonResponse({ code: 'Ok', destinations: { distance: 1 }, distances: [[0, 1]] }),
         });
         await expect(globalThis.screeningTableFn(START, [c0]))
@@ -307,7 +270,7 @@ describe('screeningTableFn', () => {
         // throttle's PUBLIC_MIN_GAP_MS from the first.
         globalThis.resetOsrmFallbackState();
 
-        installFetch({
+        installOsrmKindFetch({
             table: () => jsonResponse({ code: 'Ok', destinations: [{ distance: 0 }], distances: null }),
         });
         await expect(globalThis.screeningTableFn(START, [c0]))
@@ -315,7 +278,7 @@ describe('screeningTableFn', () => {
     });
 
     test('null-fills snapM / routeM when the i+1 slot is missing or non-numeric', async () => {
-        installFetch({
+        installOsrmKindFetch({
             table: () => jsonResponse({
                 code: 'Ok',
                 destinations: [{ distance: 0 }], // source only — candidate slot undefined
@@ -392,7 +355,7 @@ describe('pickBetterLoop', () => {
 
 describe('buildOneWay', () => {
     test('routes A→B with the documented /route query', async () => {
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         const out = await globalThis.buildOneWay(START.lat, START.lng, DEST.lat, DEST.lng);
         expect(fetch).toHaveBeenCalledTimes(1);
         const url = String(fetch.mock.calls[0][0]);
@@ -417,7 +380,7 @@ describe('buildLoop', () => {
         const { rightVias, leftVias, A, B } = globalThis.loopVias(
             START.lat, START.lng, DEST.lat, DEST.lng, spread,
         );
-        const fetch = installFetch({
+        const fetch = installOsrmKindFetch({
             nearest: () => jsonResponse({ waypoints: [{ location: [30, 70] }] }),
         });
         const loop = await globalThis.buildLoop(START.lat, START.lng, DEST.lat, DEST.lng, spread);
@@ -433,7 +396,7 @@ describe('buildLoop', () => {
 
     test('a non-degraded buildLoop still snaps its vias', async () => {
         const spread = SPREAD();
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         await globalThis.buildLoop(START.lat, START.lng, DEST.lat, DEST.lng, spread);
         const nearestCalls = fetch.mock.calls.filter(([url]) => String(url).includes('/nearest/'));
         expect(nearestCalls).toHaveLength(6);
@@ -444,7 +407,7 @@ describe('buildLoop', () => {
         const { rightVias, leftVias, A, B } = globalThis.loopVias(
             START.lat, START.lng, DEST.lat, DEST.lng, spread,
         );
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         const loop = await globalThis.buildLoop(
             START.lat, START.lng, DEST.lat, DEST.lng, spread, { degraded: true },
         );
@@ -462,7 +425,7 @@ describe('buildLoop', () => {
 
     test('a degraded round trip issues exactly 2 route calls total', async () => {
         const spread = SPREAD();
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         await globalThis.buildLoop(START.lat, START.lng, DEST.lat, DEST.lng, spread, { degraded: true });
         expect(fetch).toHaveBeenCalledTimes(2);
     });
@@ -474,8 +437,8 @@ describe('buildJunctionLoop', () => {
     const POOL = [{ lat: 60.05, lng: 24.05 }];
 
     test('Overpass throw → buildLoop with overlap null and junctions null', async () => {
-        const fetch = installFetch({
-            junctions: () => jsonResponse({}, { ok: false, status: 503 }),
+        const fetch = installOsrmKindFetch({
+            junctions: () => jsonResponse({}, { status: 503 }),
         });
         const out = await globalThis.buildJunctionLoop(
             START.lat, START.lng, DEST.lat, DEST.lng, LOOP_OPTS(),
@@ -502,9 +465,9 @@ describe('buildJunctionLoop', () => {
     test('both chiralities fail on self-hosted AND public → buildLoop also fails, junction pool still returned', async () => {
         vi.useFakeTimers();
         try {
-            installFetch({
+            installOsrmKindFetch({
                 junctions: () => jsonResponse({ junctions: POOL }),
-                route: () => jsonResponse({}, { ok: false, status: 500 }),
+                route: () => jsonResponse({}, { status: 500 }),
             });
             const promise = globalThis.buildJunctionLoop(
                 START.lat, START.lng, DEST.lat, DEST.lng, LOOP_OPTS(),
@@ -521,7 +484,7 @@ describe('buildJunctionLoop', () => {
     });
 
     test('cachedJunctions skips Overpass and returns a picked chirality', async () => {
-        const fetch = installFetch();
+        const fetch = installOsrmKindFetch();
         const out = await globalThis.buildJunctionLoop(
             START.lat, START.lng, DEST.lat, DEST.lng,
             { ...LOOP_OPTS(), cachedJunctions: POOL },
@@ -535,7 +498,7 @@ describe('buildJunctionLoop', () => {
     });
 
     test('omitting onProgress still uses the junction path, not the Overpass fallback', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmKindFetch({
             junctions: () => jsonResponse({ junctions: POOL }),
         });
         const out = await globalThis.buildJunctionLoop(
@@ -552,7 +515,7 @@ describe('buildJunctionLoop', () => {
 
     test("emits 'Searching for junctions…' once, from the fetch, not also from the builder", async () => {
         const onProgress = vi.fn();
-        installFetch({
+        installOsrmKindFetch({
             junctions: () => jsonResponse({ junctions: POOL }),
         });
         await globalThis.buildJunctionLoop(

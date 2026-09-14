@@ -17,6 +17,7 @@
 
 import { describe, test, expect, beforeAll, afterEach, vi } from 'vitest';
 import { loadScripts, readScript } from './helpers/load.js';
+import { jsonResponse, installCannedFetch, requestOf } from './helpers/fetch-stub.js';
 
 const OSRM_SRC = readScript('osrm');
 
@@ -42,7 +43,7 @@ beforeAll(() => {
     // fetchCorridorJunctions pads its bbox via geo-utils.js's kmToDegLat/kmToDegLng
     // globals and fetches through net.js's fetchWithTimeout; load both real
     // sources so they resolve through the new Function scope. fetchWithTimeout
-    // internally calls the faked global `fetch`, so the per-test fakeFetch still
+    // internally calls the faked global `fetch`, so the per-test installJunctionsFetch still
     // observes the request (and its timer is cleared once the fake resolves).
     loadScripts('net', 'geo-utils');
     const src = extractFn('fetchCorridorJunctions');
@@ -59,35 +60,26 @@ beforeAll(() => {
 
 afterEach(() => {
     vi.restoreAllMocks();
-    delete globalThis.fetch;
+    vi.unstubAllGlobals();
 });
 
-function fakeFetch(junctions = [{ lat: 60.2, lng: 24.9 }]) {
-    const fn = vi.fn(async () => ({ ok: true, json: async () => ({ junctions }) }));
-    globalThis.fetch = fn;
-    return fn;
+/** Every fetch answers 200 with this junction list. */
+function installJunctionsFetch(junctions = [{ lat: 60.2, lng: 24.9 }]) {
+    return installCannedFetch(jsonResponse({ junctions }));
 }
 
-function requestOf(fetchMock) {
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    return {
-        url: new URL(url, 'https://example.test'),
-        init: init || {},
-    };
-}
-
+/** requestOf's parsed body, after pinning that it was sent as a JSON POST. */
 function bodyOf(fetchMock) {
-    const { init } = requestOf(fetchMock);
+    const { init, body } = requestOf(fetchMock);
     expect(init.method).toBe('POST');
     expect(String(init.headers?.['content-type'] || init.headers?.['Content-Type']))
         .toMatch(/application\/json/i);
-    return JSON.parse(init.body);
+    return body;
 }
 
 describe('fetchCorridorJunctions', () => {
     test('POSTs start/radius in the JSON body, never on the query string', async () => {
-        const f = fakeFetch();
+        const f = installJunctionsFetch();
         const out = await fetchCorridorJunctions(60, 24, 60.5, 24.5, 1, 7, null, false);
 
         const { url } = requestOf(f);
@@ -107,7 +99,7 @@ describe('fetchCorridorJunctions', () => {
     });
 
     test('winterMode selects the winter exclude preset', async () => {
-        const f = fakeFetch([]);
+        const f = installJunctionsFetch([]);
         await fetchCorridorJunctions(60, 24, 60.5, 24.5, 1, 7, null, true);
         expect(bodyOf(f).exclude).toBe('winter');
     });
@@ -118,7 +110,7 @@ describe('fetchCorridorJunctions', () => {
     test('reads no DOM element — works with no #maxDistance present', async () => {
         expect(document.getElementById('maxDistance')).toBeNull(); // precondition
         const spy = vi.spyOn(document, 'getElementById');
-        const f = fakeFetch();
+        const f = installJunctionsFetch();
 
         await expect(
             fetchCorridorJunctions(60, 24, 60.5, 24.5, 1, 9, null, false)
@@ -130,7 +122,7 @@ describe('fetchCorridorJunctions', () => {
 
     // Guard: a missing/invalid budget drops to legacy bbox mode (no anchoring).
     test('omitted/NaN maxKm → POST body has bbox but no start/radius', async () => {
-        const f = fakeFetch();
+        const f = installJunctionsFetch();
         await fetchCorridorJunctions(60, 24, 60.5, 24.5, 1, NaN, null, false);
 
         const { url } = requestOf(f);
@@ -143,7 +135,7 @@ describe('fetchCorridorJunctions', () => {
     });
 
     test('throws a friendly error on non-ok response', async () => {
-        globalThis.fetch = vi.fn(async () => ({ ok: false }));
+        installCannedFetch(jsonResponse({}, { status: 502 }));
         await expect(
             fetchCorridorJunctions(60, 24, 60.5, 24.5, 1, 7, null, false)
         ).rejects.toThrow(/try again/i);

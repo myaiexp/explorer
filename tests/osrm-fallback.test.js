@@ -23,6 +23,8 @@
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
+import { echoNearest, echoRoute } from './helpers/osrm-fetch.js';
 
 beforeAll(() => {
     loadScripts('osrm');
@@ -34,36 +36,17 @@ beforeEach(() => {
 
 afterEach(() => {
     vi.restoreAllMocks();
-    delete globalThis.fetch;
+    vi.unstubAllGlobals();
     vi.useRealTimers();
 });
 
-function jsonResponse(body, { ok = true, status = 200 } = {}) {
-    return { ok, status, json: async () => body };
-}
-
-function routeBody(coordsLngLat, { duration = 60, distance = 1000 } = {}) {
-    return { routes: [{ geometry: { coordinates: coordsLngLat }, duration, distance }] };
-}
-
-function coordPath(url) {
-    return String(url).split('/foot/')[1].split('?')[0];
-}
-
-function echoRoute(url) {
-    const wps = coordPath(url).split(';').map((pair) => pair.split(',').map(Number));
-    return jsonResponse(routeBody(wps));
-}
-
-function echoNearest(url) {
-    const [lng, lat] = coordPath(url).split(',').map(Number);
-    return jsonResponse({ waypoints: [{ location: [lng, lat] }] });
-}
-
-// Unlike osrm.test.js's installFetch (which never needs to tell the two
-// backends apart), every test here cares specifically about self-hosted vs.
-// public, so the mock is keyed on which base the composed URL starts with.
-function installFetch({ selfHosted, public: pub }) {
+// Keyed on which backend BASE the composed URL starts with — every test here
+// cares about self-hosted vs. public. osrm.test.js's installOsrmKindFetch keys
+// on the endpoint kind (/route, /nearest, /table, /junctions) instead and never
+// tells the two backends apart. A backend with no handler throws "unexpected
+// self-hosted/public fetch". (`public` is rebound to `pub` only because it is a
+// reserved word as a binding name.)
+function installOsrmBackendFetch({ selfHosted, public: pub }) {
     const fetch = vi.fn(async (url) => {
         const u = String(url);
         if (u.startsWith(globalThis.OSRM_FI_BASE) || u.startsWith(globalThis.OSRM_FI_NEAREST) || u.startsWith(globalThis.OSRM_FI_TABLE)) {
@@ -76,7 +59,7 @@ function installFetch({ selfHosted, public: pub }) {
         }
         throw new Error(`unexpected fetch: ${u}`);
     });
-    globalThis.fetch = fetch;
+    vi.stubGlobal('fetch', fetch);
     return fetch;
 }
 
@@ -90,7 +73,7 @@ const NEAREST_SUFFIX = `${VIA.lng},${VIA.lat}?number=1`;
 
 describe('OSRM public fallback — route', () => {
     test('uses the self-hosted base while healthy', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: (u) => echoRoute(u),
         });
         const out = await globalThis.tryOsrm(ROUTE_SUFFIX);
@@ -101,7 +84,7 @@ describe('OSRM public fallback — route', () => {
     });
 
     test('a self-hosted network failure retries the same request on public', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: () => { throw new Error('net down'); },
             public: (u) => echoRoute(u),
         });
@@ -114,8 +97,8 @@ describe('OSRM public fallback — route', () => {
     });
 
     test('a 502 from self-hosted also falls through to public', async () => {
-        const fetch = installFetch({
-            selfHosted: () => jsonResponse({}, { ok: false, status: 502 }),
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({}, { status: 502 }),
             public: (u) => echoRoute(u),
         });
         const out = await globalThis.tryOsrm(ROUTE_SUFFIX);
@@ -125,7 +108,7 @@ describe('OSRM public fallback — route', () => {
     });
 
     test('a 200 with no routes returns null, does NOT latch, and never asks public', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: () => jsonResponse({ routes: [] }),
         });
         await expect(globalThis.tryOsrm(ROUTE_SUFFIX)).resolves.toBeNull();
@@ -134,7 +117,7 @@ describe('OSRM public fallback — route', () => {
     });
 
     test('a 200 with empty route geometry returns null, does NOT latch, and never asks public', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: () => jsonResponse({ routes: [{ geometry: { coordinates: [] }, duration: 1, distance: 1 }] }),
         });
         await expect(globalThis.tryOsrm(ROUTE_SUFFIX)).resolves.toBeNull();
@@ -147,14 +130,14 @@ describe('OSRM public fallback — route', () => {
         // the first call's PUBLIC_MIN_GAP_MS — advance past that instead of
         // burning real wall-clock time on it.
         vi.useFakeTimers();
-        installFetch({
+        installOsrmBackendFetch({
             selfHosted: () => { throw new Error('net down'); },
             public: (u) => echoRoute(u),
         });
         await globalThis.tryOsrm(ROUTE_SUFFIX);
         expect(globalThis.isSelfHostedDown()).toBe(true);
 
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             public: (u) => echoRoute(u),
         });
         const p2 = globalThis.tryOsrm(ROUTE_SUFFIX);
@@ -168,7 +151,7 @@ describe('OSRM public fallback — route', () => {
     test('the latch expires so a recovered backend is used again', async () => {
         vi.useFakeTimers();
 
-        installFetch({
+        installOsrmBackendFetch({
             selfHosted: () => { throw new Error('net down'); },
             public: (u) => echoRoute(u),
         });
@@ -181,7 +164,7 @@ describe('OSRM public fallback — route', () => {
         await vi.advanceTimersByTimeAsync(1000 + 1);
         expect(globalThis.isSelfHostedDown()).toBe(false); // expired — next call re-probes
 
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: (u) => echoRoute(u),
         });
         const out = await globalThis.tryOsrm(ROUTE_SUFFIX);
@@ -193,7 +176,7 @@ describe('OSRM public fallback — route', () => {
     test('consecutive public requests are at least PUBLIC_MIN_GAP_MS apart', async () => {
         vi.useFakeTimers();
         const timestamps = [];
-        installFetch({
+        installOsrmBackendFetch({
             selfHosted: () => { throw new Error('down'); },
             public: (u) => { timestamps.push(Date.now()); return echoRoute(u); },
         });
@@ -215,7 +198,7 @@ describe('OSRM public fallback — route', () => {
 
     test('resetOsrmFallbackState also clears the throttle — a fresh public call after reset does not wait', async () => {
         vi.useFakeTimers();
-        installFetch({
+        installOsrmBackendFetch({
             selfHosted: () => { throw new Error('down'); },
             public: (u) => echoRoute(u),
         });
@@ -227,7 +210,7 @@ describe('OSRM public fallback — route', () => {
         // Re-latch and issue another public call immediately — if the
         // throttle queue/lastPublicRequestAt survived the reset, this would
         // hang waiting on a fake timer we never advance.
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: () => { throw new Error('down'); },
             public: (u) => echoRoute(u),
         });
@@ -240,7 +223,7 @@ describe('OSRM public fallback — route', () => {
 
 describe('OSRM public fallback — nearest', () => {
     test('snapToRoad falls back to public nearest', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: () => { throw new Error('down'); },
             public: (u) => echoNearest(u),
         });
@@ -253,7 +236,7 @@ describe('OSRM public fallback — nearest', () => {
     });
 
     test('a self-hosted 200 with no waypoints returns null, does NOT latch, and never asks public', async () => {
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             selfHosted: () => jsonResponse({ waypoints: [] }),
         });
         const out = await globalThis.snapToRoad(VIA, 0.5);
@@ -264,14 +247,14 @@ describe('OSRM public fallback — nearest', () => {
 
     test('while latched, a nearest call goes straight to public', async () => {
         vi.useFakeTimers();
-        installFetch({
-            selfHosted: () => jsonResponse({}, { ok: false, status: 500 }),
+        installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({}, { status: 500 }),
             public: (u) => echoNearest(u),
         });
         await globalThis.tryNearest(NEAREST_SUFFIX);
         expect(globalThis.isSelfHostedDown()).toBe(true);
 
-        const fetch = installFetch({ public: (u) => echoNearest(u) });
+        const fetch = installOsrmBackendFetch({ public: (u) => echoNearest(u) });
         const p2 = globalThis.tryNearest(NEAREST_SUFFIX);
         await vi.advanceTimersByTimeAsync(globalThis.PUBLIC_MIN_GAP_MS);
         await p2;
@@ -285,14 +268,14 @@ describe('OSRM public fallback — nearest', () => {
 describe('the self-hosted-down latch is shared across route/nearest/table', () => {
     test('a route failure also routes a later nearest call straight to public', async () => {
         vi.useFakeTimers();
-        installFetch({
+        installOsrmBackendFetch({
             selfHosted: () => { throw new Error('down'); },
             public: (u) => echoRoute(u),
         });
         await globalThis.tryOsrm(ROUTE_SUFFIX);
         expect(globalThis.isSelfHostedDown()).toBe(true);
 
-        const fetch = installFetch({ public: (u) => echoNearest(u) });
+        const fetch = installOsrmBackendFetch({ public: (u) => echoNearest(u) });
         const p2 = globalThis.tryNearest(NEAREST_SUFFIX);
         await vi.advanceTimersByTimeAsync(globalThis.PUBLIC_MIN_GAP_MS);
         await p2;
@@ -305,9 +288,9 @@ describe('the self-hosted-down latch is shared across route/nearest/table', () =
 
 describe('OSRM public fallback — table (screeningTableFn)', () => {
     test('the table helper falls back to public and still throws if both fail', async () => {
-        const fetch = installFetch({
-            selfHosted: () => jsonResponse({}, { ok: false, status: 503 }),
-            public: () => jsonResponse({}, { ok: false, status: 503 }),
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({}, { status: 503 }),
+            public: () => jsonResponse({}, { status: 503 }),
         });
         // screenCandidates (screening.js) has no try/catch around tableFn —
         // the catch is one level up in destination-resolve.js — so this must
@@ -319,8 +302,8 @@ describe('OSRM public fallback — table (screeningTableFn)', () => {
     });
 
     test('the table helper falls back to public and resolves if public succeeds', async () => {
-        const fetch = installFetch({
-            selfHosted: () => jsonResponse({}, { ok: false, status: 500 }),
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({}, { status: 500 }),
             public: () => jsonResponse({
                 code: 'Ok',
                 destinations: [{ distance: 0 }, { distance: 5 }],
@@ -335,7 +318,7 @@ describe('OSRM public fallback — table (screeningTableFn)', () => {
 
     test('while latched, the table helper skips self-hosted entirely', async () => {
         vi.useFakeTimers();
-        installFetch({
+        installOsrmBackendFetch({
             selfHosted: () => { throw new Error('down'); },
             public: () => jsonResponse({
                 code: 'Ok',
@@ -346,7 +329,7 @@ describe('OSRM public fallback — table (screeningTableFn)', () => {
         await globalThis.screeningTableFn(START, [C0]);
         expect(globalThis.isSelfHostedDown()).toBe(true);
 
-        const fetch = installFetch({
+        const fetch = installOsrmBackendFetch({
             public: () => jsonResponse({
                 code: 'Ok',
                 destinations: [{ distance: 0 }, { distance: 5 }],

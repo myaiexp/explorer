@@ -15,6 +15,7 @@
  */
 import { describe, test, expect, vi, beforeAll, afterEach } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { jsonResponse, installCannedFetch, requestOf } from './helpers/fetch-stub.js';
 
 beforeAll(() => {
     loadScripts('overpass');
@@ -26,33 +27,14 @@ afterEach(() => {
 
 const START = { lat: 62.123456, lng: 25.654321 };
 
-const okJson = (body) => ({ ok: true, status: 200, json: async () => body });
-const errStatus = (status, error = 'nope') =>
-    ({ ok: false, status, json: async () => ({ error }) });
+// The junctions-cache error envelope: a non-2xx status with `{ error }`.
+const errStatus = (status, error = 'nope') => jsonResponse({ error }, { status });
 const abortErr = () =>
     Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
 
-/** Stub fetch with a single canned reply (a response object, or {throw: err}). */
-function installFetch(reply) {
-    const fetchMock = vi.fn(async () => {
-        if (reply.throw) throw reply.throw;
-        return reply;
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    return fetchMock;
-}
-
-/** The one request the fetchers made, split into URL / init / parsed JSON body. */
-function requestOf(fetchMock) {
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    // The fetchers use a same-origin path; resolve it to inspect pathname/search.
-    return { url: new URL(url, 'https://mase.fi'), init, body: JSON.parse(init.body) };
-}
-
 describe('fetchPOIsInRadius — request shape', () => {
     test('fetchPOIsInRadius POSTs to /api/junctions/pois with start in the body', async () => {
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']);
 
         const { url, init, body } = requestOf(fetchMock);
@@ -69,7 +51,7 @@ describe('fetchPOIsInRadius — request shape', () => {
     });
 
     test('fetchPOIsInRadius sends types "all" verbatim, not an expanded filter list', async () => {
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchPOIsInRadius(START.lat, START.lng, 1, 5, 'all');
 
         const { init, body } = requestOf(fetchMock);
@@ -81,7 +63,7 @@ describe('fetchPOIsInRadius — request shape', () => {
     });
 
     test('fetchPOIsInRadius sends an explicit key list through unchanged', async () => {
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park', 'cafe']);
         expect(requestOf(fetchMock).body.types).toEqual(['park', 'cafe']);
     });
@@ -89,7 +71,7 @@ describe('fetchPOIsInRadius — request shape', () => {
     test('a scalar catalog key is wrapped into a one-element list', async () => {
         // destination-resolve.js passes poiType.key straight through, so the
         // wrapping has to happen here or the service 400s on a bare string.
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchPOIsInRadius(START.lat, START.lng, 1, 5, 'park');
         expect(requestOf(fetchMock).body.types).toEqual(['park']);
     });
@@ -97,7 +79,7 @@ describe('fetchPOIsInRadius — request shape', () => {
 
 describe('fetchPOIsInRadius — response normalization', () => {
     test('fetchPOIsInRadius maps the response candidates array through', async () => {
-        installFetch(okJson({
+        installCannedFetch(jsonResponse({
             cache: 'hit',
             count: 2,
             total: 40,
@@ -117,7 +99,7 @@ describe('fetchPOIsInRadius — response normalization', () => {
         // The wire OMITS name on an unnamed OSM element; this function's
         // contract has always been an explicit null (session.js persists
         // destName, and an absent key is not the same row as a null one).
-        installFetch(okJson({ candidates: [{ lat: 62.2, lng: 25.1 }] }));
+        installCannedFetch(jsonResponse({ candidates: [{ lat: 62.2, lng: 25.1 }] }));
         const pois = await fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']);
         expect(pois).toEqual([{ lat: 62.2, lng: 25.1, name: null }]);
         expect(Object.keys(pois[0])).toContain('name');
@@ -128,7 +110,7 @@ describe('fetchPOIsInRadius — response normalization', () => {
 
 describe('fetchRoadsInRadius', () => {
     test('fetchRoadsInRadius POSTs to /api/junctions/roads with start in the body', async () => {
-        const fetchMock = installFetch(okJson({
+        const fetchMock = installCannedFetch(jsonResponse({
             candidates: [{ lat: 62.2, lng: 25.1 }],
         }));
         const roads = await fetchRoadsInRadius(START.lat, START.lng, 1, 5);
@@ -145,19 +127,19 @@ describe('fetchRoadsInRadius', () => {
     });
 
     test('fetchRoadsInRadius sends exclude "winter" when winterMode is true', async () => {
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchRoadsInRadius(START.lat, START.lng, 1, 5, undefined, true);
         expect(requestOf(fetchMock).body.exclude).toBe('winter');
     });
 
     test('fetchRoadsInRadius sends exclude "default" when winterMode is false', async () => {
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchRoadsInRadius(START.lat, START.lng, 1, 5, undefined, false);
         expect(requestOf(fetchMock).body.exclude).toBe('default');
     });
 
     test('winterMode defaults to the summer preset when omitted', async () => {
-        const fetchMock = installFetch(okJson({ candidates: [] }));
+        const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
         await fetchRoadsInRadius(START.lat, START.lng, 1, 5);
         expect(requestOf(fetchMock).body.exclude).toBe('default');
     });
@@ -168,25 +150,25 @@ describe('fetchRoadsInRadius', () => {
 // nearby…"). Collapsing the two here would silently retire one of them.
 describe('failure vs empty', () => {
     test('a 502 rejects, so resolveCandidatePool falls back to the random pool', async () => {
-        installFetch(errStatus(502, 'POI search is busy. Please try again.'));
+        installCannedFetch(errStatus(502, 'POI search is busy. Please try again.'));
         await expect(fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']))
             .rejects.toThrow(/busy/i);
-        installFetch(errStatus(502));
+        installCannedFetch(errStatus(502));
         await expect(fetchRoadsInRadius(START.lat, START.lng, 1, 5))
             .rejects.toThrow(/busy/i);
     });
 
     test.each([400, 413, 500])('a %i also rejects rather than resolving empty', async (status) => {
-        installFetch(errStatus(status));
+        installCannedFetch(errStatus(status));
         await expect(fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']))
             .rejects.toThrow(Error);
     });
 
     test('an empty candidates array resolves to [] — the no-results branch, not the error branch', async () => {
-        installFetch(okJson({ cache: 'hit', count: 0, total: 0, candidates: [] }));
+        installCannedFetch(jsonResponse({ cache: 'hit', count: 0, total: 0, candidates: [] }));
         await expect(fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']))
             .resolves.toEqual([]);
-        installFetch(okJson({ cache: 'hit', count: 0, total: 0, candidates: [] }));
+        installCannedFetch(jsonResponse({ cache: 'hit', count: 0, total: 0, candidates: [] }));
         await expect(fetchRoadsInRadius(START.lat, START.lng, 1, 5))
             .resolves.toEqual([]);
     });
@@ -195,10 +177,10 @@ describe('failure vs empty', () => {
         // fetchWithTimeout aborts a stalled request; an AbortError must reach
         // the caller, not be swallowed into an empty pool (which would read as
         // "nothing nearby" and hide a dead service).
-        installFetch({ throw: abortErr() });
+        installCannedFetch({ throw: abortErr() });
         await expect(fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']))
             .rejects.toThrow(/aborted/);
-        installFetch({ throw: abortErr() });
+        installCannedFetch({ throw: abortErr() });
         await expect(fetchRoadsInRadius(START.lat, START.lng, 1, 5))
             .rejects.toThrow(/aborted/);
     });
