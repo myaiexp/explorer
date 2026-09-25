@@ -1,0 +1,7 @@
+{
+  "out": "fonts",
+  "families": [
+    {"family": "DM Sans", "source": "ofl/dmsans", "weights": [400, 700]},
+    {"family": "JetBrains Mono", "source": "ofl/jetbrainsmono", "weights": [400]}
+  ]
+}
