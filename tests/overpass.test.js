@@ -9,8 +9,9 @@
  * in junctions-cache/tests/overpass-pools.test.ts. What is left in the browser
  * is request shape and response normalization, which is what this file pins.
  *
- * Fake fetch, no real HTTP and no fake timers — the stub settles immediately, so
- * fetchWithTimeout's AbortController timer is cleared before it can fire.
+ * Fake fetch, no real HTTP. The stubs settle immediately, so fetchWithTimeout's
+ * AbortController timer is cleared before it can fire — except in the
+ * POOL_TIMEOUT_MS block, which stalls fetch under fake timers on purpose.
  * SCRIPT_DEPS pulls net.js (fetchWithTimeout); tests stub global fetch under it.
  */
 import { describe, test, expect, vi, beforeAll, afterEach } from 'vitest';
@@ -183,5 +184,34 @@ describe('failure vs empty', () => {
         installCannedFetch({ throw: abortErr() });
         await expect(fetchRoadsInRadius(START.lat, START.lng, 1, 5))
             .rejects.toThrow(/aborted/);
+    });
+});
+
+describe('POOL_TIMEOUT_MS', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    test('is 60s, the proxy_read_timeout in deploy/nginx-junctions.conf', () => {
+        expect(POOL_TIMEOUT_MS).toBe(60_000);
+    });
+
+    test('a stalled pool request outlives net.js\'s 20s default and aborts at 60s', async () => {
+        // A cache miss that has to reach Overpass can take longer than 20s. An
+        // early abort sends resolveCandidatePool down its random-annulus fallback.
+        vi.useFakeTimers();
+        vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((_, reject) => {
+            init.signal.addEventListener('abort', () => reject(abortErr()));
+        })));
+
+        const pending = fetchRoadsInRadius(START.lat, START.lng, 1, 5);
+        let rejected = null;
+        pending.catch((e) => { rejected = e; });
+
+        await vi.advanceTimersByTimeAsync(59_999);
+        expect(rejected).toBeNull();
+
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     });
 });

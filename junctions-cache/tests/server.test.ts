@@ -13,10 +13,6 @@
 //
 // Boundaries mocked: the Overpass fetcher (network), and log.js (so /logs can
 // assert what getRecentLogs receives and so runs don't spew structured lines).
-// cache.ts holds module-level singleton state and reads CACHE_PATH once at
-// import, so each test gets a fresh module + isolated empty cache via
-// loadServer() (vi.resetModules + a per-test temp CACHE_PATH) — the production
-// cache file is never read or written.
 
 import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';

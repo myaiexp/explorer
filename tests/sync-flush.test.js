@@ -50,8 +50,6 @@ describe('outbox resume on startup (audit)', () => {
     });
 
     test('init does NOT flush a stray outbox when not accepted (anonymous)', async () => {
-        // getUsername() gates the pump on accepted state, so a leftover queue on an
-        // anonymous device must never upload — the nudge no-ops via flushHead's guard.
         setLocation('/wander/');
         setLocalStorage({
             walk_sync_outbox: JSON.stringify([

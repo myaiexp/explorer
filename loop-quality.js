@@ -1,6 +1,5 @@
 // Loop-quality utilities for detecting degenerate round-trips.
-// Loaded after geo-utils.js (reads globalThis.haversineM) and bbox.js,
-// before app.js.
+// Loaded after geo-utils.js (reads globalThis.haversineM), before app.js.
 
 // Default 25 m: tight enough to require both legs to truly share roads
 // (sub-block separation passes), loose enough that GPS-jitter-style
