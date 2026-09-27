@@ -13,11 +13,14 @@
 // `--frozen-lockfile` deploy and its own per-package `tsc` rootDir, so there is
 // no workspace to share a package through. MIRROR any fix to the shared core in
 // BOTH files: the Bucket shape, refill()'s continuous accrual (incl. the
-// no-double-rate-burst property), the trusted-proxy client-IP extraction
-// (clientIp here / lib/client-ip.ts there), the Retry-After deficit math, and the
-// idle-≥-2-windows staleness rule. Do NOT sync the per-service policy, which is
-// intentionally different: MAX_BUCKETS (10k here vs 50k there), inline eviction
-// here vs a periodic sweeper there, and factory-owned vs module-level maps.
+// no-double-rate-burst property), the forwarding-header parsing (X-Real-IP, then
+// the last XFF hop), the Retry-After deficit math, the idle-≥-2-windows
+// staleness rule, and the cap on insert (evict stale, then refuse the new key).
+// Do NOT sync the per-service policy, which is intentionally different:
+// MAX_BUCKETS (10k here vs 50k there), the extra periodic sweeper there,
+// factory-owned vs module-level maps, and how a request earns trust for its
+// forwarding headers — the TRUSTED_PROXIES peer list here vs a root:www-data
+// unix-socket listener there, which trusts no TCP peer at all (finding #10094).
 
 import type { Context, Next } from 'hono';
 

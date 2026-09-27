@@ -1,9 +1,16 @@
 // Client IP extraction for rate limits + account ipFirstSeen.
 //
-// Trust forwarding headers only when the TCP peer is a known reverse proxy
-// (nginx on loopback). Untrusted peers — direct access, misconfigured
-// firewall, SSRF — can set XFF / X-Real-IP arbitrarily; ignoring them there
-// keeps the IP rate-limit buckets and ipFirstSeen column honest.
+// Trust forwarding headers only on a connection that provably came from the
+// reverse proxy. Anyone else — another local uid, a misconfigured firewall,
+// SSRF — can set XFF / X-Real-IP arbitrarily; ignoring them there keeps the
+// IP rate-limit buckets and ipFirstSeen column honest.
+//
+// In production that proof is the listener: wander-api.socket hands the
+// service /run/wander-api.sock, 0660 root:www-data, so only nginx can connect,
+// and index.ts marks every request accepted there with PROXY_SOCKET_FLAG.
+// Loopback TCP is deliberately NOT trusted: every uid on the box can reach
+// 127.0.0.1, and trusting it let any of them mint a fresh rate-limit key per
+// request with X-Real-IP (finding #10094).
 //
 // Behind a trusted proxy, prefer X-Real-IP (nginx overwrites it with
 // $remote_addr) then the *last* X-Forwarded-For hop (the address nginx
@@ -12,10 +19,14 @@
 
 import type { Context } from 'hono';
 
-// Default: nginx (and anything else) that terminates TLS on this host and
-// proxies to 127.0.0.1:3700. Override with TRUSTED_PROXIES=ip,ip for other
-// topologies (comma-separated).
-const DEFAULT_TRUSTED = ['127.0.0.1', '::1', '::ffff:127.0.0.1'] as const;
+// c.env key index.ts sets to `true` on requests accepted on the proxy socket.
+// Tests inject it through app.request()'s env argument to simulate nginx.
+export const PROXY_SOCKET_FLAG = 'viaProxySocket';
+
+// TCP peers whose forwarding headers are honoured. Empty by default — the
+// proxy socket is the production path. TRUSTED_PROXIES=ip,ip opts a remote
+// proxy in for other topologies (comma-separated).
+const DEFAULT_TRUSTED: readonly string[] = [];
 
 // inet-column / rate-limit key hygiene — refuse garbage that isn't a plausible
 // IPv4/IPv6 literal (Postgres `inet` would reject it on insert anyway, but the
@@ -51,6 +62,18 @@ export function peerAddress(c: Context): string | undefined {
   return typeof peer === 'string' && peer.length > 0 ? peer : undefined;
 }
 
+// Strict `=== true`: only index.ts sets the flag, and nothing a client sends
+// can reach c.env.
+function viaProxySocket(c: Context): boolean {
+  const env = c.env as Record<string, unknown> | undefined;
+  return env?.[PROXY_SOCKET_FLAG] === true;
+}
+
+function fromTrustedProxy(c: Context, peer: string | undefined): boolean {
+  if (viaProxySocket(c)) return true;
+  return peer !== undefined && isTrustedProxy(peer);
+}
+
 function lastXffHop(c: Context): string | undefined {
   const raw = c.req.header('x-forwarded-for');
   if (!raw) return undefined;
@@ -71,17 +94,18 @@ function forwardedClientIp(c: Context): string | undefined {
 
 /**
  * Rate-limit / bucket key. Prefer the nginx-overwritten client address when
- * the peer is a trusted proxy; otherwise use the peer itself and never honor
- * client forwarding headers. Falls back to 'unknown' when neither is available
- * (e.g. app.request() harness without an injected env).
+ * the request came through a trusted proxy; otherwise use the TCP peer itself
+ * and never honor client forwarding headers. Falls back to 'unknown' when
+ * neither is available — a proxy-socket request with no forwarding header
+ * (unix peers have no address), or the app.request() harness with no env —
+ * so those share one bucket rather than each getting a fresh one.
  */
 export function clientIp(c: Context): string {
   const peer = peerAddress(c);
-  if (peer && isTrustedProxy(peer)) {
-    return forwardedClientIp(c) ?? peer;
+  if (fromTrustedProxy(c, peer)) {
+    return forwardedClientIp(c) ?? peer ?? 'unknown';
   }
-  if (peer) return peer;
-  return 'unknown';
+  return peer ?? 'unknown';
 }
 
 /**
@@ -91,8 +115,7 @@ export function clientIp(c: Context): string {
  * public edge, not a dump of every local socket address. Missing/untrusted → null.
  */
 export function clientIpForStorage(c: Context): string | null {
-  const peer = peerAddress(c);
-  if (peer && isTrustedProxy(peer)) {
+  if (fromTrustedProxy(c, peerAddress(c))) {
     return forwardedClientIp(c) ?? null;
   }
   return null;

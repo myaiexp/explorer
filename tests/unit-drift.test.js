@@ -34,7 +34,7 @@ function unitFiles(dir = resolve(ROOT, 'deploy'), out = []) {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, e.name);
         if (e.isDirectory()) unitFiles(p, out);
-        else if (/\.(service|timer)$/.test(e.name)) out.push(p);
+        else if (/\.(service|timer|socket)$/.test(e.name)) out.push(p);
     }
     return out;
 }
@@ -113,9 +113,10 @@ describe('check-unit-drift.sh', () => {
         unit('a.service', OK_UNIT, { installed: OK_UNIT });
         unit('b.service', OK_UNIT, { installed: OK_UNIT });
         unit('c.timer', OK_UNIT, { installed: OK_UNIT });
+        unit('d.socket', OK_UNIT, { installed: OK_UNIT });
         const { code, out } = run();
         expect(code).toBe(0);
-        expect(out).toMatch(/none \(3 checked\)/);
+        expect(out).toMatch(/none \(4 checked\)/);
     });
 
     test('an empty tree fails rather than reporting a clean sweep of nothing', () => {

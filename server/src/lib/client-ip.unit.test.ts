@@ -1,7 +1,8 @@
-// Unit tests for trusted-proxy client IP extraction (audit finding #1342).
+// Unit tests for trusted-proxy client IP extraction (audit finding #1342, #10094).
 import { describe, it, expect, afterEach } from 'vitest';
 import { Hono, type Context } from 'hono';
 import {
+  PROXY_SOCKET_FLAG,
   clientIp,
   clientIpForStorage,
   isPlausibleIp,
@@ -15,6 +16,10 @@ function appWith(handler: (c: Context) => Response) {
   return app;
 }
 
+// nginx over /run/wander-api.sock: index.ts sets the flag, and a unix peer has
+// no remoteAddress.
+const PROXY_SOCKET_ENV = { [PROXY_SOCKET_FLAG]: true };
+// Any local uid connecting to loopback TCP — never trusted (finding #10094).
 const LOOPBACK_ENV = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
 const PUBLIC_ENV = { incoming: { socket: { remoteAddress: '203.0.113.9' } } };
 
@@ -38,10 +43,10 @@ describe('isPlausibleIp', () => {
 });
 
 describe('isTrustedProxy', () => {
-  it('trusts loopback by default', () => {
-    expect(isTrustedProxy('127.0.0.1')).toBe(true);
-    expect(isTrustedProxy('::1')).toBe(true);
-    expect(isTrustedProxy('::ffff:127.0.0.1')).toBe(true);
+  it('trusts no TCP peer by default — loopback included (finding #10094)', () => {
+    expect(isTrustedProxy('127.0.0.1')).toBe(false);
+    expect(isTrustedProxy('::1')).toBe(false);
+    expect(isTrustedProxy('::ffff:127.0.0.1')).toBe(false);
     expect(isTrustedProxy('203.0.113.1')).toBe(false);
   });
 
@@ -59,7 +64,7 @@ describe('clientIp', () => {
     const res = await app.request(
       '/',
       { headers: { 'x-forwarded-for': '  198.51.100.7 , 10.0.0.1' } },
-      LOOPBACK_ENV
+      PROXY_SOCKET_ENV
     );
     expect(await res.text()).toBe('10.0.0.1');
   });
@@ -74,15 +79,44 @@ describe('clientIp', () => {
           'x-forwarded-for': '198.51.100.7, 10.0.0.1',
         },
       },
-      LOOPBACK_ENV
+      PROXY_SOCKET_ENV
     );
     expect(await res.text()).toBe('203.0.113.9');
   });
 
-  it('falls back to the peer when trusted proxy sends no forwarding headers', async () => {
+  it('keys a proxy-socket request with no forwarding headers on one shared bucket', async () => {
     const app = appWith((c) => new Response(clientIp(c)));
-    const res = await app.request('/', {}, LOOPBACK_ENV);
-    expect(await res.text()).toBe('127.0.0.1');
+    const res = await app.request('/', {}, PROXY_SOCKET_ENV);
+    expect(await res.text()).toBe('unknown');
+  });
+
+  it('ignores X-Real-IP / XFF from a loopback peer — any local uid (finding #10094)', async () => {
+    const app = appWith((c) => new Response(clientIp(c)));
+    for (const fresh of ['198.51.100.1', '198.51.100.2']) {
+      const res = await app.request(
+        '/',
+        { headers: { 'x-real-ip': fresh, 'x-forwarded-for': fresh } },
+        LOOPBACK_ENV
+      );
+      expect(await res.text()).toBe('127.0.0.1');
+    }
+  });
+
+  it('only trusts the proxy-socket flag when it is exactly true', async () => {
+    const app = appWith((c) => new Response(clientIp(c)));
+    const res = await app.request(
+      '/',
+      { headers: { 'x-real-ip': '198.51.100.3' } },
+      { [PROXY_SOCKET_FLAG]: 'true' }
+    );
+    expect(await res.text()).toBe('unknown');
+  });
+
+  it('honours forwarding headers from a TRUSTED_PROXIES peer', async () => {
+    process.env.TRUSTED_PROXIES = '203.0.113.9';
+    const app = appWith((c) => new Response(clientIp(c)));
+    const res = await app.request('/', { headers: { 'x-real-ip': '198.51.100.4' } }, PUBLIC_ENV);
+    expect(await res.text()).toBe('198.51.100.4');
   });
 
   it('ignores XFF and X-Real-IP from an untrusted peer (spoof bypass)', async () => {
@@ -112,9 +146,9 @@ describe('clientIp', () => {
     const res = await app.request(
       '/',
       { headers: { 'x-forwarded-for': 'not a real ip!!!' } },
-      LOOPBACK_ENV
+      PROXY_SOCKET_ENV
     );
-    expect(await res.text()).toBe('127.0.0.1');
+    expect(await res.text()).toBe('unknown');
   });
 
   it('ignores an implausible last XFF hop rather than walking left into a spoof', async () => {
@@ -122,9 +156,9 @@ describe('clientIp', () => {
     const res = await app.request(
       '/',
       { headers: { 'x-forwarded-for': '198.51.100.7, not-an-ip' } },
-      LOOPBACK_ENV
+      PROXY_SOCKET_ENV
     );
-    expect(await res.text()).toBe('127.0.0.1');
+    expect(await res.text()).toBe('unknown');
   });
 });
 
@@ -134,7 +168,7 @@ describe('clientIpForStorage', () => {
     const res = await app.request(
       '/',
       { headers: { 'x-forwarded-for': '203.0.113.5' } },
-      LOOPBACK_ENV
+      PROXY_SOCKET_ENV
     );
     expect(await res.text()).toBe('203.0.113.5');
   });
@@ -149,14 +183,20 @@ describe('clientIpForStorage', () => {
           'x-forwarded-for': '198.51.100.7, 10.0.0.1',
         },
       },
-      LOOPBACK_ENV
+      PROXY_SOCKET_ENV
     );
     expect(await res.text()).toBe('203.0.113.9');
   });
 
   it('returns null without forwarding headers even behind a trusted proxy', async () => {
     const app = appWith((c) => new Response(String(clientIpForStorage(c))));
-    const res = await app.request('/', {}, LOOPBACK_ENV);
+    const res = await app.request('/', {}, PROXY_SOCKET_ENV);
+    expect(await res.text()).toBe('null');
+  });
+
+  it('returns null for a loopback peer — any local uid (finding #10094)', async () => {
+    const app = appWith((c) => new Response(String(clientIpForStorage(c))));
+    const res = await app.request('/', { headers: { 'x-real-ip': '1.2.3.4' } }, LOOPBACK_ENV);
     expect(await res.text()).toBe('null');
   });
 

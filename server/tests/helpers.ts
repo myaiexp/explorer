@@ -4,6 +4,7 @@ import { createDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 import { schema } from '../src/db.js';
 import { resetRateLimiter } from '../src/middleware/rate-limit.js';
+import { PROXY_SOCKET_FLAG } from '../src/lib/client-ip.js';
 import { resolveTestDatabaseUrl } from './test-db.js';
 
 // Guarded test DB URL — resolveTestDatabaseUrl() throws unless the db name ends
@@ -38,13 +39,11 @@ export function authHeaders(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
-// Hono `app.request` Env that simulates nginx on loopback — required for
-// forwarding headers to be trusted by lib/client-ip.ts (audit #1342). Without
-// this peer, client-supplied XFF / X-Real-IP is ignored and the rate-limit key
-// is 'unknown'.
-export const TRUSTED_PROXY_ENV = {
-  incoming: { socket: { remoteAddress: '127.0.0.1' } },
-} as const;
+// Hono `app.request` Env that simulates a request nginx delivered over
+// /run/wander-api.sock — the only path on which lib/client-ip.ts trusts
+// forwarding headers (audit #1342, finding #10094). Without it, client-supplied
+// XFF / X-Real-IP is ignored and the rate-limit key is 'unknown'.
+export const TRUSTED_PROXY_ENV = { [PROXY_SOCKET_FLAG]: true } as const;
 
 export const VISIT_BODY = {
   date: '2026-04-27T10:00:00Z',

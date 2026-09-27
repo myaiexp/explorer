@@ -7,9 +7,12 @@
  *
  * Both files carry reciprocal TWIN comments spelling out which parts MUST stay
  * behaviourally identical: the Bucket shape, refill()'s continuous accrual (incl.
- * the no-double-rate-burst property), the trusted-proxy client-IP extraction
- * (X-Real-IP, else X-Forwarded-For's last hop, but only when the TCP peer is a
- * known proxy — audit #1342 / finding #7895), and the Retry-After deficit math. There is no shared package to
+ * the no-double-rate-burst property), the forwarding-header parsing (X-Real-IP,
+ * else X-Forwarded-For's last hop, only from a trusted proxy — audit #1342 /
+ * finding #7895), and the Retry-After deficit math. How a request earns that
+ * trust is per-service (wander-api: its unix-socket listener, never loopback,
+ * finding #10094; junctions-cache: its TRUSTED_PROXIES peer), so both are driven
+ * here through the one path they share — a TRUSTED_PROXIES peer. There is no shared package to
  * enforce this (separate lockfiles, separate boxes), so this test is the
  * enforcement — the sibling of tests/poi-catalog-parity.test.js.
  *
@@ -17,8 +20,8 @@
  * names, structure, and per-service policy), we drive both limiters through
  * IDENTICAL request vectors under a pinned clock and assert identical observable
  * behaviour (allow/block + Retry-After). A fix that lands in only one core forks
- * the outputs and fails RED here. Per-service policy — MAX_BUCKETS, the sweeper
- * vs inline eviction — is deliberately NOT exercised; only the shared core is.
+ * the outputs and fails RED here. Per-service policy — MAX_BUCKETS, wander-api's
+ * extra sweeper — is deliberately NOT exercised; only the shared core is.
  *
  * The comparison uses the two limiters at a matching config (60 requests / 60s):
  * server's readRateLimit() is fixed at 60/min per IP, and junctions'
@@ -33,8 +36,10 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ipRateLimit } from '../junctions-cache/src/rate-limit.ts';
 import { readRateLimit, resetRateLimiter } from '../server/src/middleware/rate-limit.ts';
 
-// nginx on loopback — the peer both cores trust, so XFF is honored for it.
-const TRUSTED_PEER = '127.0.0.1';
+// A remote nginx both cores trust through TRUSTED_PROXIES (set in beforeEach),
+// so XFF is honored for it — the VPS Tailscale address junctions-cache trusts in
+// production. Not loopback: wander-api refuses loopback as a proxy.
+const TRUSTED_PEER = '100.117.202.73';
 // A direct caller (tailnet / misconfigured firewall). Both cores must ignore
 // whatever XFF it sends and key on this address instead.
 const UNTRUSTED_PEER = '100.64.0.9';
@@ -88,12 +93,17 @@ function makePair() {
 }
 
 describe('rate-limiter core parity: server ↔ junctions-cache', () => {
+    let prevTrusted;
     beforeEach(() => {
+        prevTrusted = process.env.TRUSTED_PROXIES;
+        process.env.TRUSTED_PROXIES = TRUSTED_PEER;
         vi.useFakeTimers();
         vi.setSystemTime(0);
         resetRateLimiter(); // server maps are module-level; junctions maps are per-factory
     });
     afterEach(() => {
+        if (prevTrusted === undefined) delete process.env.TRUSTED_PROXIES;
+        else process.env.TRUSTED_PROXIES = prevTrusted;
         vi.useRealTimers();
     });
 

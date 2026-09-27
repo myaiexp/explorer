@@ -11,6 +11,7 @@ import {
   resetRateLimiter,
   sweepStaleBuckets,
 } from '../src/middleware/rate-limit.js';
+import { PROXY_SOCKET_FLAG } from '../src/lib/client-ip.js';
 
 // Thin harness: mount the real middleware on no-op handlers so the bucket logic
 // is exercised directly — no DB, no real account creation, and fake timers stay
@@ -28,8 +29,8 @@ app.post('/accounts', accountCreationRateLimit(), (c) => c.body(null, 201));
 const WINDOW_MS = 60_000;
 const HOUR_MS = 3_600_000;
 
-// Simulate nginx on loopback so X-Forwarded-For is trusted as the client IP.
-const PROXY_ENV = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
+// Simulate nginx on the proxy socket so X-Forwarded-For is trusted as the client IP.
+const PROXY_ENV = { [PROXY_SOCKET_FLAG]: true };
 
 // async, not a bare `Promise<Response>` return type: app.request is overloaded to
 // `Response | Promise<Response>`, which does not assign to the narrower annotation.
@@ -251,6 +252,43 @@ describe('sweepStaleBuckets — bounded memory', () => {
         if ((await write('cap-a', ip)).status === 204) allowed++;
       }
       expect(allowed).toBe(60);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Finding #10094: the cap used to be applied only by the 5-minute sweeper, so a
+// flood of fresh keys grew each map without bound in between. consume() now
+// enforces it on insert, the same way junctions-cache does.
+describe('consume — cap enforced on insert', () => {
+  test('a new key past the cap is refused; keys already tracked keep working', async () => {
+    resetRateLimiter(2);
+    // One username throughout, so only the IP write map approaches the cap.
+    expect((await write('capuser', '203.0.113.31')).status).toBe(204);
+    expect((await write('capuser', '203.0.113.32')).status).toBe(204);
+
+    const refused = await write('capuser', '203.0.113.33');
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get('Retry-After')).toBe(String(WINDOW_MS / 1000));
+
+    // Refusal does not displace a live bucket.
+    expect((await write('capuser', '203.0.113.31')).status).toBe(204);
+    expect((await write('capuser', '203.0.113.32')).status).toBe(204);
+  });
+
+  test('a full map admits a new key once a tracked one has gone stale', async () => {
+    vi.useFakeTimers();
+    try {
+      resetRateLimiter(2);
+      expect((await write('capuser', '203.0.113.41')).status).toBe(204);
+      expect((await write('capuser', '203.0.113.42')).status).toBe(204);
+      expect((await write('capuser', '203.0.113.43')).status).toBe(429);
+
+      // 2× the window idle → both IP buckets are indistinguishable from fresh
+      // ones, so the insert-time eviction frees room without waiting for a sweep.
+      vi.advanceTimersByTime(2 * WINDOW_MS);
+      expect((await write('capuser', '203.0.113.43')).status).toBe(204);
     } finally {
       vi.useRealTimers();
     }

@@ -3,7 +3,12 @@
 # /etc/systemd/system/ on that host every deploy. `local` is the VPS.
 [Unit]
 Description=Wander API (cloud backup)
-After=network.target postgresql.service
+# Socket-activated: wander-api.socket (/run/wander-api.sock, 0660
+# root:www-data) is the only listener, so nginx is the only client
+# (finding #10094). Without LISTEN_FDS the server falls back to loopback TCP,
+# which is for dev and tests only.
+Requires=wander-api.socket
+After=network.target postgresql.service wander-api.socket
 Wants=postgresql.service
 
 [Service]

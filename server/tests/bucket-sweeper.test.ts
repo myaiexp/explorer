@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
+import { PROXY_SOCKET_FLAG } from '../src/lib/client-ip.js';
 import {
   ipWriteRateLimit,
   usernameWriteRateLimit,
@@ -38,7 +39,7 @@ app.put(
   usernameWriteRateLimit(),
   (c) => c.body(null, 204),
 );
-const PROXY_ENV = { incoming: { socket: { remoteAddress: '127.0.0.1' } } };
+const PROXY_ENV = { [PROXY_SOCKET_FLAG]: true };
 
 // async, not a bare `Promise<Response>` return type: app.request is overloaded to
 // `Response | Promise<Response>`, which does not assign to the narrower annotation.

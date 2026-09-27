@@ -101,7 +101,7 @@ describe('rate limiting', () => {
     const { username: u, token } = await createTestAccount();
     // nginx $proxy_add_x_forwarded_for appends $remote_addr as the last hop;
     // the leftmost hops are client-supplied. TRUSTED_PROXY_ENV simulates nginx
-    // on loopback so the forwarding headers are honoured.
+    // on the proxy socket so the forwarding headers are honoured.
     const chained = { ...authHeaders(token), 'x-forwarded-for': '1.2.3.4, 5.6.7.8' };
 
     // Drain the 60 reads/min budget via the chain header.

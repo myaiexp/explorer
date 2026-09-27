@@ -98,7 +98,7 @@ while IFS= read -r src; do
             11) report "$name" "unreachable — could not ssh to $host (not checked)" ;;
         esac
     fi
-done < <(find "$UNIT_SRC_DIR" -type f \( -name '*.service' -o -name '*.timer' \) | sort)
+done < <(find "$UNIT_SRC_DIR" -type f \( -name '*.service' -o -name '*.timer' -o -name '*.socket' \) | sort)
 
 if [[ $checked -eq 0 ]]; then
     echo "  no units found under $UNIT_SRC_DIR — the scan is broken, not the deployment"

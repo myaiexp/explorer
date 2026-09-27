@@ -225,7 +225,10 @@ describe('deploy/nginx-wander.conf API proxy (finding #7582)', () => {
         const block = blockFor(conf, '/wander/api/');
         expect(block).not.toBe('');
         expect(block).toMatch(/^\s*limit_req\s+zone=api\s+burst=10\s+nodelay;/m);
-        expect(block).toMatch(/^\s*proxy_pass\s+http:\/\/127\.0\.0\.1:3700\/api\/;/m);
+        // The root:www-data unix socket, never loopback TCP: wander-api trusts
+        // X-Real-IP only on that socket (finding #10094).
+        expect(block).toMatch(/^\s*proxy_pass\s+http:\/\/unix:\/run\/wander-api\.sock:\/api\/;/m);
+        expect(directivesOf(block)).not.toMatch(/127\.0\.0\.1|localhost/);
         expect(block).toMatch(/^\s*proxy_set_header\s+X-Real-IP\s+\$remote_addr;/m);
         // Overwrite, do not append — client-supplied XFF hops must not become
         // the rate-limit key (finding #7895).

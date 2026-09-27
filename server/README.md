@@ -1,8 +1,10 @@
 # wander-api
 
-Cloud-backup API for Wander. Hono + Drizzle + Postgres, served on port 3700
-and exposed via nginx at `/wander/api/*`. Production runs Node 24
-(`/usr/bin/node` in `deploy/wander-api.service`).
+Cloud-backup API for Wander. Hono + Drizzle + Postgres, exposed via nginx at
+`/wander/api/*`. Production runs Node 24 (`/usr/bin/node` in
+`deploy/wander-api.service`) and listens only on `/run/wander-api.sock`, which
+`deploy/wander-api.socket` creates 0660 root:www-data so nginx is the only
+client. `pnpm dev` / `pnpm start` without systemd bind `127.0.0.1:3700`.
 
 ```bash
 pnpm install
@@ -47,6 +49,12 @@ Every read/write requires `Authorization: Bearer <token>` (or the
 
 `POST /accounts` and `GET /api/health` are unauthenticated.
 `POST /accounts` is rate-limited at 10 creations/hour/IP.
+
+The per-IP key is nginx's `X-Real-IP` only for requests that arrived on the
+proxy socket (`src/lib/client-ip.ts`). Every other connection — loopback TCP
+included, since any local uid can reach it — is keyed on its own peer address
+and never records `ipFirstSeen` (finding #10094). `TRUSTED_PROXIES=ip,ip`
+opts a remote TCP proxy in. Each bucket map is capped at 50k keys on insert.
 
 The human-readable username is only a public handle, not a credential.
 Missing-account and wrong-token both return an identical `401`, so the

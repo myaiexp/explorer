@@ -5,12 +5,14 @@
 // to shelly, this to the VPS), each with its own lockfile / `--frozen-lockfile`
 // deploy / per-package `tsc` rootDir, so there is no workspace to share through.
 // MIRROR any fix to the shared core in BOTH files: the Bucket shape, refill()'s
-// continuous accrual (incl. the no-double-rate-burst property), the trusted-proxy
-// client-IP extraction (lib/client-ip.ts here / clientIp there), the
-// Retry-After deficit math, and the idle-≥-2-windows staleness rule. Do NOT sync
-// the per-service policy: MAX_BUCKETS (50k here vs 10k there), the periodic
-// sweeper here vs inline eviction there, and module-level maps + REGISTRY here vs
-// factory-owned maps there.
+// continuous accrual (incl. the no-double-rate-burst property), the forwarding-
+// header parsing (X-Real-IP, then the last XFF hop), the Retry-After deficit
+// math, the idle-≥-2-windows staleness rule, and the cap on insert (evict stale,
+// then refuse the new key). Do NOT sync the per-service policy: MAX_BUCKETS (50k
+// here vs 10k there), the extra periodic sweeper here, module-level maps +
+// REGISTRY here vs factory-owned maps there, and how a request earns trust for
+// its forwarding headers — the /run/wander-api.sock listener here (loopback is
+// NOT trusted, finding #10094) vs the TRUSTED_PROXIES peer list there.
 import type { Context, Next } from 'hono';
 import { clientIp } from '../lib/client-ip.js';
 
@@ -39,14 +41,33 @@ const REGISTRY: ReadonlyArray<{ buckets: Map<string, Bucket>; windowMs: number }
 ];
 
 // Hard ceiling per map. Far above any realistic active-client count for a
-// 1–2 minute window, but bounds heap under a spoofed-X-Forwarded-For flood.
+// 1–2 minute window, but bounds heap under a many-address flood. Enforced on
+// insert by consume() and again by the sweeper.
 const MAX_BUCKETS = 50_000;
 
-export function resetRateLimiter(): void {
+// The active ceiling. Only tests lower it, through resetRateLimiter().
+let maxBuckets = MAX_BUCKETS;
+
+export function resetRateLimiter(cap = MAX_BUCKETS): void {
   usernameBuckets.clear();
   ipWriteBuckets.clear();
   ipAccountBuckets.clear();
   ipReadBuckets.clear();
+  maxBuckets = cap;
+}
+
+// Drop buckets idle ≥ 2 windows — fully refilled, so indistinguishable from a
+// never-seen key. Returns how many were removed.
+function evictStale(buckets: Map<string, Bucket>, windowMs: number, now: number): number {
+  const cutoff = windowMs * 2;
+  let removed = 0;
+  for (const [key, bucket] of buckets) {
+    if (now - bucket.lastRefill >= cutoff) {
+      buckets.delete(key);
+      removed++;
+    }
+  }
+  return removed;
 }
 
 // Continuously accrue tokens at limit/windowMs per ms, capped at limit. This is
@@ -69,6 +90,14 @@ function consume(
   const now = Date.now();
   let bucket = buckets.get(key);
   if (!bucket) {
+    // Cap on insert, not only in the 5-minute sweep: a flood of fresh keys
+    // would otherwise grow the map without bound between sweeps. A new key
+    // that still finds the map full after stale eviction is refused rather
+    // than displacing a live bucket (finding #10094).
+    if (buckets.size >= maxBuckets) {
+      evictStale(buckets, windowMs, now);
+      if (buckets.size >= maxBuckets) return false;
+    }
     bucket = { tokens: limit, lastRefill: now };
     buckets.set(key, bucket);
   } else {
@@ -99,22 +128,16 @@ function retryAfter(
 
 // Evict buckets idle long enough to be indistinguishable from a fresh one, then
 // enforce the hard cap by dropping the least-recently-active survivors. Returns
-// the number of entries removed. `maxBuckets` is injectable for testing.
-export function sweepStaleBuckets(now = Date.now(), maxBuckets = MAX_BUCKETS): number {
+// the number of entries removed. `cap` is injectable for testing.
+export function sweepStaleBuckets(now = Date.now(), cap = maxBuckets): number {
   let removed = 0;
   for (const { buckets, windowMs } of REGISTRY) {
-    const cutoff = windowMs * 2;
-    for (const [key, bucket] of buckets) {
-      if (now - bucket.lastRefill >= cutoff) {
-        buckets.delete(key);
-        removed++;
-      }
-    }
-    if (buckets.size > maxBuckets) {
+    removed += evictStale(buckets, windowMs, now);
+    if (buckets.size > cap) {
       const oldestFirst = [...buckets.entries()].sort(
         (a, b) => a[1].lastRefill - b[1].lastRefill
       );
-      const excess = buckets.size - maxBuckets;
+      const excess = buckets.size - cap;
       for (let i = 0; i < excess; i++) {
         buckets.delete(oldestFirst[i][0]);
         removed++;
