@@ -16,7 +16,10 @@
     'use strict';
 
     // The four synced sections, in sync order. These names are the sync
-    // vocabulary — they key the server's GET response and the outbox entries. The
+    // vocabulary — they key the server's GET response and the outbox entries.
+    // TWIN: ARCHIVE_SECTIONS in server/src/lib/archive-page.ts (import's allow-list
+    // is that same constant). No shared package — the frontend is a static script —
+    // so server/src/lib/cloud-sections.unit.test.ts fails if the sets drift. The
     // 'walk_*' localStorage keys they map to are owned by storage.js; sectionKey()
     // resolves each from storage.js's globals.
     var DATA_SECTIONS = ['visits', 'favorites', 'savedLocations', 'history'];

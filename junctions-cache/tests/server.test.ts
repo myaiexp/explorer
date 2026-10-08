@@ -1,5 +1,6 @@
 // @vitest-environment node
-// Integration tests for junctions-cache/src/app.ts — the Hono route layer.
+// Integration tests for the junctions-cache HTTP routes (src/routes/meta.ts +
+// junctions.ts), driven through createApp() in src/app.ts.
 // Audit finding #1565: /health, /logs and the /junctions request validation
 // (bbox parsing/range/area caps, start-anchored coord/maxKm caps, partial-param
 // handling, Overpass-error → 502) had zero coverage.

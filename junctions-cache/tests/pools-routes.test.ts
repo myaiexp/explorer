@@ -282,6 +282,30 @@ describe('POST /roads', () => {
         expect(body.error).toMatch(/POST body/);
         expect(queryMock).not.toHaveBeenCalled();
     });
+
+    test('invalid JSON → 400 and no Overpass call', async () => {
+        const { fetch, queryMock } = await loadServer();
+        const { status, body } = await post(fetch, '/roads', null, '{');
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/invalid JSON/);
+        expect(queryMock).not.toHaveBeenCalled();
+    });
+
+    test('an out-of-range startLat → 400 and no Overpass call', async () => {
+        const { fetch, queryMock } = await loadServer();
+        const { status, body } = await post(fetch, '/roads', { ...ANCHOR, startLat: 99 });
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/out of range/);
+        expect(queryMock).not.toHaveBeenCalled();
+    });
+
+    test('an unknown exclude preset → 400 and no Overpass call', async () => {
+        const { fetch, queryMock } = await loadServer();
+        const { status, body } = await post(fetch, '/roads', { ...ANCHOR, exclude: 'summer' });
+        expect(status).toBe(400);
+        expect(body.error).toMatch(/exclude must be/);
+        expect(queryMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('cache-key namespacing across query kinds', () => {

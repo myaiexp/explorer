@@ -11,6 +11,7 @@ import {
   MAX_ROWS_PER_SECTION,
   MAX_STORED_BYTES,
 } from '../lib/limits.js';
+import { ARCHIVE_SECTIONS } from '../lib/archive-page.js';
 import { incomingJsonbBytes, wouldExceedStoredBudget } from '../lib/snapshot-size.js';
 import { accountAuth } from '../middleware/auth.js';
 import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';
@@ -84,7 +85,9 @@ export function importRoutes(db: Db): Hono {
       return c.json({ error: 'Body must be an object' }, 400);
     }
 
-    const knownKeys = new Set(['visits', 'favorites', 'savedLocations', 'history']);
+    // Wire names, not the singular error-message words in `sections` below.
+    // ARCHIVE_SECTIONS is the server copy; the client mirror is DATA_SECTIONS.
+    const knownKeys = new Set<string>(ARCHIVE_SECTIONS);
     for (const key of Object.keys(body)) {
       if (!knownKeys.has(key)) {
         return c.json({ error: `Unknown section: ${key}` }, 400);

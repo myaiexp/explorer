@@ -22,7 +22,7 @@
 // loadFresh() (vi.resetModules + a per-test temp CACHE_PATH).
 
 import { describe, test, expect, vi, afterEach, type Mock } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { wideBboxFromStart } from '../src/cache.js';
@@ -855,5 +855,33 @@ describe('bumpAndSave', () => {
 
         const onDisk = JSON.parse(readFileSync(file, 'utf8'));
         expect(Object.keys(onDisk)).toHaveLength(2);   // the single snapshot holds both entries
+    });
+
+    test('a failed snapshot write is logged and does not stick, so a later miss still saves', async () => {
+        vi.useRealTimers();
+        const dir = mkTmpDir();
+        const file = join(dir, 'cache.json');
+        const { cache, fetchMock, log } = await loadFresh(file);
+        fetchMock.mockResolvedValue([{ lat: 60.5, lng: 24.5 }]);
+
+        try {
+            await cache.getJunctions(BBOX, 'default');
+            // The debounced write has not started. A mode the owner cannot
+            // write makes saveCache reject; the catch must clear `saving` or
+            // every later bumpAndSave returns early and the snapshot stops.
+            chmodSync(dir, 0o555);
+            await waitFor(() => log.mock.calls.some((c) =>
+                c[0] === 'ERROR' && (c[1] as { event?: string }).event === 'cache_save_failed'));
+            expect(existsSync(file)).toBe(false);
+
+            chmodSync(dir, 0o755);
+            await cache.getJunctions({ minLat: 61, minLng: 25, maxLat: 62, maxLng: 26 }, 'default');
+            await waitFor(() => existsSync(file));
+        } finally {
+            chmodSync(dir, 0o755);
+        }
+
+        const onDisk = JSON.parse(readFileSync(file, 'utf8'));
+        expect(Object.keys(onDisk)).toHaveLength(2);
     });
 });

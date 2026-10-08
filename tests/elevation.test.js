@@ -134,6 +134,51 @@ describe('fetchElevations', () => {
         expect(new URL(url).searchParams.get('latitude').split(',')).toHaveLength(n);
         expect(result).toEqual(Array.from({ length: n }, (_, i) => 100 + i));
     });
+
+    // A 200 that is not a series must hide the chart. Open-Meteo answers
+    // `{ error: true, reason }` with status 200, and a short array would
+    // otherwise be drawn against the wrong vertices.
+    test('a 200 error body resolves to null', async () => {
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({
+            error: true, reason: 'hourly latitude/longitude must not exceed 100 coordinates',
+        })));
+        await expect(fetchElevations(coords)).resolves.toBeNull();
+    });
+
+    test('a series shorter than the request resolves to null', async () => {
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({ elevation: [10, 20] })));
+        await expect(fetchElevations(coords)).resolves.toBeNull();
+    });
+
+    // Downsampled routes interpolate. A null sample takes its neighbour;
+    // two nulls in a row become 0. Either path used to be NaN in the chart.
+    test('null samples interpolate from the neighbour, never NaN', async () => {
+        const n = 101;
+        const long = Array.from({ length: n }, (_, i) => [60 + i * 0.001, 24.9]);
+        global.fetch = vi.fn((url) => {
+            const nLats = new URL(url).searchParams.get('latitude').split(',').length;
+            const elevation = Array.from({ length: nLats }, () => 80);
+            // Samples land on vertices 0,2,4,… so [0]=null/[1]=40 brackets
+            // vertex 1, and [2]=null/[3]=null brackets vertex 5.
+            elevation[0] = null;
+            elevation[1] = 40;
+            elevation[2] = null;
+            elevation[3] = null;
+            return Promise.resolve(jsonResponse({ elevation }));
+        });
+
+        const result = await fetchElevations(long);
+        expect(result).toHaveLength(n);
+        expect(result.every((e) => Number.isFinite(e))).toBe(true);
+        expect(result[0]).toBe(40);
+        expect(result[1]).toBe(40);
+        // Vertex 4 is the null sample. The walk uses a strict <, so that
+        // vertex is still t=1 of the previous segment and a null right-hand
+        // sample takes the left neighbour. Vertex 5 sits between two nulls.
+        expect(result[4]).toBe(40);
+        expect(result[5]).toBe(0);
+        expect(result[6]).toBe(0);
+    });
 });
 
 describe('renderElevationChart', () => {

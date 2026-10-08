@@ -4,7 +4,7 @@
 the Geofabrik Finland extract, serving the Overpass interpreter on
 `127.0.0.1:5002`. It is the upstream for `junctions-cache` — the only consumer.
 
-Design and rationale: `docs/plans/2026-08-31-self-hosted-overpass-design.md`.
+Original design (not rewritten; this unit is what runs, and the latch shipped as `isLocalDown` in `junctions-cache/src/overpass-target.ts`): `docs/plans/2026-08-31-self-hosted-overpass-design.md`.
 
 ## Install
 

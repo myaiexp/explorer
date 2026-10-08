@@ -197,6 +197,19 @@ describe('deleteHistoryEntry', () => {
     expect(deleteCalls).toEqual([{ section: 'history', id: '7' }]);
     expect(document.getElementById('historyList').children).toHaveLength(2);
   });
+
+  test('deleting the only entry hides #historySection', () => {
+    seedHistory([
+      { id: 'a', destLat: 60, destLng: 25, destName: 'A', date: '2026-01-01T00:00:00Z', distance: 1 },
+    ]);
+    window.renderHistorySection();
+    expect(document.getElementById('historySection').classList.contains('visible')).toBe(true);
+
+    window.deleteHistoryEntry(0);
+
+    expect(storedHistory()).toEqual([]);
+    expect(document.getElementById('historySection').classList.contains('visible')).toBe(false);
+  });
 });
 
 describe('toggleHistoryExpanded', () => {

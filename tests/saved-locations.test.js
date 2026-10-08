@@ -180,6 +180,22 @@ describe('toggleSaveLocation: hard-quota write failure (audit #5721)', () => {
   });
 });
 
+describe('selectSavedLocation', () => {
+  test('clicking a chip fills #location, fills the star, and persists settings', () => {
+    localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify([
+      { id: 'a', label: 'Home', value: 'Jyväskylä' },
+    ]));
+    window.renderSavedLocations();
+    saveSettingsCalls = 0;
+
+    document.querySelector('.saved-location-item').click();
+
+    expect(document.getElementById('location').value).toBe('Jyväskylä');
+    expect(starFill()).toBe('#fbbf24');
+    expect(saveSettingsCalls).toBe(1);
+  });
+});
+
 describe('deleteSavedLocation: index-based delete', () => {
   test("deletes by index, mirrors removed.id || String(value), and stops propagation", () => {
     const seed = [

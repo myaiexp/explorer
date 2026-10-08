@@ -105,6 +105,25 @@ describe('GET /api/:username/archive/:section (idea #3715)', () => {
     expect(third.body.nextCursor).toBeNull();
   });
 
+  test('walks every history row newest-first across pages, geometry intact', async () => {
+    const { username: u, token } = await createTestAccount();
+    for (let i = 0; i < 3; i++) {
+      await db.insert(schema.history).values({
+        id: `h-${i}`, username: u, date: dayStamp(i),
+        startLat: 60, startLng: 25, destLat: 60.1, destLng: 25.1, distance: 5,
+        routeCoords: [[60 + i, 25 + i]],
+      });
+    }
+    const first = await fetchPage(u, token, 'history', '?limit=2');
+    expect(first.status).toBe(200);
+    expect(first.body.rows.map((r) => r.id)).toEqual(['h-2', 'h-1']);
+    expect(first.body.rows[0]!.routeCoords).toEqual([[62, 27]]);
+    const second = await fetchPage(u, token, 'history', `?limit=2&cursor=${encodeURIComponent(first.body.nextCursor!)}`);
+    expect(second.body.rows.map((r) => r.id)).toEqual(['h-0']);
+    expect(second.body.rows[0]!.routeCoords).toEqual([[60, 25]]);
+    expect(second.body.nextCursor).toBeNull();
+  });
+
   test('an empty section is one empty page with no cursor', async () => {
     const { username: u, token } = await createTestAccount();
     const page = await fetchPage(u, token, 'history');

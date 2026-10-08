@@ -1,23 +1,8 @@
 /**
- * Tests for cloud-backup-ui.js — the consent toast and overflow-menu sync
- * controls (audit #7070).
- *
- * sync.test.js stubs showConsentToast, so Decline / the 30s auto-timer /
- * Accept success-and-failure / the duplicate-toast guard never ran against
- * the real DOM. This file drives the production UI with fake timers and the
- * real WanderSync (via the sync harness) so decline() actually persists
- * walk_cloud_backup state=declined.
- *
- * Collaborators resolved at call time: showError/showSuccess and
- * closeOverflowMenuIfOpen are faked (toast.js / overflow-menu.js have their
- * own suites). WanderSync is the real one so persist + getState().link
- * are the production paths.
- *
- * updateSyncMenu (finding #7587) is the only place that shows/hides Enable /
- * Copy backup link / Delete cloud data. Accept success already fires
- * wander-sync-state-change; these tests assert the resulting visibility so a
- * regression cannot leave the private #t= link uncopyable or Delete visible
- * while anonymous.
+ * Tests for cloud-backup-ui.js — consent toast and overflow-menu sync controls.
+ * WanderSync is real (sync harness); showError/showSuccess and
+ * closeOverflowMenuIfOpen are faked. updateSyncMenu is what shows or hides
+ * Enable / Copy backup link / Delete cloud data.
  */
 import { describe, test, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
@@ -269,6 +254,19 @@ describe('confirmDeleteCloudData', () => {
         expect(consentRecord()).toBeNull();
         expect(successes).toEqual(['Cloud data deleted.']);
         expectAnonymousMenu();
+    });
+
+    test('a DELETE that returns 500 toasts the failure and keeps the account', async () => {
+        await setupAccepted('rugged-pine-42');
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch({ 'DELETE /wander/api/rugged-pine-42': { status: 500 } });
+        const del = vi.spyOn(window.WanderSync, 'deleteAccount');
+        globalThis.confirmDeleteCloudData();
+        await expect(del.mock.results[0].value).rejects.toThrow(/DELETE account failed: 500/);
+        expect(errors).toEqual(['Could not delete cloud data. Try again later.']);
+        expect(successes).toEqual([]);
+        expect(window.WanderSync.getState().state).toBe('accepted');
     });
 });
 

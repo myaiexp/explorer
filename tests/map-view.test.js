@@ -190,6 +190,27 @@ describe('renderVisitedLayer', () => {
     });
 });
 
+describe('drawRoutePair', () => {
+    test('draws both legs as glow pairs and returns the combined coords', () => {
+        const outbound = [[62.1, 25.7], [62.2, 25.8]];
+        const ret = [[62.2, 25.8], [62.15, 25.75]];
+        const all = drawRoutePair({ coords: outbound }, { coords: ret }, DEFAULT_COLOR);
+
+        expect(all).toEqual([...outbound, ...ret]);
+        const lines = leaflet.map.ofType('polyline');
+        expect(lines).toHaveLength(4);
+        expect(lines.filter((l) => l.options.weight === 10)).toHaveLength(2);
+        expect(lines.filter((l) => l.options.weight === 3.5)).toHaveLength(2);
+        expect(lines.every((l) => l.options.color === DEFAULT_COLOR)).toBe(true);
+    });
+
+    test('a missing return leg draws only the outbound glow', () => {
+        const outbound = [[62.1, 25.7], [62.2, 25.8]];
+        expect(drawRoutePair({ coords: outbound }, null, DEFAULT_COLOR)).toEqual(outbound);
+        expect(leaflet.map.ofType('polyline')).toHaveLength(2);
+    });
+});
+
 describe('clearMap / clearRouteLines', () => {
     function drawSession() {
         drawRouteGlow([[62.1, 25.7], [62.2, 25.8]], DEFAULT_COLOR);
