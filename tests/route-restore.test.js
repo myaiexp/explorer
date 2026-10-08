@@ -43,7 +43,6 @@ beforeEach(() => {
   globalThis.saveToHistory = (session) => { saveToHistoryCalls.push(session); };
   globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
     tripMode,
-    smartRouting: tripMode !== 'one-way',
     winterMode: false,
     maxKm: 5,
     spread: SPREAD,
@@ -297,7 +296,7 @@ describe('buildAndDisplay — successful build persists', () => {
 
   test('spreads readRouteBuildOptions into buildRouteForMode', async () => {
     const blob = {
-      tripMode: 'round', smartRouting: true, winterMode: true,
+      tripMode: 'round', winterMode: true,
       maxKm: 9, spread: { offsetKm: 2 }, avoidBacktracking: true,
     };
     readRouteBuildOptions.mockReturnValue(blob);
@@ -324,7 +323,7 @@ describe('buildAndDisplay — successful build persists', () => {
     expect(readRouteBuildOptions).toHaveBeenCalledWith('one-way');
     const opts = buildRouteCalls[0][4];
     expect(opts.tripMode).toBe('one-way');
-    expect(opts.smartRouting).toBe(false);
+    expect(opts).not.toHaveProperty('smartRouting');
     expect(opts.winterMode).toBe(false);
     expect(opts.spread).toBe(SPREAD);
     expect(saveToHistoryCalls).toHaveLength(1);

@@ -2,7 +2,7 @@
 import { and, desc, eq, getTableColumns, notInArray } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
-import { GET_GEOMETRY_KEEP } from './validate-fields.js';
+import { GET_GEOMETRY_KEEP } from './limits.js';
 
 type TripTable = typeof schema.visits | typeof schema.history;
 

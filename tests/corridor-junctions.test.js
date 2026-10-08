@@ -3,10 +3,10 @@
  * cache fetch.
  *
  * Loading: loadScripts('osrm') evaluates the production module with its real
- * SCRIPT_DEPS (net, geometry, loop-quality → geo-utils), the same way
+ * SCRIPT_DEPS (net, overpass, geometry, loop-quality → geo-utils), the same way
  * osrm.test.js does, and the tests drive the globalThis.fetchCorridorJunctions
  * it exports. fetchWithTimeout is the real one: it calls the per-test fake
- * `fetch` and clears its abort timer once the fake resolves.
+ * `fetch` and clears its abort timer once the fake's json() settles.
  *
  * Guards two invariants:
  *   - audit #1268: maxKm is an explicit parameter, NOT read from the DOM.
@@ -99,6 +99,14 @@ describe('fetchCorridorJunctions', () => {
         expect(body.startLat).toBeUndefined();
         expect(body.startLng).toBeUndefined();
         expect(body.bbox).toBeTruthy();
+    });
+
+    test('uses the junctions-cache pool timeout, not the 20s fetch default', async () => {
+        const spy = vi.spyOn(globalThis, 'fetchWithTimeout');
+        installJunctionsFetch();
+        await fetchCorridorJunctions(60, 24, 60.5, 24.5, 1, 7, null, false);
+        expect(globalThis.POOL_TIMEOUT_MS).toBe(60_000);
+        expect(spy.mock.calls[0][2]).toBe(globalThis.POOL_TIMEOUT_MS);
     });
 
     test('throws a friendly error on non-ok response', async () => {

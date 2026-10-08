@@ -7,7 +7,7 @@ import {
   ARCHIVE_PAGE_MAX_BYTES,
   ARCHIVE_PAGE_MAX_ROWS,
   GET_SNAPSHOT_MAX_BYTES,
-} from '../src/lib/validate-fields.js';
+} from '../src/lib/limits.js';
 
 beforeEach(async () => {
   await truncateAll();

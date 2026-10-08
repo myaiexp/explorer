@@ -1,9 +1,9 @@
 // OSRM routing + loop building — self-hosted OSRM-foot wrappers (route / nearest
 // / table), road/junction snapping, and the envelope/junction loop builders.
 // No DOM: callers pass a precomputed `spread`. Loaded after net.js (for
-// fetchWithTimeout), geometry.js (for envelopeOffsetPoint),
-// geo-utils.js (haversineKm / kmToDegLat) and loop-quality.js (loopOverlapFraction),
-// before route-dispatch.js + app.js.
+// fetchWithTimeout), overpass.js (postJunctionsCache), geometry.js (for
+// envelopeOffsetPoint), geo-utils.js (haversineKm / kmToDegLat) and
+// loop-quality.js (loopOverlapFraction), before route-dispatch.js + app.js.
 
 // Self-hosted OSRM-foot for Finland.
 const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
@@ -48,10 +48,11 @@ function isSelfHostedDown() {
     return Date.now() < selfHostedDownUntil;
 }
 
-// Latch self-hosted as down for SELF_HOSTED_RETRY_MS. Called whenever a
-// self-hosted request throws (timeout/network) or resolves non-ok — never
-// for a self-hosted 200 that simply has no route, which is a property of
-// the destination, not the backend.
+// Latch self-hosted as down for SELF_HOSTED_RETRY_MS. A timeout, a network
+// error, or an HTTP failure that is not an OSRM answer (5xx, or a 4xx whose
+// body is not an OSRM code). A business code — NoRoute, NoTable, NoSegment,
+// including the HTTP 400 osrm-routed actually returns — is the engine
+// answering about this destination and must not latch.
 function markSelfHostedDown() {
     selfHostedDownUntil = Date.now() + SELF_HOSTED_RETRY_MS;
 }
@@ -104,41 +105,66 @@ function parseRouteResponse(data) {
     };
 }
 
-// Public-fallback attempt for /route. Always throttled; returns null on any
-// failure (network, non-ok, or no usable route) — there's nowhere further to
-// fall back to.
-async function tryOsrmPublic(suffix) {
-    return throttlePublic(async () => {
-        try {
-            const res = await fetchWithTimeout(`${OSRM_PUBLIC_BASE}/${suffix}`);
-            if (!res.ok) return null;
-            const data = await res.json();
-            return parseRouteResponse(data);
-        } catch { return null; }
-    });
+// json() on a non-JSON body (an HTML 400 from a proxy) is not an OSRM code.
+async function readOsrmJson(res) {
+    try { return await res.json(); } catch { return null; }
 }
 
-// Internal: fetch + parse OSRM /route response. `suffix` is the path+query
-// AFTER the /route/v1/foot/ base — this function (not the caller) decides
-// which base to compose it onto, which is what makes the public fallback
-// invisible to every caller. Returns the parsed route, or null.
-async function tryOsrm(suffix) {
+// An OSRM code other than Ok is the engine answering. 5xx is never that,
+// even with a body, and a 4xx without a code string is a transport failure.
+function osrmBusinessError(status, data) {
+    if (!data || typeof data.code !== 'string' || data.code === 'Ok') return false;
+    if (status >= 500) return false;
+    if (status >= 400) return true;
+    return status >= 200 && status < 300;
+}
+
+// One fetch against one base. A business code throws with osrmBusiness set so
+// the fallback below can tell "the engine answered" from "the engine is down".
+// `label` is part of the error text callers and tests already match.
+async function fetchOsrm(base, suffix, parse, label) {
+    const res = await fetchWithTimeout(`${base}/${suffix}`);
+    const data = await readOsrmJson(res);
+    if (osrmBusinessError(res.status, data)) {
+        const err = new Error(`${label} ${data.code}`);
+        err.osrmBusiness = true;
+        throw err;
+    }
+    if (!res.ok) throw new Error(`${label} http ${res.status}`);
+    return parse(data);
+}
+
+// Self-hosted first, public only when self-hosted is unreachable. `swallow`
+// is true for route and nearest (a failed public attempt is null — there is
+// nowhere further to fall back) and false for table (screening has to see
+// a total outage as a throw). A business code never latches and never asks
+// public: swallowing it returns null, otherwise it is rethrown as-is.
+async function withOsrmFallback(selfBase, publicBase, suffix, parse, swallow, label) {
+    const once = (base) => fetchOsrm(base, suffix, parse, label);
+    const viaPublic = () => throttlePublic(() => once(publicBase).catch((err) => {
+        if (swallow) return null;
+        throw err;
+    }));
     if (!isSelfHostedDown()) {
         try {
-            const res = await fetchWithTimeout(`${OSRM_FI_BASE}/${suffix}`);
-            if (!res.ok) throw new Error(`osrm http ${res.status}`);
-            const data = await res.json();
-            return parseRouteResponse(data);
-        } catch {
-            // Self-hosted is unreachable or erroring — latch and retry the
-            // exact same request on the public fallback. A 200 with no
-            // usable route never reaches here (parseRouteResponse returns
-            // null without throwing), so it doesn't latch.
+            return await once(selfBase);
+        } catch (err) {
+            if (err && err.osrmBusiness) {
+                if (swallow) return null;
+                throw err;
+            }
             markSelfHostedDown();
-            return tryOsrmPublic(suffix);
+            return viaPublic();
         }
     }
-    return tryOsrmPublic(suffix);
+    return viaPublic();
+}
+
+// `suffix` is the path+query AFTER the /route/v1/foot/ base — this function
+// (not the caller) decides which base to compose it onto. Returns the parsed
+// route, or null.
+function tryOsrm(suffix) {
+    return withOsrmFallback(OSRM_FI_BASE, OSRM_PUBLIC_BASE, suffix, parseRouteResponse, true, 'osrm');
 }
 
 // Route through an ordered list of {lat,lng} waypoints. Returns {coords, duration, distance, steps} or null.
@@ -154,32 +180,12 @@ function parseNearestResponse(data) {
     return { lat: data.waypoints[0].location[1], lng: data.waypoints[0].location[0] };
 }
 
-async function tryNearestPublic(suffix) {
-    return throttlePublic(async () => {
-        try {
-            const res = await fetchWithTimeout(`${OSRM_PUBLIC_NEAREST}/${suffix}`);
-            if (!res.ok) return null;
-            const data = await res.json();
-            return parseNearestResponse(data);
-        } catch { return null; }
-    });
-}
-
-// Internal: OSRM /nearest call. `suffix` is the path+query after
-// /nearest/v1/foot/. Returns {lat, lng} or null on any failure.
-async function tryNearest(suffix) {
-    if (!isSelfHostedDown()) {
-        try {
-            const res = await fetchWithTimeout(`${OSRM_FI_NEAREST}/${suffix}`);
-            if (!res.ok) throw new Error(`osrm nearest http ${res.status}`);
-            const data = await res.json();
-            return parseNearestResponse(data);
-        } catch {
-            markSelfHostedDown();
-            return tryNearestPublic(suffix);
-        }
-    }
-    return tryNearestPublic(suffix);
+// OSRM /nearest. `suffix` is the path+query after /nearest/v1/foot/.
+// Returns {lat, lng} or null on any failure.
+function tryNearest(suffix) {
+    return withOsrmFallback(
+        OSRM_FI_NEAREST, OSRM_PUBLIC_NEAREST, suffix, parseNearestResponse, true, 'osrm nearest',
+    );
 }
 
 // Snap a geometric via to the nearest road point within snapRadius km.
@@ -211,12 +217,8 @@ async function screeningTableFn(start, candidates) {
         ...candidates.map(c => `${c.lng},${c.lat}`)
     ].join(';');
     const suffix = `${coords}?sources=0&annotations=distance`;
-
-    const attempt = async (base) => {
-        const res = await fetchWithTimeout(`${base}/${suffix}`);
-        if (!res.ok) throw new Error(`osrm table http ${res.status}`);
-        const data = await res.json();
-        if (data.code !== 'Ok') throw new Error(`osrm table ${data.code}`);
+    return withOsrmFallback(OSRM_FI_TABLE, OSRM_PUBLIC_TABLE, suffix, (data) => {
+        if (!data || data.code !== 'Ok') throw new Error(`osrm table ${data && data.code}`);
         const dests = data.destinations;
         const dists = data.distances && data.distances[0];
         if (!Array.isArray(dests) || !Array.isArray(dists)) {
@@ -229,17 +231,7 @@ async function screeningTableFn(start, candidates) {
             const routeM = typeof r === 'number' ? r : null;
             return { snapM, routeM };
         });
-    };
-
-    if (!isSelfHostedDown()) {
-        try {
-            return await attempt(OSRM_FI_TABLE);
-        } catch {
-            markSelfHostedDown();
-            return throttlePublic(() => attempt(OSRM_PUBLIC_TABLE));
-        }
-    }
-    return throttlePublic(() => attempt(OSRM_PUBLIC_TABLE));
+    }, false, 'osrm table');
 }
 
 // ── Loop envelope constants ────────────────────────────────────────────────
@@ -374,15 +366,7 @@ async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offs
         body.maxKm = maxKm;
     }
     if (onProgress) onProgress('Searching for junctions…');
-    const response = await fetchWithTimeout('/api/junctions/junctions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-        throw new Error('POI search is busy. Please try again.');
-    }
-    const data = await response.json();
+    const data = await postJunctionsCache('/api/junctions/junctions', body);
     return data.junctions || [];
 }
 
@@ -401,23 +385,23 @@ function snapToJunction(via, junctionPool, snapRadius) {
 // Pick lower-overlap of two candidate (outbound, return) pairs. Falls back
 // gracefully if one chirality fully failed. Used by buildJunctionLoop's
 // both-chirality success path.
-function pickBetterLoop(outA, retA, outB, retB) {
-    const aOk = outA && retA;
-    const bOk = outB && retB;
-    if (aOk && bOk) {
-        const ovA = loopOverlapFraction(outA.coords, retA.coords);
-        const ovB = loopOverlapFraction(outB.coords, retB.coords);
-        return ovA <= ovB
-            ? { outbound: outA, return: retA, overlap: ovA }
-            : { outbound: outB, return: retB, overlap: ovB };
+function pickBetterLoop(outOnRight, backOnLeft, outOnLeft, backOnRight) {
+    const rightOk = outOnRight && backOnLeft;
+    const leftOk = outOnLeft && backOnRight;
+    if (rightOk && leftOk) {
+        const ovRight = loopOverlapFraction(outOnRight.coords, backOnLeft.coords);
+        const ovLeft = loopOverlapFraction(outOnLeft.coords, backOnRight.coords);
+        return ovRight <= ovLeft
+            ? { outbound: outOnRight, return: backOnLeft, overlap: ovRight }
+            : { outbound: outOnLeft, return: backOnRight, overlap: ovLeft };
     }
-    if (aOk) {
-        const ovA = loopOverlapFraction(outA.coords, retA.coords);
-        return { outbound: outA, return: retA, overlap: ovA };
+    if (rightOk) {
+        const ovRight = loopOverlapFraction(outOnRight.coords, backOnLeft.coords);
+        return { outbound: outOnRight, return: backOnLeft, overlap: ovRight };
     }
-    if (bOk) {
-        const ovB = loopOverlapFraction(outB.coords, retB.coords);
-        return { outbound: outB, return: retB, overlap: ovB };
+    if (leftOk) {
+        const ovLeft = loopOverlapFraction(outOnLeft.coords, backOnRight.coords);
+        return { outbound: outOnLeft, return: backOnRight, overlap: ovLeft };
     }
     return { outbound: null, return: null, overlap: null };
 }
@@ -462,13 +446,16 @@ async function buildJunctionLoop(startLat, startLng, destLat, destLng, {
     const snappedLeft  = viasLeft .map(v => snapToJunction(v, junctions, snapRadius));
 
     onProgress('Building both chiralities…');
-    const [outA, retA, outB, retB] = await Promise.all([
+    // First chirality walks out on the right vias and back on the reversed
+    // left; the second walks out on the left and back on the reversed right.
+    // The return leg is the other side, so these are not "out right / return right".
+    const [outOnRight, backOnLeft, outOnLeft, backOnRight] = await Promise.all([
         fetchRouteThrough([A, ...snappedRight, B]),
         fetchRouteThrough([B, ...snappedLeft.slice().reverse(), A]),
         fetchRouteThrough([A, ...snappedLeft, B]),
         fetchRouteThrough([B, ...snappedRight.slice().reverse(), A]),
     ]);
-    const picked = pickBetterLoop(outA, retA, outB, retB);
+    const picked = pickBetterLoop(outOnRight, backOnLeft, outOnLeft, backOnRight);
     if (!picked.outbound || !picked.return) {
         const loop = await buildLoop(startLat, startLng, destLat, destLng, spread, { avoidBacktracking });
         return { outbound: loop.outbound, return: loop.return, overlap: null, junctions };

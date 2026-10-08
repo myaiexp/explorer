@@ -59,7 +59,9 @@ export const SCRIPT_DEPS = {
     // Sampling interpolates with haversineM; fetch goes through fetchWithTimeout.
     'elevation':    ['net', 'geo-utils'],
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
-    'osrm':         ['net', 'geometry', 'loop-quality'],
+    // overpass owns postJunctionsCache, which fetchCorridorJunctions calls.
+    // overpass depends only on net, so this edge does not cycle.
+    'osrm':         ['net', 'overpass', 'geometry', 'loop-quality'],
     // fetchWithTimeout only: the bbox/distance math moved server-side with the
     // Overpass queries, so overpass.js no longer touches geo-utils.
     'overpass':     ['net'],
@@ -95,12 +97,10 @@ export function readScript(name) {
 /**
  * Evaluate one script's source in the current realm. `filename` names the V8
  * script, so pass it only when `src` is that file's exact text — anything else
- * maps coverage and stack traces onto the wrong lines. The escape hatch for the
- * one test that must transform the source first (fit-encoder injects an
- * internals export, then evalScript) passes none: the patched text is not the
- * file on disk. Every other test goes through loadScripts and reads what it
- * needs back off globalThis — never slice a single function out of a source,
- * since the slice cannot see a sibling helper it later calls.
+ * maps coverage and stack traces onto the wrong lines. Suites go through
+ * loadScripts and read what they need back off globalThis — never slice a
+ * single function out of a source, since the slice cannot see a sibling
+ * helper it later calls.
  */
 export function evalScript(src, filename) {
     vm.compileFunction(src, [], filename ? { filename } : {}).call(globalThis);

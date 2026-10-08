@@ -57,7 +57,7 @@ describe('buildRouteForMode dispatch', () => {
         expect(onProgress).toHaveBeenCalledWith('Building route…');
     });
 
-    test('one-way takes priority over smartRouting → buildOneWay, not buildJunctionLoop', async () => {
+    test('one-way never takes the junction loop, even when a caller still passes smartRouting', async () => {
         const r = await globalThis.buildRouteForMode(60, 24, 61, 25, {
             tripMode: 'one-way', smartRouting: true, winterMode: true, onProgress: vi.fn(),
         });
@@ -101,25 +101,21 @@ describe('buildRouteForMode dispatch', () => {
             { maxKm: undefined, onProgress: expect.any(Function), cachedJunctions: null, winterMode: false, spread: undefined, avoidBacktracking: false });
     });
 
-    // ── Branch: plain loop ───────────────────────────────────────────────────
-    test('round-trip + smart off → buildLoop only, junctions null, message shown', async () => {
+    // There is no healthy "plain loop" switch. smartRouting used to look like
+    // one, but a false on a non-degraded round trip must not dodge the junction
+    // loop — the only plain loop is the degraded branch below.
+    test('a healthy round trip uses the junction loop even when smartRouting is false', async () => {
         const onProgress = vi.fn();
         const r = await globalThis.buildRouteForMode(60, 24, 61, 25, {
             tripMode: 'round', smartRouting: false, winterMode: false, onProgress,
             buildingMessage: 'Building route…',
         });
-        expect(buildLoop).toHaveBeenCalledTimes(1);
-        // signature: (startLat, startLng, destLat, destLng, spread, { degraded });
-        // spread omitted → undefined; degraded omitted → defaults to false.
-        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, undefined, { degraded: false, avoidBacktracking: false });
+        expect(buildJunctionLoop).toHaveBeenCalledTimes(1);
+        expect(buildLoop).not.toHaveBeenCalled();
         expect(buildOneWay).not.toHaveBeenCalled();
-        expect(buildJunctionLoop).not.toHaveBeenCalled();
-        expect(r).toEqual({
-            outbound: { coords: ['loop-out'] },
-            return: { coords: ['loop-ret'] },
-            junctions: null,
-        });
-        expect(onProgress).toHaveBeenCalledWith('Building route…');
+        expect(r.junctions).toEqual([{ lat: 60, lng: 24 }]);
+        // The junction branch reports its own progress and skips buildingMessage.
+        expect(onProgress).not.toHaveBeenCalledWith('Building route…');
     });
 
     test('round-trip + smart off + degraded → buildLoop receives degraded: true', async () => {
@@ -152,8 +148,9 @@ describe('buildRouteForMode dispatch', () => {
 
         onProgress.mockClear();
         await globalThis.buildRouteForMode(60, 24, 61, 25, {
-            tripMode: 'round', smartRouting: false, onProgress,
+            tripMode: 'round', degraded: true, onProgress,
         });
+        expect(buildLoop).toHaveBeenCalledTimes(1);
         expect(onProgress).not.toHaveBeenCalled();
     });
 });
@@ -161,11 +158,9 @@ describe('buildRouteForMode dispatch', () => {
 describe('degraded round trips never reach the junctions path', () => {
     // buildRouteForDestination short-circuits before findBestLoop while
     // degraded, but spread-control.js and route-restore.js call
-    // buildRouteForMode DIRECTLY, spreading readRouteBuildOptions — which
-    // since the toggle removal reports smartRouting: true for every round
-    // trip. Without this gate, a spread reroute or a shared-link restore
-    // during a shelly outage still fires a junctions-cache fetch at the same
-    // dead machine, times out, and then falls back into an unreduced buildLoop.
+    // buildRouteForMode DIRECTLY. A degraded round trip must take the plain
+    // loop here too, or a spread reroute during a shelly outage still fires a
+    // junctions-cache fetch at the same dead machine.
     test('degraded takes the plain loop and forwards the flag', async () => {
         const r = await globalThis.buildRouteForMode(60, 24, 61, 25, {
             tripMode: 'round', smartRouting: true, winterMode: false,
@@ -210,13 +205,14 @@ describe('avoidBacktracking reaches every loop builder', () => {
         expect(buildLoop).not.toHaveBeenCalled();
     });
 
-    test('plain round trip → buildLoop receives it', async () => {
+    test('a healthy round trip forwards it to the junction loop, not buildLoop', async () => {
         await globalThis.buildRouteForMode(60, 24, 61, 25, {
-            tripMode: 'round', smartRouting: false, winterMode: false,
+            tripMode: 'round', winterMode: false,
             spread: SPREAD, avoidBacktracking: true,
         });
-        expect(buildLoop).toHaveBeenCalledWith(60, 24, 61, 25, SPREAD,
-            { degraded: false, avoidBacktracking: true });
+        expect(buildJunctionLoop).toHaveBeenCalledWith(60, 24, 61, 25,
+            expect.objectContaining({ spread: SPREAD, avoidBacktracking: true }));
+        expect(buildLoop).not.toHaveBeenCalled();
     });
 
     test('degraded round trip → buildLoop receives it alongside degraded', async () => {

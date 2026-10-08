@@ -78,11 +78,9 @@
         // answer to "what is this device bound to when we are NOT adopting a URL
         // account?". Every such path routes through here: no URL segment, a bare link
         // with no token, a cancelled adopt/switch, and a switch whose download failed.
-        // The rule used to be written out at each site (an if/else chain in one, a
-        // nested ternary in another), and the copies diverged: the account-switch
-        // paths only handled 'declined' and dropped an already-bound device to
-        // 'anonymous' while localStorage still said accepted — mutate() then no-oped
-        // for the rest of the session, so walks stopped syncing with no UI signal.
+        // An accepted record must stay accepted. Dropping it to anonymous makes
+        // mutate() no-op for the rest of the session, so walks stop syncing with
+        // no UI signal.
         function restoreFromConsent(consent) {
             if (consent && consent.state === 'accepted') {
                 setAuth('accepted', consent.username, consent.token || null);

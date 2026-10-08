@@ -117,7 +117,7 @@ function notifyStorage(level, message) {
 }
 
 // Write to localStorage, recovering from a full quota instead of throwing an
-// uncaught QuotaExceededError (which used to silently drop new walks). On quota,
+// uncaught QuotaExceededError. On quota,
 // free space by trimming old visit geometry — compacting the value itself when
 // the write is the visits array, else shrinking the persisted visits — and retry
 // once. A hard failure surfaces a toast and returns false rather than losing the

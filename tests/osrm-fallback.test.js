@@ -342,4 +342,48 @@ describe('OSRM public fallback — table (screeningTableFn)', () => {
         expect(fetch).toHaveBeenCalledTimes(1);
         expect(String(fetch.mock.calls[0][0]).startsWith(globalThis.OSRM_PUBLIC_TABLE)).toBe(true);
     });
+
+    // osrm-routed answers "no path" with HTTP 400 and { code: 'NoTable' }, not
+    // a transport failure. Treating that as an outage latches self-hosted down
+    // for five minutes and spends a public request on a question the engine
+    // already answered.
+    test('a 400 NoTable is the engine answering: one fetch, no latch, no public', async () => {
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({ code: 'NoTable' }, { status: 400 }),
+        });
+        await expect(globalThis.screeningTableFn(START, [C0])).rejects.toThrow(/NoTable/);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
+    });
+});
+
+describe('OSRM business codes are not an outage', () => {
+    test('a 400 NoRoute returns null, does not latch, and never asks public', async () => {
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({ code: 'NoRoute', routes: [] }, { status: 400 }),
+        });
+        await expect(globalThis.tryOsrm(ROUTE_SUFFIX)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
+    });
+
+    test('a 400 NoSegment from nearest returns null without latching', async () => {
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse({ code: 'NoSegment' }, { status: 400 }),
+        });
+        await expect(globalThis.tryNearest(NEAREST_SUFFIX)).resolves.toBeNull();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(globalThis.isSelfHostedDown()).toBe(false);
+    });
+
+    test('a 400 whose body is not an OSRM code still latches and falls back', async () => {
+        const fetch = installOsrmBackendFetch({
+            selfHosted: () => jsonResponse('bad gateway', { status: 400 }),
+            public: (u) => echoRoute(u),
+        });
+        const out = await globalThis.tryOsrm(ROUTE_SUFFIX);
+        expect(out).toBeTruthy();
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(globalThis.isSelfHostedDown()).toBe(true);
+    });
 });

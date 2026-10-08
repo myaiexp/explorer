@@ -286,5 +286,5 @@
         return out;
     }
 
-    global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP };
+    global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP, _internals: { ByteWriter, crc16, writeDefinition, toSemicircles, toFitTime, osrmStepToType, nearestCoordIndex, FIT_EPOCH, SEMICIRCLE, WALK_MPS, T, M } };
 })(typeof window !== 'undefined' ? window : globalThis);

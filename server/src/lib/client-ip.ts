@@ -74,6 +74,41 @@ function fromTrustedProxy(c: Context, peer: string | undefined): boolean {
   return peer !== undefined && isTrustedProxy(peer);
 }
 
+// Rate-limit key for an IPv6 address: the /64, so a client rotating the
+// interface identifier does not get a fresh bucket per address. IPv4, dotted
+// IPv4-mapped (`::ffff:a.b.c.d`), and hex-form IPv4-mapped stay the full
+// address — collapsing those would merge distinct v4 clients. Unparseable
+// values stay whole too, so garbage is not folded into one shared key.
+// TWIN: junctions-cache/src/rate-limit.ts ipv6BucketKey. Not applied to
+// clientIpForStorage — ipFirstSeen keeps the address we actually saw.
+function expandIpv6(ip: string): string[] | null {
+  const parts = ip.split('::');
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(':') : [];
+  const tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+  if (parts.length === 1 && head.length !== 8) return null;
+  if (head.length + tail.length > 8) return null;
+  const groups = [...head, ...Array(8 - head.length - tail.length).fill('0'), ...tail];
+  if (groups.length !== 8) return null;
+  const out: string[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(group)) return null;
+    out.push(Number.parseInt(group, 16).toString(16));
+  }
+  return out;
+}
+
+export function ipv6BucketKey(ip: string): string {
+  if (!ip.includes(':')) return ip;
+  if (/^::ffff:\d{1,3}(\.\d{1,3}){3}$/i.test(ip)) return ip;
+  const hextets = expandIpv6(ip);
+  if (!hextets) return ip;
+  const mapped = hextets[0] === '0' && hextets[1] === '0' && hextets[2] === '0'
+    && hextets[3] === '0' && hextets[4] === '0' && hextets[5] === 'ffff';
+  if (mapped) return ip;
+  return `${hextets.slice(0, 4).join(':')}::/64`;
+}
+
 function lastXffHop(c: Context): string | undefined {
   const raw = c.req.header('x-forwarded-for');
   if (!raw) return undefined;
@@ -102,10 +137,10 @@ function forwardedClientIp(c: Context): string | undefined {
  */
 export function clientIp(c: Context): string {
   const peer = peerAddress(c);
-  if (fromTrustedProxy(c, peer)) {
-    return forwardedClientIp(c) ?? peer ?? 'unknown';
-  }
-  return peer ?? 'unknown';
+  const raw = fromTrustedProxy(c, peer)
+    ? (forwardedClientIp(c) ?? peer ?? 'unknown')
+    : (peer ?? 'unknown');
+  return ipv6BucketKey(raw);
 }
 
 /**

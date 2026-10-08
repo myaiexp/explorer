@@ -6,13 +6,7 @@ A minimal dark-mode UI designed for tool-like apps: data-dense, keyboard-friendl
 
 ## Fonts
 
-Load from Google Fonts:
-
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
-```
+Self-hosted. `index.html` links `fonts/fonts.css?v=__COMMIT__`. The files (`fonts.css`, `dm-sans.woff2`, `jetbrains-mono.woff2`) are generated from `fonts.json` by `helm/scripts/webfonts`: DM Sans 400 and 700, JetBrains Mono 400. The CSP `font-src` is `'self'` only, so a Google Fonts stylesheet would be blocked.
 
 - **UI font**: `DM Sans` — clean, slightly geometric sans. Used for all body text, labels, buttons.
 - **Mono font**: `JetBrains Mono` — for coordinates, codes, data values.

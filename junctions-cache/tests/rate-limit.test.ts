@@ -37,6 +37,19 @@ describe('ipRateLimit', () => {
         expect(await blocked.json()).toEqual({ error: 'Rate limit exceeded' });
     });
 
+    test('the hard cap evicts idle buckets and refuses a new key when none are idle', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        const app = new Hono();
+        app.get('/x', ipRateLimit(1, 60_000, 3), c => c.text('ok'));
+        expect((await reqFrom(app, '1.1.1.1')).status).toBe(200);
+        expect((await reqFrom(app, '1.1.1.2')).status).toBe(200);
+        expect((await reqFrom(app, '1.1.1.3')).status).toBe(200);
+        expect((await reqFrom(app, '1.1.1.4')).status).toBe(429);
+        vi.setSystemTime(120_000);
+        expect((await reqFrom(app, '1.1.1.4')).status).toBe(200);
+    });
+
     test('budgets are per-IP — one client exhausting its bucket does not block another', async () => {
         const app = appWith(1);
         expect((await reqFrom(app, '10.0.0.1')).status).toBe(200);

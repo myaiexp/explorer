@@ -3,7 +3,7 @@ import { describe, test, expect, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, resetRateLimiter, authHeaders } from './helpers.js';
 import { schema } from '../src/db.js';
-import { FAVORITE_LIGHT_KEYS, GET_GEOMETRY_KEEP } from '../src/lib/validate-fields.js';
+import { FAVORITE_LIGHT_KEYS, GET_GEOMETRY_KEEP } from '../src/lib/limits.js';
 
 beforeEach(async () => {
   await truncateAll();

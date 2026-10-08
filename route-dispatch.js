@@ -9,24 +9,17 @@
 // handler, restoreFromHash and rerouteWithCurrentSpread.
 //
 // opts:
-//   tripMode         'one-way' | anything-else (a loop)
-//   smartRouting     bool — junction-snapped loop vs plain envelope loop. Not a
-//                    user toggle (no #smartRouting checkbox exists): callers
-//                    derive it — route-view.js's readRouteBuildOptions computes
-//                    tripMode !== 'one-way' for spread-control.js and
-//                    route-restore.js; destination-resolve.js's
-//                    buildRouteForDestination reaches this function only for
-//                    one-way/degraded builds and hardcodes smartRouting: false
-//                    ("plain loop, deliberately") since it runs the real
-//                    smart-loop retry loop (findBestLoop) itself, upstream.
-//   winterMode       bool — forwarded to buildJunctionLoop (smart loops only)
+//   tripMode         'one-way' | anything-else (a loop). One-way returns before
+//                    the loop branch. A round trip is a junction loop unless
+//                    degraded — there is no second flag for that choice.
+//   winterMode       bool — forwarded to buildJunctionLoop (junction loops only)
 //   maxKm            number — caller's max-distance budget; forwarded to
-//                    buildJunctionLoop for the corridor cache key (smart loops only)
+//                    buildJunctionLoop for the corridor cache key (junction loops only)
 //   onProgress       msg => void — forwarded to buildJunctionLoop; also used
 //                    to emit buildingMessage (see below)
-//   cachedJunctions  prior junction pool to reuse (smart loops only); default null
+//   cachedJunctions  prior junction pool to reuse (junction loops only); default null
 //   buildingMessage  if set, emitted via onProgress before the one-way / plain
-//                    loop builds; smart loops report their own progress from
+//                    loop builds; junction loops report their own progress from
 //                    buildJunctionLoop, so the message is skipped there. default null
 //   spread           precomputed { offsetMult, viaTs } (computeSpreadParams);
 //                    forwarded to buildLoop / buildJunctionLoop so the routing
@@ -35,23 +28,24 @@
 //   degraded         bool — Layer 2 of the shelly-down pipeline reduction
 //                    (osrm.js's isSelfHostedDown() latch, read once by
 //                    route-view.js's readRouteBuildOptions and passed down from
-//                    there). Forwarded to buildLoop, which skips its /nearest
-//                    snap when true. Only the plain-loop branch takes it —
-//                    smart round-trips never reach here while degraded;
-//                    destination-resolve.js short-circuits before ever calling
-//                    findBestLoop. Default false so non-degraded callers (and
-//                    existing tests) are unaffected.
+//                    there). A degraded round trip takes the plain loop, which
+//                    skips its /nearest snap, and skips the junction fetch:
+//                    junctions-cache lives on the same machine as the OSRM the
+//                    latch just gave up on. buildRouteForDestination
+//                    short-circuits before findBestLoop on the generate path;
+//                    spread-control.js and route-restore.js call this function
+//                    directly, so the gate has to exist here too. Default false.
 //   avoidBacktracking  bool — the #avoidBacktracking checkbox, read by
 //                    route-view.js's readRouteBuildOptions. Widens the loop
 //                    envelope and keeps the via snap inside it (see osrm.js's
 //                    loop envelope constants). Forwarded to BOTH loop branches:
-//                    it is pure geometry, so it applies equally to a smart loop
-//                    and a plain one, and one-way has no envelope to widen.
+//                    it is pure geometry, so it applies equally to a junction
+//                    loop and a plain one, and one-way has no envelope to widen.
 //
 // Returns { outbound, return, junctions }. junctions is null except for the
-// smart-loop branch, which returns the pool buildJunctionLoop used or fetched.
+// junction-loop branch, which returns the pool buildJunctionLoop used or fetched.
 async function buildRouteForMode(startLat, startLng, destLat, destLng, {
-    tripMode, smartRouting, winterMode, maxKm, onProgress,
+    tripMode, winterMode, maxKm, onProgress,
     cachedJunctions = null, buildingMessage = null, spread = undefined, degraded = false,
     avoidBacktracking = false,
 } = {}) {
@@ -60,14 +54,7 @@ async function buildRouteForMode(startLat, startLng, destLat, destLng, {
         const outbound = await buildOneWay(startLat, startLng, destLat, destLng);
         return { outbound, return: null, junctions: null };
     }
-    // `degraded` beats smartRouting: junctions-cache lives on the same machine
-    // as the self-hosted OSRM the latch just gave up on, so a junction fetch
-    // here is a guaranteed timeout followed by an unreduced buildLoop fallback.
-    // buildRouteForDestination short-circuits earlier for the generate path,
-    // but spread-control.js and route-restore.js call this function directly
-    // with readRouteBuildOptions spread in — and that reports smartRouting
-    // true for every round trip — so the gate has to exist here too.
-    if (smartRouting && !degraded) {
+    if (!degraded) {
         const result = await buildJunctionLoop(
             startLat, startLng, destLat, destLng,
             { maxKm, onProgress, cachedJunctions, winterMode, spread, avoidBacktracking });

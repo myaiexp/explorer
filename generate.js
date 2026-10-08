@@ -69,11 +69,9 @@ async function generateDestination() {
             // down so the destination-resolve pipeline stays DOM-free. maxKm
             // was already parsed (and validated) above; keep that snapshot so
             // a field change during geocode cannot sneak an unvalidated budget
-            // into the build. smartRouting is not read here: it is no longer a
-            // toggle a caller can opt out of — buildRouteForDestination runs
-            // its junction-snap retry loop unconditionally for every
-            // non-degraded round trip (see destination-resolve.js). Read BEFORE
-            // the straight-line scaling below, which now depends on it.
+            // into the build. Read BEFORE the straight-line scaling below, which
+            // depends on tripMode and avoidBacktracking. A non-degraded round
+            // trip always takes the junction-snap retry loop (destination-resolve.js).
             const { winterMode, spread, degraded, avoidBacktracking } = readRouteBuildOptions(tripMode);
 
             // Straight-line scaling: the walk is longer than the crow-flies

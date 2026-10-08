@@ -69,4 +69,44 @@ describe('fetchWithTimeout', () => {
         await vi.advanceTimersByTimeAsync(20_000);
         expect(abort).not.toHaveBeenCalled();
     });
+
+    test('aborts a body that stalls after the headers have arrived', async () => {
+        vi.useFakeTimers();
+        global.fetch = vi.fn((url, init) => Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => new Promise((_, reject) => {
+                init.signal.addEventListener('abort', () => {
+                    const e = new Error('The operation was aborted.');
+                    e.name = 'AbortError';
+                    reject(e);
+                });
+            }),
+        }));
+
+        const res = await fetchWithTimeout('https://example.test/osrm');
+        const pending = res.json();
+        let rejected = null;
+        pending.catch((e) => { rejected = e; });
+
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(rejected).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    test('a finished body read clears the timer so a later tick does not abort', async () => {
+        vi.useFakeTimers();
+        const abort = vi.spyOn(AbortController.prototype, 'abort');
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ code: 'Ok' }),
+        }));
+
+        const res = await fetchWithTimeout('https://example.test/osrm');
+        await expect(res.json()).resolves.toEqual({ code: 'Ok' });
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(abort).not.toHaveBeenCalled();
+    });
 });

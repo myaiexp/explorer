@@ -2,7 +2,8 @@
 // per-account write budget (finding #7756).
 import { sql, type SQLWrapper } from 'drizzle-orm';
 import { schema } from '../db.js';
-import { MAX_STORED_BYTES } from './validate-fields.js';
+import { FAVORITE_PAYLOAD_BYTES_SQL, ROUTE_PAIR_BYTES_SQL } from './jsonb-bytes-sql.js';
+import { MAX_STORED_BYTES } from './limits.js';
 
 // drizzle `db` and `tx` both expose execute(); this is the overlap so the PUT
 // transaction can reuse the same estimator under the account-row lock.
@@ -24,9 +25,10 @@ function bytesFrom(result: unknown): number {
 }
 
 // Uncompressed JSON-text bytes of the fat columns GET would serialize under
-// `?geometry=full`. octet_length(::text) matches JSON.stringify better than
-// pg_column_size (which is TOAST-compressed and would under-count a repeat-char
-// blob). Saved-location rows are skipped — they are already length-capped text.
+// `?geometry=full`. octet_length(::text) is the on-disk text, which is larger
+// than compact JSON.stringify (spaces, key order). pg_column_size is
+// TOAST-compressed and would under-count a repeat-char blob. Saved-location
+// rows are skipped — they are already length-capped text.
 export async function estimateStoredSnapshotBytes(
   db: Executor,
   username: string,
@@ -34,19 +36,15 @@ export async function estimateStoredSnapshotBytes(
   const result = await db.execute(sql`
     SELECT
       COALESCE((
-        SELECT SUM(
-          COALESCE(octet_length(route_coords::text), 0)
-          + COALESCE(octet_length(return_route_coords::text), 0)
-        ) FROM visits WHERE username = ${username}
+        SELECT SUM(${sql.raw(ROUTE_PAIR_BYTES_SQL)})
+        FROM visits WHERE username = ${username}
       ), 0)
       + COALESCE((
-        SELECT SUM(
-          COALESCE(octet_length(route_coords::text), 0)
-          + COALESCE(octet_length(return_route_coords::text), 0)
-        ) FROM history WHERE username = ${username}
+        SELECT SUM(${sql.raw(ROUTE_PAIR_BYTES_SQL)})
+        FROM history WHERE username = ${username}
       ), 0)
       + COALESCE((
-        SELECT SUM(COALESCE(octet_length(payload::text), 0))
+        SELECT SUM(${sql.raw(FAVORITE_PAYLOAD_BYTES_SQL)})
         FROM favorites WHERE username = ${username}
       ), 0)
       AS bytes
@@ -67,33 +65,59 @@ export async function estimateRowStoredBytes(
   const result =
     table === schema.favorites
       ? await db.execute(sql`
-          SELECT COALESCE(octet_length(payload::text), 0) AS bytes
+          SELECT ${sql.raw(FAVORITE_PAYLOAD_BYTES_SQL)} AS bytes
           FROM favorites WHERE username = ${username} AND id = ${id}
         `)
       : table === schema.history
         ? await db.execute(sql`
-            SELECT
-              COALESCE(octet_length(route_coords::text), 0)
-              + COALESCE(octet_length(return_route_coords::text), 0) AS bytes
+            SELECT ${sql.raw(ROUTE_PAIR_BYTES_SQL)} AS bytes
             FROM history WHERE username = ${username} AND id = ${id}
           `)
         : await db.execute(sql`
-            SELECT
-              COALESCE(octet_length(route_coords::text), 0)
-              + COALESCE(octet_length(return_route_coords::text), 0) AS bytes
+            SELECT ${sql.raw(ROUTE_PAIR_BYTES_SQL)} AS bytes
             FROM visits WHERE username = ${username} AND id = ${id}
           `);
   return bytesFrom(result);
 }
 
-// UTF-8 byte length of JSON.stringify — the write-path twin of
-// octet_length(::text). null/undefined/unserializable → 0, matching
-// COALESCE(octet_length(...), 0).
+// Postgres jsonb::text is not JSON.stringify. It inserts a space after ',' and
+// ':', and orders object keys by byte length then memcmp. Compact JSON
+// under-counts a coordinate array by about a tenth, which makes the 32 MiB
+// cap soft. null/undefined/unserializable → 0, matching COALESCE(octet_length(...), 0).
+function cmpJsonbKey(a: string, b: string): number {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return ab.length - bb.length;
+  return Buffer.compare(ab, bb);
+}
+
+function jsonbText(value: unknown): string | null {
+  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return null;
+  if (value === null) return 'null';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((el) => jsonbText(el) ?? 'null');
+    return `[${parts.join(', ')}]`;
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).filter((key) => jsonbText(obj[key]) !== null);
+    keys.sort(cmpJsonbKey);
+    const parts = keys.map((key) => `${JSON.stringify(key)}: ${jsonbText(obj[key])}`);
+    return `{${parts.join(', ')}}`;
+  }
+  return null;
+}
+
 export function storedJsonbBytes(value: unknown): number {
+  // A missing column is SQL NULL, and COALESCE(octet_length(NULL), 0) is 0 —
+  // not the 4 bytes of a JSON null literal stored inside a document.
   if (value === undefined || value === null) return 0;
-  const s = JSON.stringify(value);
-  if (typeof s !== 'string') return 0;
-  return Buffer.byteLength(s, 'utf8');
+  const text = jsonbText(value);
+  if (text === null) return 0;
+  return Buffer.byteLength(text, 'utf8');
 }
 
 export function incomingJsonbBytes(table: unknown, row: object): number {

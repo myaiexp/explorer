@@ -21,9 +21,8 @@ function importVisits(event) {
     reader.onload = function (e) {
         // Only the untrusted-parse and shape check are caught here. Everything
         // after them is our own code, and a throw there is a bug that must
-        // surface with its stack — it used to be relabeled 'invalid JSON file',
-        // which both misnamed the failure and hid that the rows had ALREADY been
-        // written to localStorage.
+        // surface with its stack. Relabeling it 'invalid JSON file' would hide
+        // that the rows may already have been written to localStorage.
         let parsed;
         try {
             parsed = JSON.parse(e.target.result);
@@ -49,11 +48,10 @@ function importVisits(event) {
 }
 
 // Merge already-parsed rows into the visits collection. Every row is normalized
-// BEFORE anything is persisted (visit-shape.js) — an unvalidated row used to be
-// written and queued for upload first, and only then handed to the renderer,
-// where a missing coord or distance threw. Since renderVisitedLayer also runs at
-// app.js's top level, that left the app throwing part-way through init on every
-// subsequent page load with no in-app way out.
+// BEFORE anything is persisted (visit-shape.js). A row that fails the shape
+// check is not written and not queued: renderVisitedLayer runs at app.js's
+// top level, so a missing coord or distance there throws part-way through
+// init on every later page load, with no in-app way out.
 //
 // Split out from the FileReader plumbing so the merge contract is testable
 // without a File. Returns { added, skipped }.

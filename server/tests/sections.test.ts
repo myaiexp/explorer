@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'vitest';
 import { eq, and, sql } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, authHeaders, VISIT_BODY, resetRateLimiter } from './helpers.js';
 import { schema } from '../src/db.js';
-import { MAX_ROWS_PER_SECTION } from '../src/lib/validate-fields.js';
+import { MAX_ROWS_PER_SECTION } from '../src/lib/limits.js';
 
 beforeEach(async () => {
   await truncateAll();

@@ -698,7 +698,6 @@ describe('the build that discovers the outage', () => {
     let call = 0;
     globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
       tripMode,
-      smartRouting: tripMode !== 'one-way',
       winterMode: false,
       maxKm: parseFloat(document.getElementById('maxDistance').value),
       spread: SPREAD,
@@ -714,7 +713,6 @@ describe('the build that discovers the outage', () => {
     let call = 0;
     globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
       tripMode,
-      smartRouting: tripMode !== 'one-way',
       winterMode: false,
       maxKm: parseFloat(document.getElementById('maxDistance').value),
       spread: SPREAD,

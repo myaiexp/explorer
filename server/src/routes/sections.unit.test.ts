@@ -4,12 +4,8 @@ import { schema } from '../db.js';
 import { sectionsRoutes } from './sections.js';
 import { resetRateLimiter } from '../middleware/rate-limit.js';
 import { hashToken } from '../lib/token-hash.js';
-import {
-  MAX_LABEL_LEN,
-  MAX_NAME_LEN,
-  MAX_ROWS_PER_SECTION,
-  MAX_STORED_BYTES,
-} from '../lib/validate-fields.js';
+import { MAX_ROWS_PER_SECTION, MAX_STORED_BYTES } from '../lib/limits.js';
+import { MAX_LABEL_LEN, MAX_NAME_LEN } from '../lib/validate-fields.js';
 
 // Captures the single insert/delete op a handler issues against the fake Db.
 interface RecordedOp {

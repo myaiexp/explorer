@@ -169,6 +169,25 @@ describe('rate-limiter core parity: server ↔ junctions-cache', () => {
         expect((await drive(server, '5.6.7.8, 7.7.7.7')).blocked).toBe(false);
     });
 
+    test('IPv6 clients in one /64 share a bucket; another prefix and a mapped v4 do not', async () => {
+        const { junctions, server } = makePair();
+        const a = '2001:db8:0:1::1';
+        const sibling = '2001:0db8:0000:0001:ffff::2';
+        const other = '2001:db8:0:2::1';
+        const mapped = '::ffff:203.0.113.9';
+        for (let i = 0; i < 60; i++) {
+            expect((await drive(junctions, undefined, TRUSTED_PEER, a)).blocked).toBe(false);
+            expect((await drive(server, undefined, TRUSTED_PEER, a)).blocked).toBe(false);
+        }
+        expect((await drive(junctions, undefined, TRUSTED_PEER, sibling)).blocked).toBe(true);
+        expect((await drive(server, undefined, TRUSTED_PEER, sibling)).blocked).toBe(true);
+        expect((await drive(junctions, undefined, TRUSTED_PEER, other)).blocked).toBe(false);
+        expect((await drive(server, undefined, TRUSTED_PEER, other)).blocked).toBe(false);
+        // Dotted IPv4-mapped stays the full address, so it is not the /64 above.
+        expect((await drive(junctions, undefined, TRUSTED_PEER, mapped)).blocked).toBe(false);
+        expect((await drive(server, undefined, TRUSTED_PEER, mapped)).blocked).toBe(false);
+    });
+
     test('behind a trusted proxy, both prefer X-Real-IP over XFF (finding #7895)', async () => {
         const { junctions, server } = makePair();
 

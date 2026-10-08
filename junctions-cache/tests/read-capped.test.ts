@@ -10,6 +10,31 @@ function streamOf(text: string): ReadableStream<Uint8Array> {
 }
 
 describe('readTextCapped', () => {
+    test('joins chunks before decoding, including a multibyte character split across them', async () => {
+        const bytes = new TextEncoder().encode('Hämeenlinna');
+        const splitAt = bytes.indexOf(0xc3); // leading byte of ä
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(bytes.subarray(0, splitAt + 1));
+                controller.enqueue(bytes.subarray(splitAt + 1));
+                controller.close();
+            },
+        });
+        expect(await readTextCapped(stream, 100, 'overpass')).toBe('Hämeenlinna');
+    });
+
+    test('a running total that crosses the cap on a later chunk is refused', async () => {
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new Uint8Array(4));
+                controller.enqueue(new Uint8Array(4));
+                controller.enqueue(new Uint8Array(4));
+                controller.close();
+            },
+        });
+        await expect(readTextCapped(stream, 10, 'overpass')).rejects.toBeInstanceOf(BodyTooLargeError);
+    });
+
     test('returns the decoded body when it is under the cap', async () => {
         const text = await readTextCapped(streamOf('{"ok":true}'), 100, 'overpass');
         expect(text).toBe('{"ok":true}');

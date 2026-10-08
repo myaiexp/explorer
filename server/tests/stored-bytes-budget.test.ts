@@ -8,9 +8,21 @@ import {
   createTestAccount,
   resetRateLimiter,
   authHeaders,
+  VISIT_BODY,
 } from './helpers.js';
 import { schema } from '../src/db.js';
-import { MAX_STORED_BYTES } from '../src/lib/validate-fields.js';
+import { incomingJsonbBytes } from '../src/lib/snapshot-size.js';
+import { MAX_STORED_BYTES } from '../src/lib/limits.js';
+
+function bytesOf(result: unknown): number {
+  const row = Array.isArray(result)
+    ? result[0]
+    : (result && typeof result === 'object' && 'rows' in result
+      ? (result as { rows: unknown[] }).rows[0]
+      : undefined);
+  const bytes = (row as { bytes?: unknown } | undefined)?.bytes;
+  return typeof bytes === 'number' ? bytes : Number(bytes);
+}
 
 beforeEach(async () => {
   await truncateAll();
@@ -25,6 +37,27 @@ async function fillStoredBytes(username: string, id = 'fat-fill'): Promise<void>
     VALUES (${id}, ${username}, jsonb_build_object('blob', repeat('x', ${MAX_STORED_BYTES})))
   `);
 }
+
+describe('stored jsonb byte estimate matches postgres (finding #11797)', () => {
+  test('a PUT polyline\'s incomingJsonbBytes equals octet_length(::text)', async () => {
+    const { username: u, token } = await createTestAccount();
+    const routeCoords = [[24.94, 61.5], [24.95, 61.6], [24.96, 61.7]];
+    const returnRouteCoords = [[24.96, 61.7], [24.95, 61.6]];
+    const res = await app.request(`/api/${u}/visits/v-coords`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...VISIT_BODY, routeCoords, returnRouteCoords }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(204);
+
+    const result = await db.execute(sql`
+      SELECT octet_length(route_coords::text)
+        + octet_length(return_route_coords::text) AS bytes
+      FROM visits WHERE username = ${u} AND id = 'v-coords'
+    `);
+    expect(incomingJsonbBytes(schema.visits, { routeCoords, returnRouteCoords })).toBe(bytesOf(result));
+  });
+});
 
 describe('PUT per-account stored-bytes budget (finding #7756)', () => {
   test('rejects a new favorite once stored jsonb is at MAX_STORED_BYTES', async () => {

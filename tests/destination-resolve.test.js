@@ -51,6 +51,7 @@ beforeEach(() => {
     globalThis.buildJunctionLoop = vi.fn();
     globalThis.buildRouteForMode = vi.fn();
     globalThis.OVERLAP_BAD_THRESHOLD = 0.4;
+    globalThis.LOOP_GOOD_ENOUGH = 0.4;
     globalThis.POI_TYPES = POI_TYPES;
 });
 
@@ -86,7 +87,7 @@ describe('resolveCandidatePool', () => {
         const r = await globalThis.resolveCandidatePool(60, 24, {
             ...base, routingStrategy: 'roads', onProgress, winterMode: true });
         // winterMode threads through to the overpass fetcher (was a DOM read before)
-        expect(globalThis.fetchRoadsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, onProgress, true);
+        expect(globalThis.fetchRoadsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, true);
         expect(r.candidatePool).toBe(roads);
         expect(r.dest).toBe(roads[0]);
         expect(r.destName).toBeNull();
@@ -100,7 +101,7 @@ describe('resolveCandidatePool', () => {
         // The bare key, not an array and never the Overpass filter string —
         // overpass.js wraps a scalar key, and the service resolves keys through
         // its own catalog so a client cannot inject a query.
-        expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, 'park', expect.any(Function));
+        expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, 'park');
         expect(globalThis.fetchPOIsInRadius.mock.calls[0][4]).not.toContain('leisure');
         expect(r.dest).toBe(pois[0]);
         expect(r.destName).toBe('Central Park');
@@ -147,8 +148,7 @@ describe('resolveCandidatePool', () => {
         expect(onProgress).toHaveBeenCalledWith('Searching for any POI…');
         // 'all' says the same thing as every key in the catalog, in one token,
         // and cannot drift when the two catalogs differ by an entry.
-        expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(
-            60, 24, 0.5, 2, 'all', expect.any(Function));
+        expect(globalThis.fetchPOIsInRadius).toHaveBeenCalledWith(60, 24, 0.5, 2, 'all');
     });
 
     test('any: straight random pool, no Overpass fetch', async () => {
@@ -410,8 +410,19 @@ describe('findBestLoop budget-aware ranking', () => {
         expect(best.overlap).toBe(0.35);
     });
 
+    test('the retry cutoff does not follow the overlap-warning threshold', async () => {
+        // generate.js warns at OVERLAP_BAD_THRESHOLD. findBestLoop stops retrying
+        // at LOOP_GOOD_ENOUGH. Moving the warning must not change how many
+        // candidates get built: 0.2 is over the warning and under the cutoff.
+        globalThis.OVERLAP_BAD_THRESHOLD = 0.05;
+        globalThis.LOOP_GOOD_ENOUGH = 0.4;
+        globalThis.buildJunctionLoop.mockResolvedValue(sizedLoop(0.2, 5));
+        await globalThis.findBestLoop(60, 24, optsFor(false));
+        expect(globalThis.buildJunctionLoop).toHaveBeenCalledTimes(1);
+    });
+
     test('a sub-threshold overlap that busts the budget no longer stops the retry loop', async () => {
-        // 0.10 overlap is under OVERLAP_BAD_THRESHOLD, so legacy early-exits on
+        // 0.10 overlap is under LOOP_GOOD_ENOUGH, so legacy early-exits on
         // attempt 1. Budget-aware scores it 0.10 + 0.80 and keeps looking.
         globalThis.buildJunctionLoop.mockResolvedValue(sprawling);
         await globalThis.findBestLoop(60, 24, optsFor(false));
@@ -478,18 +489,17 @@ describe('buildRouteForDestination', () => {
         expect(built.overlap).toBeNull();
     });
 
-    // one-way builds are unchanged: they never took the smart-loop branch
-    // before (tripMode !== 'one-way' already gated it), and still don't —
-    // dispatched straight through buildRouteForMode with smartRouting
-    // hardcoded false ("plain loop, deliberately"), regardless of tripMode.
+    // one-way builds never take the junction-retry loop. They dispatch through
+    // buildRouteForMode with no smartRouting key — tripMode is the whole signal.
     test('one-way builds are unchanged → buildRouteForMode path, junctions/overlap null', async () => {
         globalThis.buildRouteForMode.mockResolvedValue({ outbound: { coords: ['ow'] }, return: null, junctions: null });
         const built = await globalThis.buildRouteForDestination(60, 24, {
             candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
             maxKm: 5, tripMode: 'one-way', spread: {}, winterMode: true, onProgress: vi.fn() });
         expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
-        expect(globalThis.buildRouteForMode).toHaveBeenCalledWith(60, 24, 61, 25, expect.objectContaining({
-            tripMode: 'one-way', smartRouting: false, winterMode: false }));
+        const opts = globalThis.buildRouteForMode.mock.calls[0][4];
+        expect(opts).toEqual(expect.objectContaining({ tripMode: 'one-way', winterMode: false }));
+        expect(opts).not.toHaveProperty('smartRouting');
         expect(built.dest).toBe(dest);
         expect(built.outbound).toEqual({ coords: ['ow'] });
         expect(built.junctions).toBeNull();
@@ -509,12 +519,9 @@ describe('buildRouteForDestination', () => {
         // (osrm.test.js pins that); asserting it's never called is the same
         // as asserting no junctions fetch happened.
         expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
-        // The fallback call hardcodes smartRouting: false — that's the "plain
-        // loop, deliberately" meaning that used to come from a caller-supplied
-        // false and must survive as an explicit literal now that the incoming
-        // flag is gone entirely.
-        expect(globalThis.buildRouteForMode).toHaveBeenCalledWith(60, 24, 61, 25, expect.objectContaining({
-            tripMode: 'round', smartRouting: false, degraded: true }));
+        const opts = globalThis.buildRouteForMode.mock.calls[0][4];
+        expect(opts).toEqual(expect.objectContaining({ tripMode: 'round', degraded: true }));
+        expect(opts).not.toHaveProperty('smartRouting');
         expect(built.outbound).toEqual({ coords: ['lo'] });
         expect(built.return).toEqual({ coords: ['lr'] });
     });
@@ -583,8 +590,10 @@ describe('buildRouteForDestination', () => {
             maxKm: 5, tripMode: 'one-way', spread: {}, winterMode: true,
             onProgress: vi.fn(), degraded: true });
         expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
-        expect(globalThis.buildRouteForMode).toHaveBeenCalledWith(60, 24, 61, 25, expect.objectContaining({
-            tripMode: 'one-way', smartRouting: false, winterMode: false, degraded: true }));
+        const opts = globalThis.buildRouteForMode.mock.calls[0][4];
+        expect(opts).toEqual(expect.objectContaining({
+            tripMode: 'one-way', winterMode: false, degraded: true }));
+        expect(opts).not.toHaveProperty('smartRouting');
         expect(built.outbound).toEqual({ coords: ['ow'] });
     });
 });

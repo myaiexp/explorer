@@ -66,7 +66,6 @@ beforeEach(() => {
     globalThis.getRouteColor = () => '#ff0000';
     globalThis.readRouteBuildOptions = vi.fn((tripMode) => ({
         tripMode,
-        smartRouting: tripMode !== 'one-way',
         winterMode: false,
         maxKm: 5,
         spread: SPREAD,
@@ -145,7 +144,7 @@ describe('rerouteWithCurrentSpread', () => {
         expect(document.getElementById('smartRouting')).toBeNull();
         setCurrentSession(baseSession());
         readRouteBuildOptions.mockReturnValue({
-            tripMode: 'round', smartRouting: true, winterMode: true,
+            tripMode: 'round', winterMode: true,
             maxKm: 5, spread: SPREAD,
         });
 
@@ -159,7 +158,7 @@ describe('rerouteWithCurrentSpread', () => {
         const session = baseSession();
         setCurrentSession(session);
         readRouteBuildOptions.mockReturnValue({
-            tripMode: 'round', smartRouting: true, winterMode: true,
+            tripMode: 'round', winterMode: true,
             maxKm: 5, spread: SPREAD, avoidBacktracking: true,
         });
 
@@ -171,7 +170,7 @@ describe('rerouteWithCurrentSpread', () => {
         expect([lat, lng, dLat, dLng]).toEqual([62.1, 25.7, 62.2, 25.8]);
         expect(opts.cachedJunctions).toBe(JUNCTIONS);
         expect(opts.tripMode).toBe('round');
-        expect(opts.smartRouting).toBe(true);
+        expect(opts).not.toHaveProperty('smartRouting');
         expect(opts.winterMode).toBe(true);
         expect(opts.spread).toBe(SPREAD);
         expect(opts.maxKm).toBe(5);
@@ -194,7 +193,7 @@ describe('rerouteWithCurrentSpread', () => {
         expect(getCurrentSession().junctions).toBe(JUNCTIONS);
         expect(getCurrentSession().visitId).toBe('visit-1');
         expect(readRouteBuildOptions).toHaveBeenCalledWith('one-way');
-        expect(buildRouteForMode.mock.calls[0][4].smartRouting).toBe(false);
+        expect(buildRouteForMode.mock.calls[0][4]).not.toHaveProperty('smartRouting');
     });
 
     test('one-way with outbound and no return is a usable replacement', async () => {

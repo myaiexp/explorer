@@ -13,10 +13,10 @@ import {
   LNG_MAX,
 } from './route-coords.js';
 import type { AnyRecord } from './type-guards.js';
+import { MAX_FAVORITE_PAYLOAD_LEN } from './limits.js';
 import {
   MAX_LABEL_LEN,
   MAX_NAME_LEN,
-  MAX_FAVORITE_PAYLOAD_LEN,
   isIsoDate,
   tooLong,
   payloadLength,

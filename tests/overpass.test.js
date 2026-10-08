@@ -129,13 +129,13 @@ describe('fetchRoadsInRadius', () => {
 
     test('fetchRoadsInRadius sends exclude "winter" when winterMode is true', async () => {
         const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
-        await fetchRoadsInRadius(START.lat, START.lng, 1, 5, undefined, true);
+        await fetchRoadsInRadius(START.lat, START.lng, 1, 5, true);
         expect(requestOf(fetchMock).body.exclude).toBe('winter');
     });
 
     test('fetchRoadsInRadius sends exclude "default" when winterMode is false', async () => {
         const fetchMock = installCannedFetch(jsonResponse({ candidates: [] }));
-        await fetchRoadsInRadius(START.lat, START.lng, 1, 5, undefined, false);
+        await fetchRoadsInRadius(START.lat, START.lng, 1, 5, false);
         expect(requestOf(fetchMock).body.exclude).toBe('default');
     });
 

@@ -4,10 +4,17 @@ import {
   isIsoDate,
   tooLong,
   payloadLength,
-  idError,
+  parseRowId,
   MAX_DATE_LEN,
   MAX_ID_LEN,
 } from './validate-fields.js';
+
+// The old idError wrapper lived only so this file could assert the 400 string.
+// parseRowId is the function the routes call.
+function idError(id: unknown): string | null {
+  const parsed = parseRowId(id);
+  return 'error' in parsed ? parsed.error : null;
+}
 
 describe('isIsoDate', () => {
   it('accepts bare dates and full timestamps', () => {

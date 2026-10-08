@@ -585,14 +585,15 @@ describe('buildJunctionLoop', () => {
         });
 
         test('the both-chiralities-failed fallback builds the widened loop', async () => {
-            // A 200 with no route is a legitimate "no path" answer: it fails the
-            // chirality without tripping the self-hosted-down latch, so the
-            // fallback's own calls stay on the stubbed self-hosted backend.
+            // osrm-routed answers "no path" with HTTP 400 { code: 'NoRoute' }.
+            // That is the engine, not an outage: it must fail the chirality
+            // without latching, so the fallback's own calls stay on the
+            // stubbed self-hosted backend.
             const { A, B, rightVias, leftVias } = WIDE();
             let routeCalls = 0;
             const fetch = installOsrmKindFetch({
                 route: (url) => (++routeCalls <= 4
-                    ? jsonResponse({ code: 'NoRoute', routes: [] })
+                    ? jsonResponse({ code: 'NoRoute', routes: [] }, { status: 400 })
                     : echoRoute(url)),
             });
             const out = await globalThis.buildJunctionLoop(
@@ -600,6 +601,7 @@ describe('buildJunctionLoop', () => {
             );
             expect(out.overlap).toBeNull();
             expect(out.outbound).toBeTruthy();
+            expect(globalThis.isSelfHostedDown()).toBe(false);
             expect(routed(fetch).slice(4)).toEqual([
                 [A, ...rightVias, B],
                 [B, ...leftVias.slice().reverse(), A],

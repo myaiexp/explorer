@@ -24,9 +24,10 @@ export default defineConfig({
             include: ['*.js'],
             exclude: ['vitest.config.js'],
             // Enforced by `pnpm test:coverage` only — a path-filtered run would
-            // always miss it. Set ~1 point under the 2026-09-14 baseline (lines
-            // 94.2, functions 96.6, branches 94.7); raise them as coverage grows.
-            thresholds: { lines: 93, statements: 93, functions: 95, branches: 93 },
+            // always miss it. Set ~1 point under the 2026-10-08 baseline (lines
+            // 99.22, functions 97.69, branches 95.06), after fit-encoder.js
+            // started counting; raise them as coverage grows.
+            thresholds: { lines: 98, statements: 98, functions: 96, branches: 94 },
         },
     },
 });

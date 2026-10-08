@@ -245,6 +245,30 @@ describe('WanderSync.init', () => {
     // _state === 'accepted', so a cancelled switch used to silently stop backing
     // up the account the device still owns — for the rest of the session, with no
     // UI signal. Pins the behaviour, not just the state fields.
+    test('Case 4/5 confirm onto a different account drops the previous outbox', async () => {
+        setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+            walk_sync_outbox: JSON.stringify([
+                { section: 'visits', op: 'put', id: 'local-v', data: { id: 'local-v' } },
+            ]),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        mockFetch({
+            '/wander/api/mossy-fern-7': { visits: [], favorites: [], savedLocations: [], history: [] },
+        });
+        loadSync();
+        await window.WanderSync.init();
+        await drainFlushPump();
+        expect(window.WanderSync.getState()).toMatchObject({
+            state: 'accepted', username: 'mossy-fern-7',
+        });
+        expect(localStorage.getItem('walk_sync_outbox')).toBeNull();
+        const urls = global.fetch.mock.calls.map((c) => String(c[0]));
+        expect(urls.some((u) => u.includes('/mossy-fern-7/visits/local-v'))).toBe(false);
+    });
+
     test('Case 4/5 cancel: the still-bound account keeps queueing mutations', async () => {
         setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({

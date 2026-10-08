@@ -7,9 +7,10 @@
 // UNITS — this file is the metres→kilometres boundary. An OSRM route object's
 // `distance` is METRES (osrm.js maps it straight off the OSRM response); every
 // session/persisted field below is KILOMETRES. Identifiers carry a Km/M suffix
-// wherever the name is ours to choose; the un-suffixed `distance` /
-// `routeDistance` / `returnRouteDistance` are fixed by the DB columns
-// (server/src/schema.ts) and stay as-is. route-restore.js converts back.
+// wherever the name is ours to choose. The un-suffixed `distance` is the one
+// DB column (server/src/schema.ts). `routeDistance` and `returnRouteDistance`
+// are persisted row keys — localStorage and the server's favorite light keys —
+// not columns, and stay as-is. route-restore.js converts back.
 
 // Per-leg + total walking distance/duration from an outbound/return route pair.
 // A missing leg falls back to the straight-line distance — EXCEPT a one-way

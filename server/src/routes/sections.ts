@@ -13,7 +13,7 @@ import {
   MAX_ROWS_PER_SECTION,
   MAX_STORED_BYTES,
   MAX_WRITE_BODY_BYTES,
-} from '../lib/validate-fields.js';
+} from '../lib/limits.js';
 import {
   estimateRowStoredBytes,
   estimateStoredSnapshotBytes,

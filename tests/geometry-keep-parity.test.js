@@ -3,7 +3,7 @@
  * Drift guard for the newest-N geometry window that exists in two independent
  * deployables:
  *   - storage.js VISIT_GEOMETRY_KEEP          (quota-trim of local visits)
- *   - server/src/lib/validate-fields.ts
+ *   - server/src/lib/limits.ts
  *     GET_GEOMETRY_KEEP                       (GET /:username omits older polylines)
  *
  * Both sides carry reciprocal TWIN comments: the quota trim and the default GET
@@ -18,7 +18,7 @@ import { describe, test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { GET_GEOMETRY_KEEP } from '../server/src/lib/validate-fields.ts';
+import { GET_GEOMETRY_KEEP } from '../server/src/lib/limits.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,7 +29,7 @@ function numberConst(src, name) {
 }
 
 const storageSrc = readFileSync(join(ROOT, 'storage.js'), 'utf8');
-const fieldsSrc = readFileSync(join(ROOT, 'server/src/lib/validate-fields.ts'), 'utf8');
+const fieldsSrc = readFileSync(join(ROOT, 'server/src/lib/limits.ts'), 'utf8');
 
 describe('geometry-keep window parity: storage.js ↔ GET /:username', () => {
     test('VISIT_GEOMETRY_KEEP and GET_GEOMETRY_KEEP are the same 50', () => {

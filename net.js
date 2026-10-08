@@ -10,16 +10,44 @@
 // explicit larger ms, since a cache miss there has to reach Overpass.
 const FETCH_TIMEOUT_MS = 20000;
 
-// Same signature as fetch(url, init), plus a per-call timeout (ms). Rejects with
-// an AbortError if the response doesn't arrive in time; callers already treat a
-// fetch rejection as a network failure, so no call site needs special handling.
+// Same signature as fetch(url, init), plus a per-call timeout (ms). The timer
+// covers the body read too: clearing it when the headers arrive leaves
+// res.json() able to stall withLoading forever. A reply with no body method
+// (a test double that is just {ok, status}) clears immediately. unref so an
+// unread real Response does not hold the process open. Rejects with an
+// AbortError; callers already treat a fetch rejection as a network failure.
 async function fetchWithTimeout(url, init = {}, ms = FETCH_TIMEOUT_MS) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), ms);
-    try {
-        return await fetch(url, { ...init, signal: ctl.signal });
-    } finally {
+    if (typeof timer.unref === 'function') timer.unref();
+    let cleared = false;
+    const clear = () => {
+        if (cleared) return;
+        cleared = true;
         clearTimeout(timer);
+    };
+    try {
+        const res = await fetch(url, { ...init, signal: ctl.signal });
+        const methods = ['json', 'text', 'arrayBuffer', 'blob'];
+        const present = methods.filter((method) => typeof res[method] === 'function');
+        if (present.length === 0) {
+            clear();
+            return res;
+        }
+        for (const method of present) {
+            const orig = res[method].bind(res);
+            res[method] = async (...args) => {
+                try {
+                    return await orig(...args);
+                } finally {
+                    clear();
+                }
+            };
+        }
+        return res;
+    } catch (err) {
+        clear();
+        throw err;
     }
 }
 

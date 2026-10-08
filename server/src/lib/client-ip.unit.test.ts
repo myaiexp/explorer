@@ -69,6 +69,28 @@ describe('clientIp', () => {
     expect(await res.text()).toBe('10.0.0.1');
   });
 
+  it('buckets an IPv6 client by /64 and leaves an IPv4-mapped address whole (finding #11552)', async () => {
+    const app = appWith((c) => new Response(clientIp(c)));
+    const v6 = await app.request(
+      '/',
+      { headers: { 'x-real-ip': '2001:0db8:0000:0001::1' } },
+      PROXY_SOCKET_ENV
+    );
+    expect(await v6.text()).toBe('2001:db8:0:1::/64');
+    const mapped = await app.request(
+      '/',
+      { headers: { 'x-real-ip': '::ffff:203.0.113.9' } },
+      PROXY_SOCKET_ENV
+    );
+    expect(await mapped.text()).toBe('::ffff:203.0.113.9');
+    const hexMapped = await app.request(
+      '/',
+      { headers: { 'x-real-ip': '0:0:0:0:0:ffff:c000:201' } },
+      PROXY_SOCKET_ENV
+    );
+    expect(await hexMapped.text()).toBe('0:0:0:0:0:ffff:c000:201');
+  });
+
   it('prefers X-Real-IP over a spoofable XFF chain (finding #7895)', async () => {
     const app = appWith((c) => new Response(clientIp(c)));
     const res = await app.request(
@@ -163,6 +185,16 @@ describe('clientIp', () => {
 });
 
 describe('clientIpForStorage', () => {
+  it('records the full IPv6 address, not the rate-limit /64 (finding #11552)', async () => {
+    const app = appWith((c) => new Response(String(clientIpForStorage(c))));
+    const res = await app.request(
+      '/',
+      { headers: { 'x-real-ip': '2001:db8:0:1::1' } },
+      PROXY_SOCKET_ENV
+    );
+    expect(await res.text()).toBe('2001:db8:0:1::1');
+  });
+
   it('records the trusted-proxy last XFF hop', async () => {
     const app = appWith((c) => new Response(String(clientIpForStorage(c))));
     const res = await app.request(

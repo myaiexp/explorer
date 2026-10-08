@@ -102,8 +102,8 @@ summed in Postgres — the row that would blow `ARCHIVE_PAGE_MAX_BYTES` (2 MiB)
 is never serialized into Node. A page always returns at least one row, so a
 single row above the budget is still retrievable instead of stalling the walk.
 
-Caps and validators live in `src/lib/validate-fields.ts` /
-`src/lib/validate-rows.ts`. Trip-row scalar coords (`startLat` / `startLng` /
+Size and paging budgets live in `src/lib/limits.ts`. Field-shape checks live
+in `src/lib/validate-fields.ts` / `src/lib/validate-rows.ts`. Trip-row scalar coords (`startLat` / `startLng` /
 `destLat` / `destLng`) must be finite and inside the same WGS-84 bounds as
 `routeCoords` (`[-90, 90]` / `[-180, 180]`); `distance` must be finite and
 ≥ 0. Finding #7775: `typeof === 'number'` used to accept lat 999 and Infinity.

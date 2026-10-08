@@ -5,7 +5,7 @@ import type { Db } from '../db.js';
 import { schema } from '../db.js';
 import { accountAuth } from '../middleware/auth.js';
 import { readRateLimit } from '../middleware/rate-limit.js';
-import { GET_SNAPSHOT_MAX_BYTES } from '../lib/validate-fields.js';
+import { GET_SNAPSHOT_MAX_BYTES } from '../lib/limits.js';
 import { selectFavoriteSection } from '../lib/favorite-snapshot.js';
 import { estimateStoredSnapshotBytes } from '../lib/snapshot-size.js';
 import { selectTripSection } from '../lib/trip-snapshot.js';

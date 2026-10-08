@@ -427,6 +427,42 @@ describe('quota-full sync-down', () => {
         delete globalThis.showError;
     });
 
+    test('account switch: an apply that throws rolls the wipe back', async () => {
+        setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
+        setLocalStorage({
+            walk_cloud_backup: JSON.stringify({ state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42' }),
+            walk_visits: JSON.stringify([{ id: 'local-v' }]),
+            walk_history: JSON.stringify([{ id: 'local-h' }]),
+        });
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        mockFetch({
+            '/wander/api/mossy-fern-7': {
+                visits: [serverTrip({ id: 'server-v' })], favorites: [], savedLocations: [], history: [],
+            },
+        });
+        globalThis.showError = vi.fn();
+        loadSync();
+        const real = Storage.prototype.setItem;
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (k, v) {
+            if (k === 'walk_visits' && String(v).includes('server-v')) {
+                throw new DOMException('denied', 'SecurityError');
+            }
+            return real.call(this, k, v);
+        });
+
+        await window.WanderSync.init();
+
+        expect(JSON.parse(localStorage.getItem('walk_visits'))).toEqual([{ id: 'local-v' }]);
+        expect(JSON.parse(localStorage.getItem('walk_history'))).toEqual([{ id: 'local-h' }]);
+        expect(window.WanderSync.getState()).toMatchObject({
+            state: 'accepted', username: 'rugged-pine-42', token: 'tok-rp42',
+        });
+        expect(globalThis.showError).toHaveBeenCalledWith(
+            expect.stringContaining('your previous data was restored'),
+        );
+        delete globalThis.showError;
+    });
+
     test('restoreSections puts an absent section back as absent, not as []', () => {
         setLocalStorage({ walk_visits: JSON.stringify([{ id: 'local-v' }]) });
         const snap = globalThis.SyncSections.snapshotSections();

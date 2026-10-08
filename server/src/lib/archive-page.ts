@@ -2,7 +2,8 @@
 import { and, eq, inArray, sql, type SQLWrapper } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
-import { ARCHIVE_PAGE_MAX_BYTES } from './validate-fields.js';
+import { FAVORITE_PAYLOAD_BYTES_SQL, ROUTE_PAIR_BYTES_SQL } from './jsonb-bytes-sql.js';
+import { ARCHIVE_PAGE_MAX_BYTES } from './limits.js';
 
 export const ARCHIVE_SECTIONS = ['visits', 'history', 'favorites', 'savedLocations'] as const;
 export type ArchiveSection = (typeof ARCHIVE_SECTIONS)[number];
@@ -19,17 +20,17 @@ const SECTION_SQL: Record<ArchiveSection, { table: string; sortColumn: string; b
   visits: {
     table: 'visits',
     sortColumn: 'date',
-    bytes: 'COALESCE(octet_length(route_coords::text), 0) + COALESCE(octet_length(return_route_coords::text), 0)',
+    bytes: ROUTE_PAIR_BYTES_SQL,
   },
   history: {
     table: 'history',
     sortColumn: 'date',
-    bytes: 'COALESCE(octet_length(route_coords::text), 0) + COALESCE(octet_length(return_route_coords::text), 0)',
+    bytes: ROUTE_PAIR_BYTES_SQL,
   },
   favorites: {
     table: 'favorites',
     sortColumn: 'updated_at',
-    bytes: 'COALESCE(octet_length(payload::text), 0)',
+    bytes: FAVORITE_PAYLOAD_BYTES_SQL,
   },
   // No jsonb column — the row count is the only bound that applies here.
   savedLocations: { table: 'saved_locations', sortColumn: 'updated_at', bytes: '0' },

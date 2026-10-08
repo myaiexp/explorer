@@ -2,7 +2,7 @@
 import { and, desc, eq, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../db.js';
 import { schema } from '../db.js';
-import { FAVORITE_LIGHT_KEYS, GET_GEOMETRY_KEEP } from './validate-fields.js';
+import { FAVORITE_LIGHT_KEYS, GET_GEOMETRY_KEEP } from './limits.js';
 
 // jsonb_build_object pairs from the bookmark-key whitelist. Keys are a fixed
 // const array (no user input), so sql.raw is the join, not a query parameter.

@@ -3,22 +3,17 @@
  * Tests for fit-encoder.js — Garmin FIT course-file binary encoder.
  * Audit finding #1562: this file had zero test coverage.
  *
- * Loading: fit-encoder.js is a non-module browser IIFE that exposes only
- * { encodeCourse, osrmStepsToCoursePoints, CP } on globalThis. The closure
- * also holds ByteWriter, crc16, toSemicircles, toFitTime,
- * osrmStepToType and nearestCoordIndex — all of which the audit requires us
- * to test. We read its text via helpers/load.js's readScript() and
- * string-inject an `_internals` export at load time only (the export line is
- * untouched on disk), then evaluate the patched source with evalScript() — the
- * escape hatch loadScripts() itself doesn't cover. If the export line ever
- * changes, the injection throws loudly.
+ * Loading: fit-encoder.js is a non-module browser IIFE. The closure's helpers
+ * (ByteWriter, crc16, toSemicircles, …) are on FitEncoder._internals, on the
+ * same line as the public export so the file's line offsets stay put.
+ * loadScripts evaluates that exact text with the file's URL, which is what
+ * puts the file on the coverage report.
  *
  * Distance uses the canonical globalThis.haversineM from geo-utils.js (audit
  * #1262 / #7313), so geo-utils.js must run in the realm first — exactly as it
  * does in the browser load order; helpers/load.js's SCRIPT_DEPS lists geo-utils
- * as fit-encoder's dependency, but since we bypass loadScripts() for the
- * injection, we load geo-utils explicitly ourselves before it. Cumulative-
- * distance assertions call the same globalThis.haversineM the encoder uses.
+ * as fit-encoder's dependency, so loadScripts('fit-encoder') pulls it in.
+ * Cumulative-distance assertions call the same globalThis.haversineM the encoder uses.
  *
  * The FIT CRC-16 is exactly CRC-16/ARC (reflected, poly 0xA001, init 0,
  * catalog check value 0xBB3D for "123456789"). We validate the SUT's
@@ -27,24 +22,12 @@
  */
 
 import { describe, test, expect, beforeAll } from 'vitest';
-import { loadScripts, readScript, evalScript } from './helpers/load.js';
-
-const EXPORT_LINE =
-    'global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP };';
-const INJECTED =
-    'global.FitEncoder = { encodeCourse, osrmStepsToCoursePoints, CP, ' +
-    '_internals: { ByteWriter, crc16, writeDefinition, ' +
-    'toSemicircles, toFitTime, osrmStepToType, nearestCoordIndex, ' +
-    'FIT_EPOCH, SEMICIRCLE, WALK_MPS, T, M } };';
+import { loadScripts } from './helpers/load.js';
 
 let enc, internals, CP;
 
 beforeAll(() => {
-    loadScripts('geo-utils');   // exposes globalThis.haversineM (encoder calls it directly)
-    const RAW = readScript('fit-encoder');
-    const SRC = RAW.replace(EXPORT_LINE, INJECTED);
-    if (SRC === RAW) throw new Error('injection failed — export line changed in fit-encoder.js');
-    evalScript(SRC);
+    loadScripts('fit-encoder');
     enc = globalThis.FitEncoder;
     internals = enc._internals;
     CP = enc.CP;

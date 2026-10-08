@@ -10,6 +10,17 @@ const OVERLAP_PROXIMITY_M = 25;
 // are sharing nearly half their length, which is the lake-collapse signal.
 const OVERLAP_BAD_THRESHOLD = 0.4;
 
+// Same number as the warning today, but a different binding: generate.js warns
+// the walker at OVERLAP_BAD_THRESHOLD, and findBestLoop stops retrying below
+// this cutoff. Tuning the warning must not change how many candidates get built.
+const LOOP_GOOD_ENOUGH = 0.4;
+
+// True only strictly under the cutoff. A rank equal to the cutoff does not
+// stop the retry, and a missing rank never counts as good enough.
+function loopIsGoodEnough(rank) {
+    return rank !== null && rank !== undefined && rank < globalThis.LOOP_GOOD_ENOUGH;
+}
+
 // For each p in `from`, count it as "near" if ANY q in `to` is within
 // OVERLAP_PROXIMITY_M. Returns the fraction of near points. Naïve O(n*m) —
 // coords are 100–500 points typically, fine without spatial indexing.
@@ -73,6 +84,8 @@ function loopScore(overlap, totalKm, maxKm) {
 // from non-script consumers (e.g. vm.runInThisContext in tests).
 globalThis.OVERLAP_PROXIMITY_M = OVERLAP_PROXIMITY_M;
 globalThis.OVERLAP_BAD_THRESHOLD = OVERLAP_BAD_THRESHOLD;
+globalThis.LOOP_GOOD_ENOUGH = LOOP_GOOD_ENOUGH;
+globalThis.loopIsGoodEnough = loopIsGoodEnough;
 globalThis.loopOverlapFraction = loopOverlapFraction;
 globalThis.loopBudgetOvershoot = loopBudgetOvershoot;
 globalThis.loopScore = loopScore;

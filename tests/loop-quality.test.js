@@ -16,6 +16,16 @@ beforeAll(() => {
     loadScripts('loop-quality');   // pulls in geo-utils first (globalThis.haversineM)
 });
 
+describe('loopIsGoodEnough', () => {
+    test('stops strictly under the cutoff, and never for a missing rank', () => {
+        expect(globalThis.LOOP_GOOD_ENOUGH).toBe(0.4);
+        expect(globalThis.loopIsGoodEnough(0.4 - 1e-9)).toBe(true);
+        expect(globalThis.loopIsGoodEnough(0.4)).toBe(false);
+        expect(globalThis.loopIsGoodEnough(null)).toBe(false);
+        expect(globalThis.loopIsGoodEnough(undefined)).toBe(false);
+    });
+});
+
 describe('loopOverlapFraction', () => {
     test('identical polylines → 1.0', () => {
         const path = [[60.17, 24.94], [60.18, 24.95], [60.19, 24.96]];

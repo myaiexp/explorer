@@ -5,7 +5,7 @@ import {
   GET_SNAPSHOT_MAX_BYTES,
   MAX_IMPORT_BODY_BYTES,
   MAX_STORED_BYTES,
-} from './validate-fields.js';
+} from './limits.js';
 import {
   estimateStoredSnapshotBytes,
   incomingJsonbBytes,
@@ -29,8 +29,14 @@ describe('MAX_STORED_BYTES', () => {
 });
 
 describe('storedJsonbBytes', () => {
-  it('counts UTF-8 bytes of JSON.stringify', () => {
-    expect(storedJsonbBytes({ a: 1 })).toBe(Buffer.byteLength(JSON.stringify({ a: 1 }), 'utf8'));
+  it('counts postgres jsonb text, which spaces separators and sorts object keys', () => {
+    // Compact JSON.stringify under-counts octet_length(jsonb::text): spaces
+    // after ',' and ':', and keys ordered by byte length then memcmp.
+    const coords = [[24.94, 61.5], [24.95, 61.6]];
+    const pgCoords = '[[24.94, 61.5], [24.95, 61.6]]';
+    expect(Buffer.byteLength(pgCoords)).toBeGreaterThan(Buffer.byteLength(JSON.stringify(coords)));
+    expect(storedJsonbBytes(coords)).toBe(Buffer.byteLength(pgCoords));
+    expect(storedJsonbBytes({ b: 1, a: 2 })).toBe(Buffer.byteLength('{"a": 2, "b": 1}'));
     expect(storedJsonbBytes('hi')).toBe(4); // '"hi"'
   });
 
@@ -41,11 +47,12 @@ describe('storedJsonbBytes', () => {
   });
 
   it('counts UTF-8, not UTF-16 code units', () => {
-    // One emoji is 2 UTF-16 units and 4 UTF-8 bytes; JSON.stringify adds quotes.
+    // One emoji is 2 UTF-16 units and 4 UTF-8 bytes. jsonb text adds the
+    // space after ':' that compact JSON.stringify omits.
     const payload = { n: '😀' };
-    const json = JSON.stringify(payload);
-    expect(json.length).toBeLessThan(Buffer.byteLength(json, 'utf8'));
-    expect(storedJsonbBytes(payload)).toBe(Buffer.byteLength(json, 'utf8'));
+    const pg = '{"n": "😀"}';
+    expect(pg.length).toBeLessThan(Buffer.byteLength(pg, 'utf8'));
+    expect(storedJsonbBytes(payload)).toBe(Buffer.byteLength(pg, 'utf8'));
   });
 });
 

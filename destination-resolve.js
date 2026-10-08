@@ -1,18 +1,9 @@
 // Destination-resolution pipeline — resolve a candidate pool, screen it for
-// water-reachability, and build the best route for it. Pure orchestration of
-// pieces that live in sibling modules (overpass fetchers, screening, novelty
-// ranking, junction/route builders); reads NO DOM — mode flags (winterMode,
-// degraded) are passed in, matching route-dispatch.js. This file
-// never touches document/DOM or osrm.js's isSelfHostedDown() latch directly.
-// Smart routing (junction-snapped loops via findBestLoop) is no longer a
-// caller-supplied flag here — buildRouteForDestination runs it unconditionally
-// for every non-degraded round trip; see its own comment below.
-// Every cross-file dependency (rankByNovelty, generateRandomPointAnnulus,
-// capPool, screenCandidates, screeningTableFn, fetchRoadsInRadius,
-// fetchPOIsInRadius, buildJunctionLoop, buildRouteForMode, loopScore,
-// OVERLAP_BAD_THRESHOLD, POI_TYPES) is resolved from globalThis at call time.
-// Loaded after route-dispatch.js + osrm.js + overpass.js, before app.js;
-// generate.js's generateDestination wires it.
+// water-reachability, and build the best route for it. Pure orchestration;
+// reads no DOM. buildRouteForDestination runs findBestLoop for every
+// non-degraded round trip. Cross-file helpers (including loopIsGoodEnough)
+// are resolved from globalThis at call time. Loaded after route-dispatch.js
+// + osrm.js + overpass.js, before app.js.
 
 // Orchestration-layer routing policy — the size of the random-annulus candidate
 // pool and the smart-routing retry budget for findBestLoop. (Don't confuse
@@ -70,7 +61,7 @@ async function resolveCandidatePool(startLat, startLng, {
         onProgress('Searching for roads in the area…');
         let roads;
         try {
-            roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, onProgress, winterMode);
+            roads = await fetchRoadsInRadius(startLat, startLng, straightMin, straightMax, winterMode);
         } catch {
             onProgress('Overpass unavailable, using random point…');
             return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
@@ -107,7 +98,7 @@ async function resolveCandidatePool(startLat, startLng, {
         onProgress(`Searching for ${label}…`);
         let pois;
         try {
-            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, types, onProgress);
+            pois = await fetchPOIsInRadius(startLat, startLng, straightMin, straightMax, types);
         } catch {
             onProgress('Overpass unavailable, using random point…');
             return randomPoolResult(startLat, startLng, straightMin, straightMax, existingDests);
@@ -229,8 +220,7 @@ async function findBestLoop(startLat, startLng, {
         };
         if (isBetterLoop(candidate, bestSeen, rankKey)) bestSeen = candidate;
 
-        const rank = candidate[rankKey];
-        if (rank !== null && rank !== undefined && rank < OVERLAP_BAD_THRESHOLD) break;
+        if (loopIsGoodEnough(candidate[rankKey])) break;
     }
     return bestSeen;
 }
@@ -247,11 +237,9 @@ async function findBestLoop(startLat, startLng, {
 // junctions-cache fetch) is never entered at all — no candidate retries, one
 // chirality, one buildRouteForMode call. That's the whole reduction;
 // findBestLoop itself is untouched (retryBudget stays what it is — do not add
-// a second retry-limiting mechanism there). The buildRouteForMode fallback
-// call below hardcodes `smartRouting: false` — that is deliberate, not a
-// vestige: it tells route-dispatch.js "plain loop" for the one-way and
-// degraded cases, which both still route through buildRouteForMode and still
-// need an explicit dispatch flag. Returns the (possibly updated)
+// a second retry-limiting mechanism there). The fallback call below does not
+// pass a loop-shape flag: tripMode and degraded are enough for
+// buildRouteForMode to pick one-way or the plain loop. Returns the (possibly updated)
 // dest/destName plus the built legs, junctions, and loop overlap (null when
 // not a measured smart loop, and outbound/return are undefined when a smart
 // build produced nothing).
@@ -271,7 +259,7 @@ async function buildRouteForDestination(startLat, startLng, {
     // The degraded round trip still gets the wider envelope — it costs no extra
     // request, and a rough public-OSRM loop is exactly where retracing hurts most.
     const r = await buildRouteForMode(startLat, startLng, dest.lat, dest.lng, {
-        tripMode, smartRouting: false, winterMode: false, onProgress,
+        tripMode, winterMode: false, onProgress,
         buildingMessage: 'Building route…', spread, degraded, avoidBacktracking,
     });
     return { dest, destName, outbound: r.outbound, return: r.return, junctions: null, overlap: null };

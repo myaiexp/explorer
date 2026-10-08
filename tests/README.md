@@ -59,7 +59,7 @@ Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm �
 
 ### Transform-before-eval
 
-`readScript(name)` returns source text. One test transforms it before evaluating: **fit-encoder** string-injects an `_internals` export, then `evalScript`s the patched source (side-effect load; return value unused). It passes no filename — the patched text is not the file on disk, so naming it would misplace coverage — which leaves fit-encoder.js at 0% in the frontend report. Every other suite loads through `loadScripts` and reads the module's exports off `globalThis` — `corridor-junctions` drives osrm.js's `fetchCorridorJunctions` after `loadScripts('osrm')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
+`readScript(name)` returns source text. Every suite loads through `loadScripts`, which evaluates that exact text under the file's URL so coverage attributes it — `fit-encoder` included, via `FitEncoder._internals` on the export line. `corridor-junctions` drives osrm.js's `fetchCorridorJunctions` after `loadScripts('osrm')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
 
 ### File naming
 

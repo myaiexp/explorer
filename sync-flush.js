@@ -147,9 +147,8 @@
                 // Reset the ladder only on outcomes that aren't a server fault:
                 // success (2xx), server-directed throttling (429), and 4xx drops.
                 // The 5xx/unexpected branch must NOT reset — it reads the
-                // accumulated value so the ladder actually escalates. Resetting
-                // here (the old bug) made every 5xx call nextBackoff(0) → a
-                // constant ~1s retry that hammered a down server forever.
+                // accumulated value so the ladder actually escalates. A reset
+                // there would call nextBackoff(0) and retry every fault at ~1s.
                 if (res.status >= 200 && res.status < 300) {
                     _backoffMs = 0;
                     consumeOutboxHead();

@@ -106,13 +106,13 @@ describe('readRouteBuildOptions', () => {
         setModes({ winter: true, maxKm: '12.5', spread: '100' });
         expect(readRouteBuildOptions('round')).toEqual({
             tripMode: 'round',
-            smartRouting: true,
             winterMode: true,
             maxKm: 12.5,
             spread: computeSpreadParams(100),
             degraded: false,
             avoidBacktracking: false,
         });
+        expect(readRouteBuildOptions('round')).not.toHaveProperty('smartRouting');
     });
 
     test('readRouteBuildOptions reports degraded when the latch is live', () => {
@@ -125,30 +125,21 @@ describe('readRouteBuildOptions', () => {
         expect(readRouteBuildOptions('round').degraded).toBe(false);
     });
 
-    // The silent-downgrade guard (finding #8xxx): smart routing is unconditional
-    // for round trips now — there is no longer any input that can turn it off
-    // for a round trip short of picking one-way or going degraded (handled
-    // separately, downstream, in destination-resolve.js).
-    test('smart routing is on for every round trip, unconditionally', () => {
-        setModes({ winter: false });
-        expect(readRouteBuildOptions('round').smartRouting).toBe(true);
-        setModes({ winter: true });
-        expect(readRouteBuildOptions('round').smartRouting).toBe(true);
-    });
-
-    test('one-way never enables smart routing', () => {
-        setModes({ winter: true });
+    // The dispatch flag is gone. A round trip is a junction loop unless
+    // degraded, and one-way never is — neither mode exposes a switch that
+    // could turn the junction loop off.
+    test('neither trip mode exposes a smartRouting flag', () => {
+        expect(readRouteBuildOptions('round')).not.toHaveProperty('smartRouting');
         const opts = readRouteBuildOptions('one-way');
         expect(opts.tripMode).toBe('one-way');
-        expect(opts.smartRouting).toBe(false);
-        // Dest-pool winter filtering is independent of smart routing (the
-        // checkbox hint said so, and still does); dispatch already ignores
-        // winterMode unless it takes the smart-loop branch, so the helper
-        // does not re-gate it.
-        expect(opts.winterMode).toBe(true);
+        expect(opts).not.toHaveProperty('smartRouting');
+        // Dest-pool winter filtering is independent of loop shape, so the
+        // helper does not re-gate winterMode on one-way.
+        setModes({ winter: true });
+        expect(readRouteBuildOptions('one-way').winterMode).toBe(true);
     });
 
-    test('winterMode is read independently of tripMode / smartRouting', () => {
+    test('winterMode is read independently of tripMode', () => {
         setModes({ winter: true });
         expect(readRouteBuildOptions('round').winterMode).toBe(true);
         setModes({ winter: false });

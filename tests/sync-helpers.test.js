@@ -9,7 +9,7 @@
  * accepted.
  */
 
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 let mutations;
@@ -33,6 +33,17 @@ beforeEach(() => {
   };
 
   loadScripts('sync-helpers');
+});
+
+describe('maybeRequestConsent', () => {
+  test.each(['anonymous', 'declined', 'accepted'])('requests consent only while anonymous (%s)', (state) => {
+    const requestConsent = vi.fn();
+    globalThis.WanderSync.getState = () => ({ state });
+    globalThis.WanderSync.requestConsent = requestConsent;
+    maybeRequestConsent();
+    if (state === 'anonymous') expect(requestConsent).toHaveBeenCalledTimes(1);
+    else expect(requestConsent).not.toHaveBeenCalled();
+  });
 });
 
 describe('syncedPut', () => {

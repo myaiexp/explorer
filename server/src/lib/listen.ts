@@ -4,6 +4,9 @@
 // and passes it down as fd 3, so the uid boundary is the socket file's mode,
 // not a TCP port every local uid can reach (finding #10094). Dev and tests
 // bind 127.0.0.1:PORT and never trust forwarding headers there.
+import type { Server } from 'node:http';
+import { createAdaptorServer, serve } from '@hono/node-server';
+import { PROXY_SOCKET_FLAG } from './client-ip.js';
 
 // sd_listen_fds(3): the first passed fd is always 3.
 const SD_LISTEN_FDS_START = 3;
@@ -34,4 +37,44 @@ export function inheritedSocketFd(env: Env, pid: number): number | undefined {
  */
 export function isUnixListener(address: unknown): boolean {
   return address === null || typeof address === 'string';
+}
+
+type Fetch = (req: Request, env?: Record<string, unknown>) => Response | Promise<Response>;
+type ProxyListen = { fd: number } | { path: string } | { port: number; host: string };
+
+// Requests are flagged only after listen() reports a unix socket. A TCP fd
+// calls onRefuse and leaves the flag off, so a socket unit edited to
+// ListenStream=<port> cannot trust forwarding headers. Tests drive this
+// without process.exit.
+export function startProxyListener(
+  fetch: Fetch,
+  listen: ProxyListen,
+  hooks: { onRefuse: () => void; onReady?: () => void },
+): Server {
+  let verified = false;
+  const server = createAdaptorServer({
+    fetch: (req, env) => fetch(req, verified ? { ...env, [PROXY_SOCKET_FLAG]: true } : env),
+  }) as Server;
+  server.listen(listen, () => {
+    if (!isUnixListener(server.address())) {
+      hooks.onRefuse();
+      return;
+    }
+    verified = true;
+    hooks.onReady?.();
+  });
+  return server;
+}
+
+// Loopback dev/test listener. Never sets PROXY_SOCKET_FLAG — a TCP peer is
+// not nginx, whatever headers it sends.
+export function startLoopbackListener(fetch: Fetch, port: number, onReady?: () => void): Server {
+  return serve(
+    {
+      fetch: (req, env) => fetch(req, env),
+      port,
+      hostname: '127.0.0.1',
+    },
+    onReady,
+  ) as Server;
 }

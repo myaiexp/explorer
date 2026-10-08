@@ -5,7 +5,7 @@ import { schema } from '../src/db.js';
 import {
   MAX_IMPORT_BODY_BYTES,
   MAX_ROWS_PER_SECTION,
-} from '../src/lib/validate-fields.js';
+} from '../src/lib/limits.js';
 
 beforeEach(async () => {
   await truncateAll();

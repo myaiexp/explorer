@@ -172,7 +172,16 @@
             // hard-stop (401/403 paused the pump without dropping the queue) and
             // re-arms once consent/token is known good. Fresh workers have no
             // backoff to reset; flushHead no-ops when the queue is empty.
+            var consent = readConsentRecord();
+            var previous = (consent && consent.state === 'accepted') ? consent.username : null;
             return WanderSync._runInit().then(function (result) {
+                // Outbox entries have no owner; flushHead builds the path from the
+                // current username. Clear only after a successful bind to a
+                // different account. A failed or cancelled switch rolls _username
+                // back, so previous === _username and that account's queue stays.
+                if (previous && _state === 'accepted' && _username && _username !== previous) {
+                    flushWorker.clear();
+                }
                 if (_state === 'accepted') { flushWorker.resume(); }
                 return result;
             });

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders, VISIT_BODY } from './helpers.js';
 import { schema } from '../src/db.js';
-import { GET_GEOMETRY_KEEP } from '../src/lib/validate-fields.js';
+import { GET_GEOMETRY_KEEP } from '../src/lib/limits.js';
 
 beforeEach(async () => {
   await truncateAll();

@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Db } from '../db.js';
 import { accountAuth } from '../middleware/auth.js';
 import { readRateLimit } from '../middleware/rate-limit.js';
-import { ARCHIVE_PAGE_DEFAULT_ROWS, ARCHIVE_PAGE_MAX_ROWS } from '../lib/validate-fields.js';
+import { ARCHIVE_PAGE_DEFAULT_ROWS, ARCHIVE_PAGE_MAX_ROWS } from '../lib/limits.js';
 import { decodeCursor, isArchiveSection, selectArchivePage } from '../lib/archive-page.js';
 
 // Strict integer parse — Number('1.5') and Number(' 2 ') both coerce, and a

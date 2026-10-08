@@ -10,7 +10,7 @@ import {
   MAX_IMPORT_BODY_BYTES,
   MAX_ROWS_PER_SECTION,
   MAX_STORED_BYTES,
-} from '../lib/validate-fields.js';
+} from '../lib/limits.js';
 import { incomingJsonbBytes, wouldExceedStoredBudget } from '../lib/snapshot-size.js';
 import { accountAuth } from '../middleware/auth.js';
 import { ipWriteRateLimit, usernameWriteRateLimit } from '../middleware/rate-limit.js';

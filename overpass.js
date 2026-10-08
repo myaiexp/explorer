@@ -15,14 +15,28 @@
 // browser only to describe the dropdown.
 //
 // Start coordinates travel in the POST body, never the query string, so nginx
-// access logs cannot persist a walker's home (#7559). Same rule as osrm.js's
-// fetchCorridorJunctions.
+// access logs cannot persist a walker's home (#7559). osrm.js's
+// fetchCorridorJunctions posts through the same helper.
 
 // One request per pool now, not a 3-attempt client retry budget — the service
 // owns the retries and the slot waiting. 60s matches the proxy_read_timeout in
 // deploy/nginx-junctions.conf, which is the real ceiling on a cache miss that
 // has to reach Overpass.
 const POOL_TIMEOUT_MS = 60000;
+
+// POST to junctions-cache and hand back the parsed JSON. Every non-2xx throws
+// the same busy error: a 400, a 413, and a 502 are all "try again" to a walker.
+async function postJunctionsCache(path, body) {
+    const response = await fetchWithTimeout(path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+    }, POOL_TIMEOUT_MS);
+    if (!response.ok) {
+        throw new Error('POI search is busy. Please try again.');
+    }
+    return response.json();
+}
 
 // POST a pool request and hand back the raw candidate array.
 //
@@ -34,25 +48,14 @@ const POOL_TIMEOUT_MS = 60000;
 // empty pool rather than an error: "nothing nearby, using a random point" is
 // the better failure for a walker than no walk at all.
 async function fetchCandidatePool(path, body) {
-    const response = await fetchWithTimeout(path, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-    }, POOL_TIMEOUT_MS);
-    if (!response.ok) {
-        throw new Error('POI search is busy. Please try again.');
-    }
-    const data = await response.json();
+    const data = await postJunctionsCache(path, body);
     return Array.isArray(data.candidates) ? data.candidates : [];
 }
 
 // `types` is a catalog key, a list of keys, or the string 'all' (the "any POI"
 // option — the server expands it to the whole catalog). A scalar key is wrapped
 // here, which is why destination-resolve.js can pass poiType.key through as-is.
-//
-// `onProgress` no longer has anything to narrate — there is no client-side
-// retry left — but stays in the positional shape every caller already passes.
-async function fetchPOIsInRadius(startLat, startLng, minKm, maxKm, types, onProgress) { // eslint-disable-line no-unused-vars
+async function fetchPOIsInRadius(startLat, startLng, minKm, maxKm, types) {
     const selector = (types === 'all' || Array.isArray(types)) ? types : [types];
     const candidates = await fetchCandidatePool('/api/junctions/pois', {
         startLat, startLng, minKm, maxKm, types: selector,
@@ -63,7 +66,7 @@ async function fetchPOIsInRadius(startLat, startLng, minKm, maxKm, types, onProg
     return candidates.map(c => ({ lat: c.lat, lng: c.lng, name: c.name || null }));
 }
 
-async function fetchRoadsInRadius(startLat, startLng, minKm, maxKm, onProgress, winterMode = false) { // eslint-disable-line no-unused-vars
+async function fetchRoadsInRadius(startLat, startLng, minKm, maxKm, winterMode = false) {
     const candidates = await fetchCandidatePool('/api/junctions/roads', {
         startLat, startLng, minKm, maxKm,
         exclude: winterMode ? 'winter' : 'default',
@@ -74,6 +77,7 @@ async function fetchRoadsInRadius(startLat, startLng, minKm, maxKm, onProgress, 
 // Explicit globalThis exports so the helpers load from non-script consumers
 // (vm.runInThisContext in tests) as well as the browser's window.
 globalThis.POOL_TIMEOUT_MS = POOL_TIMEOUT_MS;
+globalThis.postJunctionsCache = postJunctionsCache;
 globalThis.fetchCandidatePool = fetchCandidatePool;
 globalThis.fetchPOIsInRadius = fetchPOIsInRadius;
 globalThis.fetchRoadsInRadius = fetchRoadsInRadius;
