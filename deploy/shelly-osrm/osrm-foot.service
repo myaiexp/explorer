@@ -14,6 +14,28 @@ Group=osrm
 ExecStart=/usr/bin/osrm-routed --algorithm mld --ip 100.69.160.113 --port 5000 /srv/osrm/finland/processed/current/finland-latest.osrm
 Restart=always
 RestartSec=10
+# Journal peak 2.5G on 2026-10-09 (cgroup peak 2.12 GiB). 4x is 10G, past
+# the 8G rung, so 16G. This box has 62 GiB. No MemoryDenyWriteExecute.
+# Listens on the tailscale address. Deny only link-local: a private-range
+# deny would reject the tailnet clients this process exists to serve.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+IPAddressDeny=169.254.0.0/16
+MemoryMax=16G
 
 [Install]
 WantedBy=multi-user.target
