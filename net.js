@@ -1,9 +1,6 @@
-// Shared fetch-with-timeout wrapper for every frontend network call.
-// AbortController + setTimeout so a stalled connection rejects promptly instead
-// of hanging on the browser's multi-minute socket default — which would leave
-// the generate spinner up with a dead button (withLoading), or freeze the sync
-// outbox with _flushing stuck true. Mirrors junctions-cache/src/overpass.ts's
-// fetchWithTimeout. No DOM. Loaded first, before any module that fetches.
+// Shared fetch-with-timeout for frontend calls; the abort timer stays armed
+// until the body is read so a stalled res.json() cannot wedge the generate
+// spinner or the sync outbox. No DOM. Loaded first, before any module that fetches.
 
 // Default per-call ceiling. OSRM (self-hosted, fast), Nominatim, and the sync
 // API all fit well under this; the junctions-cache pool endpoints pass an

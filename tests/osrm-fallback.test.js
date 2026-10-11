@@ -18,8 +18,8 @@
  * and doesn't trip, and the public throttle's pacing.
  *
  * Loading: helpers/load.js's SCRIPT_DEPS already lists osrm's real edges
- * (net, geometry, loop-quality), so loadScripts('osrm') evaluates the
- * production module in this realm, same as osrm.test.js.
+ * (net, overpass, geometry, loop-quality), so loadScripts('osrm') evaluates
+ * the production module in this realm, same as osrm.test.js.
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';

@@ -241,10 +241,6 @@ describe('WanderSync.init', () => {
         });
     });
 
-    // The user-visible consequence of that state drop: mutate() gates on
-    // _state === 'accepted', so a cancelled switch used to silently stop backing
-    // up the account the device still owns — for the rest of the session, with no
-    // UI signal. Pins the behaviour, not just the state fields.
     test('Case 4/5 confirm onto a different account drops the previous outbox', async () => {
         setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({
@@ -269,6 +265,10 @@ describe('WanderSync.init', () => {
         expect(urls.some((u) => u.includes('/mossy-fern-7/visits/local-v'))).toBe(false);
     });
 
+    // The user-visible consequence of that state drop: mutate() gates on
+    // _state === 'accepted', so a cancelled switch used to silently stop backing
+    // up the account the device still owns — for the rest of the session, with no
+    // UI signal. Pins the behaviour, not just the state fields.
     test('Case 4/5 cancel: the still-bound account keeps queueing mutations', async () => {
         setLocation('/wander/mossy-fern-7', '#t=tok-mf7');
         setLocalStorage({

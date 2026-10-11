@@ -8,8 +8,8 @@
  * buildLoop, buildJunctionLoop, buildOneWay — is fetch-stubbed here.
  *
  * Loading: helpers/load.js's SCRIPT_DEPS already lists osrm's real edges
- * (net, geometry, loop-quality), so loadScripts('osrm') evaluates the
- * production module in this realm. fetchWithTimeout is the real one; it
+ * (net, overpass, geometry, loop-quality), so loadScripts('osrm') evaluates
+ * the production module in this realm. fetchWithTimeout is the real one; it
  * calls the per-test `fetch` stub and clears its abort timer on resolve.
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';

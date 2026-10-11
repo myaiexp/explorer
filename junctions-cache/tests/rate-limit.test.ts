@@ -1,8 +1,7 @@
 // @vitest-environment node
-// Tests for junctions-cache/src/rate-limit.ts — the per-IP token-bucket limiter
-// (audit: /junctions and /logs had no app-level rate limiting). Driven through a
-// throwaway Hono app so the middleware is exercised exactly as wired in app.ts;
-// the client IP is supplied via X-Forwarded-For behind a simulated trusted proxy.
+// Tests for junctions-cache/src/rate-limit.ts, driving ipRateLimit on a throwaway
+// Hono route the way routes/junctions.ts, routes/pools.ts, and routes/meta.ts mount it.
+// The client IP is supplied via X-Forwarded-For behind a simulated trusted proxy.
 
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { Hono } from 'hono';

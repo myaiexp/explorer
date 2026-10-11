@@ -1,10 +1,13 @@
 # wander-api
 
-Cloud-backup API for Wander. Hono + Drizzle + Postgres, exposed via nginx at
-`/wander/api/*`. Production runs Node 24 (`/usr/bin/node` in
-`deploy/wander-api.service`) and listens only on `/run/wander-api.sock`, which
-`deploy/wander-api.socket` creates 0660 root:www-data so nginx is the only
-client. `pnpm dev` / `pnpm start` without systemd bind `127.0.0.1:3700`.
+Cloud-backup API for Wander. Hono + Drizzle + Postgres. Every path in this
+document is the Hono route; the public URL is that path under `/wander`
+(`POST /api/accounts` is `https://mase.fi/wander/api/accounts`). nginx
+`location /wander/api/` proxies to the socket's `/api/` prefix. `pnpm dev`
+and `pnpm start` serve the Hono path as written on `127.0.0.1:3700`.
+Production runs Node 24 (`/usr/bin/node` in `deploy/wander-api.service`) and
+listens only on `/run/wander-api.sock`, which `deploy/wander-api.socket`
+creates 0660 root:www-data so nginx is the only client.
 
 ```bash
 pnpm install
@@ -33,7 +36,7 @@ and `serve()`s. pnpm layout, DB safety, and the unit vs integration split:
 ## Auth model
 
 Each account has a high-entropy secret `token` (32 random bytes, base64url)
-issued by `POST /accounts` — the only time the plaintext is returned. The DB
+issued by `POST /api/accounts` — the only time the plaintext is returned. The DB
 stores a SHA-256 hex digest (`src/lib/token-hash.ts`); a dump of
 `accounts.token` is not a reusable credential. Auth hashes the presented bearer
 and compares constant-time (`src/middleware/auth.ts`), so pasting a stolen hash
@@ -42,13 +45,13 @@ back as `Authorization` fails.
 Every read/write requires `Authorization: Bearer <token>` (or the
 `X-Account-Token` fallback header):
 
-- `GET /:username` — four-section snapshot
-- section PUT/DELETE — visits, favorites, saved-locations, history
-- `POST /:username/import` — bulk restore
-- `DELETE /:username` — wipe the account
+- `GET /api/:username` — four-section snapshot
+- section PUT/DELETE — `/api/:username/<visits|favorites|saved-locations|history>/:id`
+- `POST /api/:username/import` — bulk restore
+- `DELETE /api/:username` — wipe the account
 
-`POST /accounts` and `GET /api/health` are unauthenticated.
-`POST /accounts` is rate-limited at 10 creations/hour/IP.
+`POST /api/accounts` and `GET /api/health` are unauthenticated.
+`POST /api/accounts` is rate-limited at 10 creations/hour/IP.
 
 The per-IP key is nginx's `X-Real-IP` only for requests that arrived on the
 proxy socket (`src/lib/client-ip.ts`). Every other connection — loopback TCP
@@ -58,8 +61,8 @@ opts a remote TCP proxy in. Each bucket map is capped at 50k keys on insert.
 
 The human-readable username is only a public handle, not a credential.
 Missing-account and wrong-token both return an identical `401`, so the
-endpoint cannot be used to enumerate usernames. `GET /:username` and
-`DELETE /:username` share an IP token-bucket of 60/min (`readRateLimit`) so
+endpoint cannot be used to enumerate usernames. `GET /api/:username` and
+`DELETE /api/:username` share an IP token-bucket of 60/min (`readRateLimit`) so
 failed-auth probing is throttled before the Postgres lookup.
 
 ## Caps
@@ -70,7 +73,7 @@ failed-auth probing is throttled before the Postgres lookup.
   `octet_length` estimator as GET). Growing PUTs 409, growing imports 400;
   shrinks and saved-location writes still go through. Finding #7756: row ×
   per-row caps alone allowed ~5 GiB of favorites JSONB.
-- Default `GET /:username` omits visit/history polylines and favorite route
+- Default `GET /api/:username` omits visit/history polylines and favorite route
   geometry older than the newest 50 (`GET_GEOMETRY_KEEP`). The DB still stores
   full rows up to `MAX_STORED_BYTES` — cloud is the archive.
 - `?geometry=full` returns the archive only when stored jsonb is under 8 MiB
@@ -79,7 +82,7 @@ failed-auth probing is throttled before the Postgres lookup.
 
 ## Archive recovery
 
-`GET /:username/archive/:section` walks an account too big for
+`GET /api/:username/archive/:section` walks an account too big for
 `?geometry=full` one bounded page at a time — the 413 stays as the
 unbounded-dump backstop. Archive recovery only; the frontend never calls it.
 
