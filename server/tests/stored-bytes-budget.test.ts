@@ -1,5 +1,6 @@
 // PUT / import per-account stored-jsonb budget (finding #7756)
 import { describe, test, expect, beforeEach } from 'vitest';
+import { Hono } from 'hono';
 import { sql, eq, and } from 'drizzle-orm';
 import {
   app,
@@ -8,11 +9,13 @@ import {
   createTestAccount,
   resetRateLimiter,
   authHeaders,
+  insertTestVisit,
   VISIT_BODY,
 } from './helpers.js';
 import { schema } from '../src/db.js';
 import { incomingJsonbBytes } from '../src/lib/snapshot-size.js';
-import { MAX_STORED_BYTES } from '../src/lib/limits.js';
+import { MAX_IMPORT_BODY_BYTES, MAX_STORED_BYTES } from '../src/lib/limits.js';
+import { importRoutes } from '../src/routes/import.js';
 
 function bytesOf(result: unknown): number {
   const row = Array.isArray(result)
@@ -126,6 +129,47 @@ describe('PUT per-account stored-bytes budget (finding #7756)', () => {
 });
 
 describe('POST /api/:username/import stored-bytes budget (finding #7756)', () => {
+  test('the import body cap cannot outgrow the stored budget (finding #12626)', () => {
+    // A live POST is rejected by bodyLimit before the handler's quota runs,
+    // so raising MAX_IMPORT_BODY_BYTES past MAX_STORED_BYTES is the change
+    // that would make that quota load-bearing. This fails when the two drift.
+    expect(MAX_IMPORT_BODY_BYTES).toBeLessThanOrEqual(MAX_STORED_BYTES);
+  });
+
+  test('rejects an import whose incoming jsonb exceeds the stored budget and keeps the seeded row (finding #12626)', async () => {
+    const { username: u, token } = await createTestAccount();
+    await insertTestVisit(u, 'survivor');
+
+    // The production cap is unreachable: bodyLimit stops a request at 5 MiB
+    // and the quota is 32 MiB. The seam lowers only this app's cap. A favorite
+    // payload is well over 1 byte, so the handler's incoming-only check has to
+    // be what returns the 400 — deleting it turns this into a 204 wipe.
+    const capped = new Hono();
+    capped.route('/api', importRoutes(db, { maxStoredBytes: 1 }));
+    const res = await capped.request(`/api/${u}/import`, {
+      method: 'POST',
+      body: JSON.stringify({
+        favorites: [{ id: 'f-1', destName: 'park' }],
+      }),
+      headers: { 'content-type': 'application/json', ...authHeaders(token) },
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: 'import exceeds maximum stored size of 1 bytes',
+    });
+
+    const visits = await db
+      .select({ id: schema.visits.id })
+      .from(schema.visits)
+      .where(eq(schema.visits.username, u));
+    expect(visits.map((r) => r.id)).toEqual(['survivor']);
+    const favorites = await db
+      .select({ id: schema.favorites.id })
+      .from(schema.favorites)
+      .where(eq(schema.favorites.username, u));
+    expect(favorites).toHaveLength(0);
+  });
+
   test('a small import still replaces an over-budget account (replace, not add)', async () => {
     const { username: u, token } = await createTestAccount();
     await fillStoredBytes(u);

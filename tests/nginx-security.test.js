@@ -56,6 +56,87 @@ function cspFrom(headers) {
     return (headers.match(/add_header\s+Content-Security-Policy\s+"([^"]+)"/) || [])[1] ?? '';
 }
 
+/**
+ * Whitespace-separated tokens of one directive.
+ *
+ * `script-src` does not match `script-src-elem`, and a token is not a
+ * substring of a longer one: `https://api.open-meteo.com/wrong` does not
+ * count as allowing `https://api.open-meteo.com` (finding #12672).
+ */
+function cspTokens(csp, directive) {
+    const body = (csp.match(new RegExp(`(?:^|;)\\s*${directive}\\s+([^;]*)`)) || [])[1] ?? '';
+    return body.split(/\s+/).filter(Boolean);
+}
+
+/**
+ * CSP host-source path match (CSP3). An empty path or `/` allows any path on
+ * that host; a path ending in `/` is a prefix; anything else matches the path
+ * exactly. Query and fragment are ignored.
+ *
+ * index.html asks for `…/leaflet@1.9.4/dist/leaflet.js`. The live allowlist
+ * token is the version directory `https://unpkg.com/leaflet@1.9.4/`, which
+ * is a prefix of that file — not the file URL itself. Exact URL equality
+ * would fail the header that actually allows the request.
+ */
+function tokenAllowsUrl(token, url) {
+    let tokenUrl;
+    let target;
+    try {
+        tokenUrl = new URL(token);
+        target = new URL(url);
+    } catch {
+        return false;
+    }
+    if (tokenUrl.protocol !== target.protocol || tokenUrl.hostname !== target.hostname) return false;
+    if (tokenUrl.port !== target.port) return false;
+    const tokenPath = tokenUrl.pathname;
+    if (tokenPath === '' || tokenPath === '/') return true;
+    if (tokenPath.endsWith('/')) return target.pathname.startsWith(tokenPath);
+    return target.pathname === tokenPath;
+}
+
+function isAbsoluteHttp(url) {
+    return /^https?:\/\//.test(url);
+}
+
+/** URLs the directive does not allow. Same-origin references need `'self'`. */
+function urlsMissingFrom(csp, directive, urls) {
+    const tokens = cspTokens(csp, directive);
+    const missing = [];
+    for (const url of urls) {
+        if (isAbsoluteHttp(url)) {
+            if (!tokens.some((token) => tokenAllowsUrl(token, url))) missing.push(url);
+        } else if (!tokens.includes("'self'")) {
+            missing.push(url);
+        }
+    }
+    return missing;
+}
+
+/** Hosts with no exact `https://<host>` token on connect-src. */
+function hostsMissingFromConnect(csp, hosts) {
+    const tokens = cspTokens(csp, 'connect-src');
+    return hosts.filter((host) => host !== 'mase.fi' && !tokens.includes(`https://${host}`));
+}
+
+/** Stylesheet hrefs and script srcs from index.html, in document order. */
+function pageResources() {
+    const html = readFileSync(resolve(ROOT, 'index.html'), 'utf8');
+    const attr = (tag, name) => (tag.match(new RegExp(`\\b${name}="([^"]*)"`)) || [])[1] ?? '';
+    const scripts = [];
+    const styles = [];
+    for (const m of html.matchAll(/<script\b[^>]*>/g)) {
+        const src = attr(m[0], 'src');
+        if (src) scripts.push(src);
+    }
+    for (const m of html.matchAll(/<link\b[^>]*>/g)) {
+        if (attr(m[0], 'rel') !== 'stylesheet') continue;
+        const href = attr(m[0], 'href');
+        if (href) styles.push(href);
+    }
+    return { scripts, styles };
+}
+
 describe('deploy/nginx-osrm-fi.conf (finding #7060)', () => {
     const conf = readDeploy('nginx-osrm-fi.conf');
 
@@ -100,13 +181,18 @@ describe('deploy/nginx-wander-headers.conf (finding #7059)', () => {
         expect(csp).not.toBe('');
         expect(csp).toMatch(/default-src 'self'/);
         expect(csp).not.toMatch(/default-src[^;]*\*/);
-        expect(csp).toMatch(/https:\/\/unpkg\.com\/leaflet@1\.9\.4\//);
-        expect(csp).toMatch(/https:\/\/\*\.tile\.openstreetmap\.org/);
-        expect(csp).toMatch(/https:\/\/server\.arcgisonline\.com/);
+        // Hosts are exact tokens on the directive that serves them. A
+        // header-wide regex stays green when the same string sits on img-src
+        // only, or when a longer token merely contains the host (finding #12672).
+        // Leaflet's script and stylesheet are read from index.html below.
+        const img = cspTokens(csp, 'img-src');
+        const connect = cspTokens(csp, 'connect-src');
+        expect(img).toContain('https://*.tile.openstreetmap.org');
+        expect(img).toContain('https://server.arcgisonline.com');
         // No overpass-api.de: POI/road pools are same-origin POSTs to
         // /api/junctions/*, already covered by connect-src 'self'.
-        expect(csp).toMatch(/https:\/\/nominatim\.openstreetmap\.org/);
-        expect(csp).toMatch(/https:\/\/api\.open-meteo\.com/);
+        expect(connect).toContain('https://nominatim.openstreetmap.org');
+        expect(connect).toContain('https://api.open-meteo.com');
     });
 });
 
@@ -248,7 +334,7 @@ describe('CSP img-src covers every tile host map-view.js can request', () => {
     // steer clients toward) blanks every tile. Both forms are allowed so the
     // switch is a one-line edit in map-view.js, not a silent outage.
     const csp = cspFrom(readDeploy('nginx-wander-headers.conf'));
-    const imgSrc = (csp.match(/img-src ([^;]*)/) || [])[1] ?? '';
+    const imgSrc = cspTokens(csp, 'img-src');
 
     function tileHosts() {
         const src = readFileSync(resolve(ROOT, 'map-view.js'), 'utf8');
@@ -265,14 +351,14 @@ describe('CSP img-src covers every tile host map-view.js can request', () => {
             const bare = host.replace(/^\{s\}\./, '');
             const needed = host === bare ? [`https://${bare}`] : [`https://*.${bare}`, `https://${bare}`];
             for (const token of needed) {
-                if (!imgSrc.split(/\s+/).includes(token)) missing.push(`${token} (${host})`);
+                if (!imgSrc.includes(token)) missing.push(`${token} (${host})`);
             }
         }
         expect(missing).toEqual([]);
     });
 
     test('the scan sees real tile layers, so it cannot pass vacuously', () => {
-        expect(imgSrc).not.toBe('');
+        expect(imgSrc.length).toBeGreaterThan(0);
         expect(tileHosts()).toContain('{s}.tile.openstreetmap.org');
         expect(tileHosts()).toContain('server.arcgisonline.com');
     });
@@ -294,27 +380,47 @@ describe('CSP connect-src covers every host the app actually fetches', () => {
     ];
 
     const csp = cspFrom(readDeploy('nginx-wander-headers.conf'));
-    const connectSrc = (csp.match(/connect-src ([^;]*)/) || [])[1] ?? '';
 
     function hostsIn(file) {
         const src = readFileSync(resolve(ROOT, file), 'utf8');
         return [...new Set([...src.matchAll(/https:\/\/([a-zA-Z0-9._-]+)/g)].map((m) => m[1]))];
     }
 
-    test('every fetched host is allowed by connect-src', () => {
+    test('every fetched host is its own connect-src token', () => {
         const missing = [];
         for (const file of FETCHING_MODULES) {
-            for (const host of hostsIn(file)) {
-                // The app's own origin is covered by 'self'.
-                if (host === 'mase.fi') continue;
-                if (!connectSrc.includes(`https://${host}`)) missing.push(`${host} (${file})`);
+            for (const host of hostsMissingFromConnect(csp, hostsIn(file))) {
+                missing.push(`${host} (${file})`);
             }
         }
         expect(missing).toEqual([]);
+        // mase.fi is skipped above because 'self' covers it. That skip is a
+        // lie if the token is gone: osrm.js fetches this origin.
+        expect(cspTokens(csp, 'connect-src')).toContain("'self'");
+    });
+
+    test('a longer host or a path-restricted token does not count (finding #12672)', () => {
+        const bad = [
+            'connect-src https://routing.openstreetmap.de.invalid',
+            'https://api.open-meteo.com/wrong',
+            'https://nominatim.openstreetmap.org.example',
+        ].join(' ');
+        expect(hostsMissingFromConnect(bad, [
+            'routing.openstreetmap.de',
+            'api.open-meteo.com',
+            'nominatim.openstreetmap.org',
+        ])).toEqual([
+            'routing.openstreetmap.de',
+            'api.open-meteo.com',
+            'nominatim.openstreetmap.org',
+        ]);
+        // The old String.includes check matches every one of these.
+        expect(bad.includes('https://routing.openstreetmap.de')).toBe(true);
+        expect(bad.includes('https://api.open-meteo.com')).toBe(true);
     });
 
     test('the scan sees real hosts, so it cannot pass vacuously', () => {
-        expect(connectSrc).not.toBe('');
+        expect(cspTokens(csp, 'connect-src').length).toBeGreaterThan(0);
         expect(hostsIn('osrm.js')).toContain('routing.openstreetmap.de');
         // Anchored on elevation.js since overpass.js stopped naming a third
         // party (its pools are same-origin now). This assertion is why the
@@ -322,5 +428,40 @@ describe('CSP connect-src covers every host the app actually fetches', () => {
         // at a module that really does fetch a cross-origin host — re-anchor
         // it, never delete it.
         expect(hostsIn('elevation.js')).toContain('api.open-meteo.com');
+    });
+});
+
+describe('CSP script-src and style-src cover every URL index.html loads (finding #12672)', () => {
+    const csp = cspFrom(readDeploy('nginx-wander-headers.conf'));
+    const { scripts, styles } = pageResources();
+
+    test('every stylesheet is allowed by style-src and every script by script-src', () => {
+        expect(urlsMissingFrom(csp, 'style-src', styles)).toEqual([]);
+        expect(urlsMissingFrom(csp, 'script-src', scripts)).toEqual([]);
+    });
+
+    test('the scan sees the leaflet files and a same-origin script, so it cannot pass vacuously', () => {
+        expect(scripts.some((s) => s.startsWith('https://unpkg.com/leaflet@'))).toBe(true);
+        expect(styles.some((s) => s.startsWith('https://unpkg.com/leaflet@'))).toBe(true);
+        expect(scripts.some((s) => !isAbsoluteHttp(s))).toBe(true);
+        expect(styles.some((s) => !isAbsoluteHttp(s))).toBe(true);
+    });
+
+    test('a directory token allows the file; the same token on img-src does not', () => {
+        const script = scripts.find((s) => s.startsWith('https://unpkg.com/leaflet@'));
+        const style = styles.find((s) => s.startsWith('https://unpkg.com/leaflet@'));
+        expect(script).toBeTruthy();
+        expect(style).toBeTruthy();
+        // Parent directory of the file, the way the live header allows the
+        // version path rather than naming leaflet.js itself.
+        const prefix = script.slice(0, script.lastIndexOf('/') + 1);
+        const allowed = `script-src ${prefix}; style-src ${prefix}`;
+        expect(urlsMissingFrom(allowed, 'script-src', [script])).toEqual([]);
+        expect(urlsMissingFrom(allowed, 'style-src', [style])).toEqual([]);
+        // A header-wide search still sees the token. script-src and style-src do not.
+        const onlyImg = `script-src 'self'; style-src 'self'; img-src ${prefix}`;
+        expect(onlyImg.includes(prefix)).toBe(true);
+        expect(urlsMissingFrom(onlyImg, 'script-src', [script])).toEqual([script]);
+        expect(urlsMissingFrom(onlyImg, 'style-src', [style])).toEqual([style]);
     });
 });

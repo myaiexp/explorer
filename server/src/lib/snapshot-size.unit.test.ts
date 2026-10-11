@@ -100,6 +100,15 @@ describe('wouldExceedStoredBudget', () => {
     expect(wouldExceedStoredBudget(0, MAX_STORED_BYTES, 0)).toBe(false);
     expect(wouldExceedStoredBudget(0, MAX_STORED_BYTES + 1, 0)).toBe(false);
   });
+
+  it('uses an explicit budget instead of MAX_STORED_BYTES (finding #12626)', () => {
+    // Import's route test passes a tiny cap because a live body cannot reach
+    // the production quota. The same incoming total is over that cap and under
+    // the real one.
+    expect(wouldExceedStoredBudget(10, 0, 0, 9)).toBe(true);
+    expect(wouldExceedStoredBudget(9, 0, 0, 9)).toBe(false);
+    expect(wouldExceedStoredBudget(10, 0, 0, MAX_STORED_BYTES)).toBe(false);
+  });
 });
 
 // firstRow accepts drizzle array results and node-postgres `{ rows }`. If the

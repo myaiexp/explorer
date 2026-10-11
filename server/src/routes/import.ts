@@ -51,7 +51,11 @@ export const importVisitRow = nullOnError(validateVisitRow);
 export const importFavoriteRow = nullOnError(validateFavoriteRow);
 export const importSavedLocationRow = nullOnError(validateSavedLocationRow);
 
-export function importRoutes(db: Db): Hono {
+export function importRoutes(db: Db, opts: { maxStoredBytes?: number } = {}): Hono {
+  // Production leaves this unset. Tests pass a tiny cap: MAX_IMPORT_BODY_BYTES
+  // is below MAX_STORED_BYTES, so a live POST cannot carry enough jsonb to
+  // trip the quota below (finding #12626).
+  const maxStoredBytes = opts.maxStoredBytes ?? MAX_STORED_BYTES;
   const app = new Hono();
 
   // Reject oversized bodies before c.req.json() buffers them (audit #1343).
@@ -152,17 +156,17 @@ export function importRoutes(db: Db): Hono {
       collected.push({ table, rows });
     }
 
-    // Per-account stored-jsonb budget (finding #7756). Import is a replace, so
-    // charge the incoming jsonb only — not current + incoming. Today's
-    // MAX_IMPORT_BODY_BYTES sits below MAX_STORED_BYTES; this check is the
-    // quota itself so a later body-cap raise cannot skip it.
+    // Per-account stored-jsonb budget (finding #7756). Import replaces every
+    // section, so charge the incoming jsonb only — the rows it deletes are not
+    // added on top. wouldExceedStoredBudget's current and old-row arguments
+    // stay 0 for that reason; the cap is the argument tests override.
     let incomingBytes = 0;
     for (const { table, rows } of collected) {
       for (const row of rows) incomingBytes += incomingJsonbBytes(table, row);
     }
-    if (wouldExceedStoredBudget(incomingBytes)) {
+    if (wouldExceedStoredBudget(incomingBytes, 0, 0, maxStoredBytes)) {
       return c.json(
-        { error: `import exceeds maximum stored size of ${MAX_STORED_BYTES} bytes` },
+        { error: `import exceeds maximum stored size of ${maxStoredBytes} bytes` },
         400,
       );
     }

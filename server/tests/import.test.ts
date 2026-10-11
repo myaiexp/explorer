@@ -344,6 +344,35 @@ describe('POST /api/:username/import', () => {
     }
   });
 
+  // A top-level array has no section keys. Without the isObject guard,
+  // `body.visits ?? []` (and the three siblings) become empty arrays and the
+  // replace transaction wipes the account. null throws in Object.keys; a JSON
+  // string's indices come back as unknown sections (finding #12622).
+  describe('non-object JSON body → 400, seeded visit survives (finding #12622)', () => {
+    const cases: Array<[string, string]> = [
+      ['array', '[]'],
+      ['null', 'null'],
+      ['string', JSON.stringify('not-an-object')],
+    ];
+    for (const [label, body] of cases) {
+      test(`${label} → 400 Body must be an object`, async () => {
+        const { username: u, token } = await createTestAccount();
+        await insertTestVisit(u, 'survivor');
+
+        const res = await app.request(`/api/${u}/import`, {
+          method: 'POST',
+          body,
+          headers: { 'content-type': 'application/json', ...authHeaders(token) },
+        });
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'Body must be an object' });
+
+        const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+        expect(rows.map((r) => r.id)).toEqual(['survivor']);
+      });
+    }
+  });
+
   // Each section value must be an array. A `null`/`undefined` value defaults to [] via `?? []`,
   // so these guards only fire for non-null, non-array values ({}, string, number, boolean).
   describe('non-array section values → 400', () => {
@@ -354,14 +383,19 @@ describe('POST /api/:username/import', () => {
       ['history', true],
     ];
     for (const [key, value] of nonArrayCases) {
-      test(`${key} as ${typeof value === 'object' ? 'object' : typeof value} → 400`, async () => {
+      test(`${key} as ${typeof value === 'object' ? 'object' : typeof value} → 400, seeded visit survives`, async () => {
         const { username: u, token } = await createTestAccount();
+        await insertTestVisit(u, 'survivor');
         const res = await app.request(`/api/${u}/import`, {
           method: 'POST',
           body: JSON.stringify({ [key]: value }),
           headers: { 'content-type': 'application/json', ...authHeaders(token) },
         });
         expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'Each section must be an array' });
+
+        const rows = await db.select().from(schema.visits).where(eq(schema.visits.username, u));
+        expect(rows.map((r) => r.id)).toEqual(['survivor']);
       });
     }
   });

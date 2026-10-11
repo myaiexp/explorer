@@ -132,11 +132,15 @@ export function incomingJsonbBytes(table: unknown, row: object): number {
 // True when a write grows stored jsonb AND the result would sit above the
 // per-account budget. Shrinks and no-ops pass even if the account is already
 // over (so a legacy fill can still be repaired). Exact equality is allowed.
+// `budget` defaults to MAX_STORED_BYTES. Import passes a smaller one in tests:
+// the body cap sits under the production quota, so a live POST cannot reach it
+// (finding #12626).
 export function wouldExceedStoredBudget(
   incomingBytes: number,
   currentBytes = 0,
   oldRowBytes = 0,
+  budget = MAX_STORED_BYTES,
 ): boolean {
   const projected = currentBytes - oldRowBytes + incomingBytes;
-  return projected > MAX_STORED_BYTES && incomingBytes > oldRowBytes;
+  return projected > budget && incomingBytes > oldRowBytes;
 }
