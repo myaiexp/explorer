@@ -15,63 +15,44 @@
 // Boundaries mocked: the Overpass fetcher (network), and log.js (so /logs can
 // assert what getRecentLogs receives and so runs don't spew structured lines).
 
-import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, test, expect, vi, beforeEach, type Mock } from 'vitest';
+import { installIsolatedLifecycle, loadServer as loadIsolatedServer, type AppFetch } from './helpers/isolated-app.js';
 
 vi.mock('../src/overpass.js', () => ({ fetchJunctionsFromOverpass: vi.fn() }));
 vi.mock('../src/log.js', () => ({ log: vi.fn(), getRecentLogs: vi.fn() }));
 
-const tmpDirs: string[] = [];
-function tmpCacheFile(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'jsrv-'));
-    tmpDirs.push(dir);
-    return join(dir, 'cache.json'); // never created — loadCache hits ENOENT and starts empty
-}
-
-type FetchFn = (req: Request) => Promise<Response>;
-
-// Fresh app instance with an isolated empty cache. resetModules + a per-test
-// CACHE_PATH give cache.ts a clean store; re-importing the mocked modules yields
-// fresh vi.fns that the freshly-imported createApp() wires to.
+// Fresh app on an isolated empty cache. The helper resets modules and points
+// CACHE_PATH at a temp file before createApp(); re-importing here yields the
+// vi.fns that app was wired to. freshness and target hold module-level state
+// that /health reads, so they come from the same graph — a file-scope import
+// would hand the test a different copy than the route sees.
 async function loadServer() {
-    vi.resetModules();
-    process.env.CACHE_PATH = tmpCacheFile();
-    const overpass = await import('../src/overpass.js');
-    const logMod = await import('../src/log.js');
-    // Both hold module-level state that /health reads, so they come from the
-    // same freshly-reset module graph the app was built from — importing them
-    // at file scope would hand the test a different copy than the route sees.
-    const freshness = await import('../src/overpass-freshness.js');
-    const target = await import('../src/overpass-target.js');
-    const { createApp } = await import('../src/app.js');
-    const app = createApp();
-    return {
-        fetch: app.fetch as FetchFn,
-        fetchMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
-        getRecentLogs: logMod.getRecentLogs as unknown as Mock,
-        freshness,
-        target,
-    };
+    return loadIsolatedServer(async () => {
+        const overpass = await import('../src/overpass.js');
+        const logMod = await import('../src/log.js');
+        const freshness = await import('../src/overpass-freshness.js');
+        const target = await import('../src/overpass-target.js');
+        return {
+            fetchMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
+            getRecentLogs: logMod.getRecentLogs as unknown as Mock,
+            freshness,
+            target,
+        };
+    }, 'jsrv-');
 }
 
-async function get(fetch: FetchFn, path: string): Promise<{ status: number; body: any }> {
+async function get(fetch: AppFetch, path: string): Promise<{ status: number; body: any }> {
     const res = await fetch(new Request('http://localhost' + path));
     return { status: res.status, body: await res.json() };
 }
 
-// Fake timers keep the cache's debounced 200ms save from ever firing (no real fs
-// write, no dangling handle); real fs reads in loadCache still resolve.
-beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); });
-afterEach(() => {
-    vi.useRealTimers();
-    delete process.env.LOGS_TOKEN; // never leak the /logs auth gate into other tests
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
+// Fake timers keep the cache's debounced save from ever firing (no real fs
+// write, no dangling handle). The lifecycle also drops LOGS_TOKEN so a /logs
+// test cannot reopen the gate for the next file.
+installIsolatedLifecycle({ fakeTimers: true });
 
 // get() with explicit request headers (e.g. an Authorization bearer for /logs).
-async function getWith(fetch: FetchFn, path: string, headers: Record<string, string>): Promise<{ status: number; body: any }> {
+async function getWith(fetch: AppFetch, path: string, headers: Record<string, string>): Promise<{ status: number; body: any }> {
     const res = await fetch(new Request('http://localhost' + path, { headers }));
     return { status: res.status, body: await res.json() };
 }
@@ -336,7 +317,7 @@ describe('GET /logs — n parsing', () => {
 
 describe('GET /logs — LOGS_TOKEN auth gate', () => {
     test('unset LOGS_TOKEN → 401 by default (closed), no log read', async () => {
-        // afterEach deletes LOGS_TOKEN, so it is unset here — the secure default.
+        // The isolated-app lifecycle deletes LOGS_TOKEN after each test, so it is unset here.
         const { fetch, getRecentLogs } = await loadServer();
         const { status, body } = await get(fetch, '/logs');
         expect(status).toBe(401);

@@ -9,26 +9,15 @@
  */
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
+import { stalledFetch } from './helpers/fetch-stub.js';
 
 loadScripts('net');
 
 afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
 });
-
-// A fetch that never responds but honours its AbortSignal — the shape of a
-// stalled connection. A bare fetch() call passes no signal, so `init.signal`
-// would be undefined and this stub would throw rather than hang.
-function stalledFetch() {
-    return vi.fn((url, init) => new Promise((_, reject) => {
-        init.signal.addEventListener('abort', () => {
-            const e = new Error('The operation was aborted.');
-            e.name = 'AbortError';
-            reject(e);
-        });
-    }));
-}
 
 describe('FETCH_TIMEOUT_MS', () => {
     test('is the 20s hang-breaker OSRM / Nominatim / sync apiFetch inherit', () => {
@@ -39,7 +28,7 @@ describe('FETCH_TIMEOUT_MS', () => {
 describe('fetchWithTimeout', () => {
     test('aborts a stalled two-arg fetch at 20s, not sooner', async () => {
         vi.useFakeTimers();
-        global.fetch = stalledFetch();
+        stalledFetch();
 
         const pending = fetchWithTimeout('https://example.test/osrm');
         let rejected = null;
@@ -72,17 +61,7 @@ describe('fetchWithTimeout', () => {
 
     test('aborts a body that stalls after the headers have arrived', async () => {
         vi.useFakeTimers();
-        global.fetch = vi.fn((url, init) => Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => new Promise((_, reject) => {
-                init.signal.addEventListener('abort', () => {
-                    const e = new Error('The operation was aborted.');
-                    e.name = 'AbortError';
-                    reject(e);
-                });
-            }),
-        }));
+        stalledFetch('body');
 
         const res = await fetchWithTimeout('https://example.test/osrm');
         const pending = res.json();

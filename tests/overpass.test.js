@@ -16,7 +16,7 @@
  */
 import { describe, test, expect, vi, beforeAll, afterEach } from 'vitest';
 import { loadScripts } from './helpers/load.js';
-import { jsonResponse, installCannedFetch, requestOf } from './helpers/fetch-stub.js';
+import { abortError, jsonResponse, installCannedFetch, requestOf, stalledFetch } from './helpers/fetch-stub.js';
 
 beforeAll(() => {
     loadScripts('overpass');
@@ -30,8 +30,6 @@ const START = { lat: 62.123456, lng: 25.654321 };
 
 // The junctions-cache error envelope: a non-2xx status with `{ error }`.
 const errStatus = (status, error = 'nope') => jsonResponse({ error }, { status });
-const abortErr = () =>
-    Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
 
 describe('fetchPOIsInRadius — request shape', () => {
     test('fetchPOIsInRadius POSTs to /api/junctions/pois with start in the body', async () => {
@@ -178,10 +176,10 @@ describe('failure vs empty', () => {
         // fetchWithTimeout aborts a stalled request; an AbortError must reach
         // the caller, not be swallowed into an empty pool (which would read as
         // "nothing nearby" and hide a dead service).
-        installCannedFetch({ throw: abortErr() });
+        installCannedFetch({ throw: abortError() });
         await expect(fetchPOIsInRadius(START.lat, START.lng, 1, 5, ['park']))
             .rejects.toThrow(/aborted/);
-        installCannedFetch({ throw: abortErr() });
+        installCannedFetch({ throw: abortError() });
         await expect(fetchRoadsInRadius(START.lat, START.lng, 1, 5))
             .rejects.toThrow(/aborted/);
     });
@@ -200,9 +198,7 @@ describe('POOL_TIMEOUT_MS', () => {
         // A cache miss that has to reach Overpass can take longer than 20s. An
         // early abort sends resolveCandidatePool down its random-annulus fallback.
         vi.useFakeTimers();
-        vi.stubGlobal('fetch', vi.fn((url, init) => new Promise((_, reject) => {
-            init.signal.addEventListener('abort', () => reject(abortErr()));
-        })));
+        stalledFetch();
 
         const pending = fetchRoadsInRadius(START.lat, START.lng, 1, 5);
         let rejected = null;

@@ -15,35 +15,23 @@
 
 import { describe, test, expect, afterEach, beforeEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
-import { jsonResponse } from './helpers/fetch-stub.js';
+import { jsonResponse, stalledFetch } from './helpers/fetch-stub.js';
 
 // SCRIPT_DEPS.elevation → net (fetchWithTimeout) + geo-utils (haversineM).
 loadScripts('elevation');
 
 afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
 });
-
-// A fetch that never responds but honours its AbortSignal — the shape of a
-// stalled connection. A bare fetch() call passes no signal, so `init.signal`
-// would be undefined and this stub would throw rather than hang.
-function stalledFetch() {
-    return vi.fn((url, init) => new Promise((_, reject) => {
-        init.signal.addEventListener('abort', () => {
-            const e = new Error('The operation was aborted.');
-            e.name = 'AbortError';
-            reject(e);
-        });
-    }));
-}
 
 const coords = [[60.1, 24.9], [60.2, 25.0], [60.3, 25.1]];
 
 describe('fetchElevations', () => {
     test('aborts a stalled request instead of hanging on the socket default', async () => {
         vi.useFakeTimers();
-        global.fetch = stalledFetch();
+        stalledFetch();
 
         const pending = fetchElevations(coords);
         // Assert the rejection before advancing, so the timer firing has a handler

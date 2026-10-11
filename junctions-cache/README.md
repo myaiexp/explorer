@@ -48,6 +48,8 @@ pnpm typecheck       # tsc over src + tests via tsconfig.test.json
 
 `pnpm build` only compiles `src/**` (the base `tsconfig.json` include), so it never type-checks the test files — `pnpm typecheck` uses `tsconfig.test.json` to close that gap and catch unsafe casts/mocks in tests.
 
+`tests/helpers/isolated-app.ts` is the bootstrap for `server.test.ts`, `post-junctions.test.ts`, `pools-routes.test.ts`, and `cache.test.ts`: temp cache dir, `vi.resetModules` + `CACHE_PATH`, env cleanup (`LOGS_TOKEN` and the cache tuning vars), and — for the HTTP suites — fake timers. `vi.mock` stays in the suite file, because the overpass mock shape differs; `loadServer(pick)` returns `fetch` plus whatever `pick` re-imports after the reset. `post(fetch, path, body, { raw, headers })` is the one POST helper. `cache.test.ts` uses `resetCacheModules` and leaves fake timers off so its persistence tests can drive the real debounce.
+
 ## Abuse controls
 
 - **Per-IP rate limits** (token bucket, keyed on the TCP socket IP; forwarding headers are used only when the peer is a trusted proxy — nginx on loopback by default, or `TRUSTED_PROXIES`): `/junctions` 60/min, `/pois` 60/min, `/roads` 60/min, `/logs` 30/min, `/health` 120/min. Each endpoint has its own bucket, so an exhausted `/pois` budget does not spend `/roads`'. Behind a trusted proxy the key is `X-Real-IP`, then the last `X-Forwarded-For` hop — never the client-supplied first hop (finding #7895). The production unit sets `TRUSTED_PROXIES=100.117.202.73` (the VPS Tailscale IPv4) so public traffic through nginx is keyed on the client, not shared as one VPS-IP bucket (finding #7754). Direct tailnet callers remain keyed on the real socket address, so a spoofed XFF cannot mint a new bucket.

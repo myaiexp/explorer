@@ -4,10 +4,8 @@
 // scheme (per-kind namespacing, re-sampling on a hit) and the shared guards
 // (query-string anchor, body cap, unknown POI key, Overpass failure, rate limit).
 
-import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, test, expect, vi, type Mock } from 'vitest';
+import { installIsolatedLifecycle, loadServer as loadIsolatedServer, post } from './helpers/isolated-app.js';
 import { POI_FILTERS } from '../src/poi-catalog.js';
 import { POOL_CAP, haversineKm } from '../src/lib/pool.js';
 import { MAX_POST_BYTES } from '../src/lib/post-body.js';
@@ -23,47 +21,17 @@ vi.mock('../src/overpass.js', async importOriginal => ({
 }));
 vi.mock('../src/log.js', () => ({ log: vi.fn(), getRecentLogs: vi.fn() }));
 
-const tmpDirs: string[] = [];
-function tmpCacheFile(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'jpool-'));
-    tmpDirs.push(dir);
-    return join(dir, 'cache.json');
-}
-
-type FetchFn = (req: Request) => Promise<Response>;
-
 async function loadServer() {
-    vi.resetModules();
-    process.env.CACHE_PATH = tmpCacheFile();
-    const overpass = await import('../src/overpass.js');
-    const { createApp } = await import('../src/app.js');
-    const app = createApp();
-    return {
-        fetch: app.fetch as FetchFn,
-        queryMock: overpass.runOverpassQuery as unknown as Mock,
-        junctionsMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
-    };
+    return loadIsolatedServer(async () => {
+        const overpass = await import('../src/overpass.js');
+        return {
+            queryMock: overpass.runOverpassQuery as unknown as Mock,
+            junctionsMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
+        };
+    }, 'jpool-');
 }
 
-async function post(
-    fetch: FetchFn,
-    path: string,
-    body: unknown,
-    raw?: string,
-): Promise<{ status: number; body: any }> {
-    const res = await fetch(new Request('http://localhost' + path, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: raw ?? JSON.stringify(body),
-    }));
-    return { status: res.status, body: await res.json() };
-}
-
-beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); });
-afterEach(() => {
-    vi.useRealTimers();
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
+installIsolatedLifecycle({ fakeTimers: true });
 
 // The Overpass query string the route built for its (single) outbound call.
 function firstQuery(queryMock: Mock): string {
@@ -285,7 +253,7 @@ describe('POST /roads', () => {
 
     test('invalid JSON → 400 and no Overpass call', async () => {
         const { fetch, queryMock } = await loadServer();
-        const { status, body } = await post(fetch, '/roads', null, '{');
+        const { status, body } = await post(fetch, '/roads', null, { raw: '{' });
         expect(status).toBe(400);
         expect(body.error).toMatch(/invalid JSON/);
         expect(queryMock).not.toHaveBeenCalled();

@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Tests for junctions-cache/src/cache.ts — in-memory cache, persistence, dedup.
-// Node env (not the repo-root jsdom default): these tests use node:fs + os.tmpdir,
-// which jsdom stubs out under vite7 (TypeError: tmpdir is not a function).
+// Node env (not the repo-root jsdom default): these tests use node:fs, which
+// jsdom stubs out under vite7. The temp dir lives in tests/helpers/isolated-app.ts.
 // Audit finding #1564: the inflight-dedup correctness property and the helpers
 // (wideBboxFromStart pole/cos handling, loadCache ENOENT/corrupt, saveCache
 // atomic write-rename, bumpAndSave debounce + re-save loop, filterToBbox) had
@@ -19,14 +19,19 @@
 //
 // cache.ts holds module-level singleton state (store/inflight/generation/saving) and
 // reads CACHE_PATH once at import, so each test gets a fresh module via
-// loadFresh() (vi.resetModules + a per-test temp CACHE_PATH).
+// loadFresh() (resetCacheModules in tests/helpers/isolated-app.ts).
 
-import { describe, test, expect, vi, afterEach, type Mock } from 'vitest';
-import { chmodSync, mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, test, expect, vi, type Mock } from 'vitest';
+import { chmodSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { wideBboxFromStart } from '../src/cache.js';
 import type { Bbox } from '../src/overpass.js';
+import {
+    installIsolatedLifecycle,
+    resetCacheModules,
+    tmpCacheFile,
+    tmpDir,
+} from './helpers/isolated-app.js';
 
 // Mock the Overpass boundary so dedup/persistence tests are deterministic and
 // never hit the network. Mock log to keep test output clean and to assert the
@@ -38,35 +43,24 @@ vi.mock('../src/log.js', () => ({ log: vi.fn(), getRecentLogs: vi.fn() }));
 
 const BBOX: Bbox = { minLat: 60, minLng: 24, maxLat: 61, maxLng: 25 };
 
-const tmpDirs: string[] = [];
-function mkTmpDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), 'jcache-'));
-    tmpDirs.push(dir);
-    return dir;
-}
-function tmpCacheFile(): string {
-    return join(mkTmpDir(), 'cache.json');
-}
-
 // Fresh module instance + isolated state, with CACHE_PATH pointed at `cachePath`.
-// cache.ts holds singleton state and reads CACHE_PATH once at import, so each
-// caller gets a clean store/inflight/generation/saving via vi.resetModules().
+// The 200ms debounce is local to this file: production default is 2000ms, and
+// the real-timer save tests would otherwise wait that long. Set before the
+// import — cache-store reads it once.
 async function loadFresh(cachePath: string) {
-    vi.resetModules();
-    process.env.CACHE_PATH = cachePath;
-    // Keep the test debounce at 200ms so real-timer save tests stay snappy;
-    // production default is 2000ms (CACHE_SAVE_DEBOUNCE_MS).
-    if (process.env.CACHE_SAVE_DEBOUNCE_MS === undefined) {
-        process.env.CACHE_SAVE_DEBOUNCE_MS = '200';
-    }
-    const overpass = await import('../src/overpass.js');
-    const logMod = await import('../src/log.js');
-    const cache = await import('../src/cache.js');
-    return {
-        cache,
-        fetchMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
-        log: logMod.log as unknown as Mock,
-    };
+    return resetCacheModules(cachePath, async () => {
+        if (process.env.CACHE_SAVE_DEBOUNCE_MS === undefined) {
+            process.env.CACHE_SAVE_DEBOUNCE_MS = '200';
+        }
+        const overpass = await import('../src/overpass.js');
+        const logMod = await import('../src/log.js');
+        const cache = await import('../src/cache.js');
+        return {
+            cache,
+            fetchMock: overpass.fetchJunctionsFromOverpass as unknown as Mock,
+            log: logMod.log as unknown as Mock,
+        };
+    });
 }
 
 // Real-timer poll (the save tests run on real timers so the 200ms debounce and
@@ -85,19 +79,11 @@ function waitFor(pred: () => boolean, timeoutMs = 3000): Promise<void> {
     });
 }
 
-afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();   // un-patch any vi.spyOn (e.g. the JSON.stringify save counter)
-    vi.clearAllMocks();
-    // The TTL / cap tests set these before loadFresh; clear them so they don't
-    // leak into other tests (the module reads them once at import).
-    delete process.env.CACHE_TTL_MS;
-    delete process.env.CACHE_EMPTY_TTL_MS;
-    delete process.env.CACHE_MAX_ENTRIES;
-    delete process.env.CACHE_MAX_POINTS;
-    delete process.env.CACHE_SAVE_DEBOUNCE_MS;
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
+// No fake timers here — persistence tests drive the real debounce, and the
+// wideBbox tests never opt in. Cleanup still drops the tuning env (read once
+// at import) and the temp dirs. restoreAllMocks un-patches vi.spyOn (the
+// JSON.stringify save counter).
+installIsolatedLifecycle();
 
 // ── wideBboxFromStart — km→degree conversion, cos(lat), pole/lng clamping ─────
 
@@ -431,7 +417,7 @@ describe('filterToBbox boundary inclusivity', () => {
 
 describe('loadCache', () => {
     test('a missing cache file leaves the store empty and logs cache_empty (no throw)', async () => {
-        const { cache, log } = await loadFresh(join(mkTmpDir(), 'does-not-exist.json'));
+        const { cache, log } = await loadFresh(join(tmpDir(), 'does-not-exist.json'));
         await cache.loadCache();
         expect(cache.cacheSize()).toBe(0);
         expect(log).toHaveBeenCalledWith('INFO', expect.objectContaining({ event: 'cache_empty' }));
@@ -859,7 +845,7 @@ describe('bumpAndSave', () => {
 
     test('a failed snapshot write is logged and does not stick, so a later miss still saves', async () => {
         vi.useRealTimers();
-        const dir = mkTmpDir();
+        const dir = tmpDir();
         const file = join(dir, 'cache.json');
         const { cache, fetchMock, log } = await loadFresh(file);
         fetchMock.mockResolvedValue([{ lat: 60.5, lng: 24.5 }]);

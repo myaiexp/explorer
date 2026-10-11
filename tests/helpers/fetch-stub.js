@@ -1,13 +1,17 @@
 // Fake-fetch primitives shared by every suite that stubs global fetch.
 /**
- * Three pieces, each with ONE contract — the suite previously carried a
- * same-named local copy of each, and the copies had drifted apart (finding
- * #9762): two `requestOf`s disagreed on whether the body came back parsed,
- * three `installFetch`es took three incompatible argument shapes.
+ * Each piece has ONE contract. The suite previously carried a same-named local
+ * copy of each, and the copies drifted (finding #9762: requestOf's body, three
+ * installFetch argument shapes; finding #12677: four stalled-fetch copies whose
+ * AbortError text had already forked).
  *
  * - jsonResponse(body, {status})  — the Response subset the app reads.
  * - installCannedFetch(reply)     — every call gets the same reply.
  * - requestOf(fetchMock)          — the single request made, as {url, init, body}.
+ * - abortError()                  — the one AbortError those stalls reject with.
+ * - stalledFetch() / stalledFetch('body')
+ *                                 — never settles until init.signal aborts.
+ *                                   'body': headers are 200, json() is what stalls.
  *
  * Suites that route by URL (osrm.test.js, osrm-fallback.test.js) keep their own
  * installer, named after what it keys on; the OSRM response/echo fixtures they
@@ -33,6 +37,42 @@ export function installCannedFetch(reply) {
     const fetchMock = vi.fn(async () => {
         if (reply.throw) throw reply.throw;
         return reply;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+}
+
+/**
+ * The AbortError a stalled fetch rejects with once its signal fires. One
+ * message: the net/elevation copies used a trailing period, overpass's
+ * abortErr dropped it (finding #12677).
+ */
+export function abortError() {
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    return error;
+}
+
+// A fetch that never settles until init.signal aborts. A call with no signal
+// rejects (init.signal throws) rather than hanging — a bare fetch() passes
+// none, and a stub that swallowed that would hide a wrapper that stopped
+// forwarding the signal. 'body' is the other hang: headers have arrived and
+// json() is what never resolves.
+function stallUntilAbort(init) {
+    return new Promise((_, reject) => {
+        init.signal.addEventListener('abort', () => reject(abortError()));
+    });
+}
+
+export function stalledFetch(stage = 'request') {
+    if (stage !== 'request' && stage !== 'body') {
+        throw new Error(`stalledFetch: unknown stage '${stage}'`);
+    }
+    const fetchMock = vi.fn((url, init) => {
+        if (stage === 'body') {
+            return Promise.resolve({ ok: true, status: 200, json: () => stallUntilAbort(init) });
+        }
+        return stallUntilAbort(init);
     });
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
