@@ -194,6 +194,16 @@ describe('deploy/nginx-wander-headers.conf (finding #7059)', () => {
         expect(connect).toContain('https://nominatim.openstreetmap.org');
         expect(connect).toContain('https://api.open-meteo.com');
     });
+
+    test('CSP does not allow the Cloudflare beacon (finding #12872)', () => {
+        // The apex sub_filter injects an unpinned beacon.min.js into every HTML
+        // response. This page holds the backup bearer, so the header must not
+        // name either beacon host — on any directive, not only script-src.
+        const csp = cspFrom(headers);
+        expect(csp).not.toMatch(/cloudflareinsights/);
+        expect(cspTokens(csp, 'script-src')).not.toContain('https://static.cloudflareinsights.com');
+        expect(cspTokens(csp, 'connect-src')).not.toContain('https://cloudflareinsights.com');
+    });
 });
 
 describe('deploy/nginx-wander.conf static block', () => {
@@ -208,6 +218,17 @@ describe('deploy/nginx-wander.conf static block', () => {
         // own copy would silently shadow the shared set, and the weaker of the
         // two would win for whoever hit that block, with no error anywhere.
         expect(directivesOf(block)).not.toMatch(/add_header/);
+    });
+
+    test('the static block replaces the inherited beacon sub_filter (finding #12872)', () => {
+        // nginx has no `sub_filter off`. A location-level sub_filter replaces
+        // the server-level list, which is what injects beacon.min.js. /explorer/
+        // rewrites into this location, so one directive covers both prefixes.
+        // The substitution itself must not be the beacon.
+        const block = directivesOf(blockFor(conf, '/wander'));
+        expect(block).toMatch(/sub_filter\s+/);
+        expect(block).not.toMatch(/cloudflareinsights/);
+        expect(block).not.toMatch(/beacon\.min\.js/);
     });
 
     // Cloud-backup links are /<prefix>/<username>#t=<token>. Dropping try_files

@@ -2,7 +2,7 @@
 // TTL, eviction, and load/save. Knows nothing about Overpass, keys or lookup
 // protocol; cache.ts layers those on top.
 
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { chmod, readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { log } from './log.js';
 
@@ -131,7 +131,14 @@ async function saveCache(): Promise<void> {
     for (const [k, v] of store) obj[k] = v;
     await mkdir(dirname(CACHE_PATH), { recursive: true });
     const tmp = CACHE_PATH + '.tmp';
-    await writeFile(tmp, JSON.stringify(obj));
+    // Owner-only. The keys are walker starts at 3 decimal degrees (~111 m).
+    // writeFile's mode applies only when the tmp file is created, so a leftover
+    // tmp from a crash keeps whatever mode it already had; chmod is not masked
+    // by umask either, which is what makes this 0600 when the process umask is
+    // the usual 0022. The unit's UMask=0077 covers every other file this
+    // process creates (finding #12871).
+    await writeFile(tmp, JSON.stringify(obj), { mode: 0o600 });
+    await chmod(tmp, 0o600);
     await rename(tmp, CACHE_PATH);
     savedGeneration = gen;
 }

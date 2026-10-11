@@ -30,9 +30,11 @@ else
 fi
 
 # 2. Persistent cache out of /home/shelly. Copy the old snapshot once so a
-#    reinstall does not start cold.
+#    reinstall does not start cold. The existence check is root's: after
+#    chmod 0750 the installing user cannot traverse the directory, and an
+#    unprivileged `-f` then looks like "no snapshot" and would overwrite it.
 sudo mkdir -p "$STATE_DIR"
-if [[ -f $OLD_CACHE && ! -f $STATE_DIR/cache.json ]]; then
+if [[ -f $OLD_CACHE ]] && ! sudo test -f "$STATE_DIR/cache.json"; then
     log "migrating cache snapshot from $OLD_CACHE"
     sudo cp -a "$OLD_CACHE" "$STATE_DIR/cache.json"
 fi
@@ -62,4 +64,14 @@ if curl -fsS "http://$TAILSCALE_IP:5001/health" | grep -q '"ok":true'; then
 else
     log "ERROR — smoke test failed; check 'journalctl -u wander-junctions.service'" >&2
     exit 1
+fi
+
+# 6. Lock a snapshot that already exists. StateDirectoryMode=0750 fixes the
+#    directory on the start above. A file created earlier stays at the mode it
+#    was written with (0644 under the old umask) until something rewrites it,
+#    and a startup prune's debounced save may not have landed yet. sudo test,
+#    because the installing user cannot see into the 0750 directory. The keys
+#    are walker starts at ~111 m (finding #12871).
+if sudo test -f "$STATE_DIR/cache.json"; then
+    sudo chmod 0600 "$STATE_DIR/cache.json"
 fi

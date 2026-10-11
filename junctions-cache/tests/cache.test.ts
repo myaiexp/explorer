@@ -22,7 +22,7 @@
 // loadFresh() (resetCacheModules in tests/helpers/isolated-app.ts).
 
 import { describe, test, expect, vi, type Mock } from 'vitest';
-import { chmodSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { chmodSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { wideBboxFromStart } from '../src/cache.js';
 import type { Bbox } from '../src/overpass.js';
@@ -528,6 +528,42 @@ describe('saveCache (driven via a getJunctions miss)', () => {
         expect(fresh.cache.cacheSize()).toBe(1);
         const r = await fresh.cache.getJunctions(BBOX, 'default'); // 'hit' ⇒ served from the loaded file, not re-fetched
         expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+    });
+
+    test('the snapshot is owner-read/write only even when umask would allow 0644 (finding #12871)', async () => {
+        vi.useRealTimers();
+        const file = tmpCacheFile();
+        // The suite default is already 0022. Pin it: a process umask of 0077
+        // would hide a writeFile that forgot the mode.
+        const prev = process.umask(0o022);
+        try {
+            const { cache, fetchMock } = await loadFresh(file);
+            fetchMock.mockResolvedValue([{ lat: 60.5, lng: 24.5 }]);
+            await cache.getJunctions(BBOX, 'default');
+            await waitFor(() => existsSync(file));
+            expect(statSync(file).mode & 0o777).toBe(0o600);
+        } finally {
+            process.umask(prev);
+        }
+    });
+
+    test('a leftover world-readable tmp is tightened before it becomes the snapshot (finding #12871)', async () => {
+        vi.useRealTimers();
+        const file = tmpCacheFile();
+        // writeFile's mode is applied only when the file is created. A tmp left
+        // behind by a crash keeps its old mode unless saveCache chmods it.
+        writeFileSync(file + '.tmp', '{}', { mode: 0o644 });
+        const prev = process.umask(0o022);
+        try {
+            const { cache, fetchMock } = await loadFresh(file);
+            fetchMock.mockResolvedValue([{ lat: 60.5, lng: 24.5 }]);
+            await cache.getJunctions(BBOX, 'default');
+            await waitFor(() => existsSync(file));
+            expect(existsSync(file + '.tmp')).toBe(false);
+            expect(statSync(file).mode & 0o777).toBe(0o600);
+        } finally {
+            process.umask(prev);
+        }
     });
 });
 

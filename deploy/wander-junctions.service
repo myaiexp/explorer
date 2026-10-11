@@ -42,7 +42,14 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=tmpfs
 BindReadOnlyPaths=/home/shelly/Projects/wander/junctions-cache
+# The snapshot's keys are walker starts at ~111 m (START_QUANTIZE_DECIMALS).
+# systemd's defaults are StateDirectoryMode=0755 and UMask=0022, and a start
+# resets the directory to that mode — the installer's chmod does not survive
+# without StateDirectoryMode=. cache-store.ts also writes the file as 0600.
+# No other unit reads the file (finding #12871).
 StateDirectory=wander-junctions
+StateDirectoryMode=0750
+UMask=0077
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

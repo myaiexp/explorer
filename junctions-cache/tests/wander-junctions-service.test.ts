@@ -23,6 +23,14 @@ describe('deploy/wander-junctions.service sandbox (finding #7755)', () => {
         expect(unit).not.toMatch(/CACHE_PATH=\/home\/shelly\//);
     });
 
+    test('keeps the start-anchored snapshot unreadable by other local uids (finding #12871)', () => {
+        // systemd's defaults are StateDirectoryMode=0755 and UMask=0022, and a
+        // start resets the directory to that mode — the installer's chmod does
+        // not survive. The keys are walker starts at ~111 m.
+        expect(unit).toMatch(/^StateDirectoryMode=0750$/m);
+        expect(unit).toMatch(/^UMask=0077$/m);
+    });
+
     test('hides /home except the junctions-cache tree and enables the hardening block', () => {
         expect(unit).toMatch(/^ProtectSystem=strict$/m);
         expect(unit).toMatch(/^ProtectHome=tmpfs$/m);
@@ -47,5 +55,26 @@ describe('deploy/wander-junctions.service TRUSTED_PROXIES (finding #7754)', () =
         expect(line).toBeDefined();
         expect(line).not.toMatch(/127\.0\.0\.1/);
         expect(line).not.toMatch(/::1/);
+    });
+});
+
+describe('deploy/install-wander-junctions.sh snapshot mode (finding #12871)', () => {
+    const script = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '../../deploy/install-wander-junctions.sh'),
+        'utf8',
+    );
+
+    test('locks the directory and the existing snapshot, not only the directory', () => {
+        // StateDirectoryMode fixes the directory on the next start. A snapshot
+        // already on disk keeps the mode it was created with until rewritten,
+        // so the installer has to chmod the file too. Both existence checks
+        // are root's: once the directory is 0750 the installing user cannot
+        // stat the file, so a plain `-f` skips the chmod and can also make
+        // the migration copy look like the snapshot is missing.
+        expect(script).toMatch(/chmod 0750 "\$STATE_DIR"/);
+        expect(script).toMatch(/sudo test -f "\$STATE_DIR\/cache\.json"/);
+        expect(script).toMatch(/chmod 0600 "\$STATE_DIR\/cache\.json"/);
+        const privileged = script.match(/sudo test -f "\$STATE_DIR\/cache\.json"/g) ?? [];
+        expect(privileged).toHaveLength(2);
     });
 });
