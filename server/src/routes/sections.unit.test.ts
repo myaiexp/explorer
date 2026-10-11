@@ -587,6 +587,32 @@ describe('string-length caps', () => {
     expect((await res.json()).error).toMatch(/label exceeds maximum length/);
   });
 
+  it('rejects an over-length saved-location value with 400', async () => {
+    // Finding #12623 — the label cap above was pinned; value shares
+    // MAX_LABEL_LEN. The 1 MiB body cap still accepts 501 characters.
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request(
+      '/alice/saved-locations/s1',
+      jsonReq('PUT', { label: 'ok', value: 'x'.repeat(MAX_LABEL_LEN + 1) })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toEqual(`value exceeds maximum length of ${MAX_LABEL_LEN}`);
+    expect(ops).toHaveLength(0);
+  });
+
+  it('accepts a saved-location value of exactly MAX_LABEL_LEN', async () => {
+    const { db, ops } = makeFakeDb({ userExists: true });
+    const app = sectionsRoutes(db);
+    const res = await app.request(
+      '/alice/saved-locations/s1',
+      jsonReq('PUT', { label: 'ok', value: 'x'.repeat(MAX_LABEL_LEN) })
+    );
+    expect(res.status).toBe(204);
+    expect(ops).toHaveLength(1);
+    expect(ops[0].row?.value).toHaveLength(MAX_LABEL_LEN);
+  });
+
   it('rejects an over-length tripMode with 400', async () => {
     // Finding #7590 — startLabel/poiCategory/destName were pinned; tripMode
     // shares tooLong(MAX_LABEL_LEN) and would 400 in production with no pin.

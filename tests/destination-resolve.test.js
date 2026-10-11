@@ -515,9 +515,6 @@ describe('buildRouteForDestination', () => {
             candidatePool: [dest], dest, destName: 'Dest', existingDests: [],
             maxKm: 5, tripMode: 'round', spread: {}, winterMode: false,
             onProgress: vi.fn(), degraded: true });
-        // buildJunctionLoop is the only path that fetches /api/junctions/
-        // (osrm.test.js pins that); asserting it's never called is the same
-        // as asserting no junctions fetch happened.
         expect(globalThis.buildJunctionLoop).not.toHaveBeenCalled();
         const opts = globalThis.buildRouteForMode.mock.calls[0][4];
         expect(opts).toEqual(expect.objectContaining({ tripMode: 'round', degraded: true }));

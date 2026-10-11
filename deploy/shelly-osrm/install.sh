@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
 # Bootstrap installer for shelly: OSRM-foot service for Finland.
-# Run via:  ssh shelly 'bash -s' < deploy/shelly-osrm/install.sh
+#
+# Run via:
+#   scp -r deploy/shelly-osrm shelly:/tmp/ && ssh shelly 'bash /tmp/shelly-osrm/install.sh'
+#
+# It needs osrm-foot.service sitting beside it, so it cannot be piped in
+# over `bash -s` — stdin leaves BASH_SOURCE unset and the unit unreachable.
+# Copying the directory keeps the unit single-sourced from the repo.
+#
 # Idempotent: safe to rerun. Pass --update-data to force a fresh extract.
 set -euo pipefail
+
+# Refuse before yay or the Geofabrik download. Under `bash -s`, BASH_SOURCE is
+# unset and ${BASH_SOURCE[0]} inside $(...) does not abort (set -e is ignored
+# for that assignment), so REPO_DIR would be the login cwd and the unit copy
+# would fail only after the preprocess.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+if [[ ! -f "$REPO_DIR/osrm-foot.service" ]]; then
+    echo "[install] ERROR: osrm-foot.service not found next to this script." >&2
+    echo "[install] Copy the whole directory over; do not pipe this script into bash." >&2
+    exit 1
+fi
 
 UPDATE_DATA=0
 for arg in "$@"; do
@@ -12,7 +30,6 @@ for arg in "$@"; do
     esac
 done
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_ROOT=/srv/osrm/finland
 PBF_DIR=$DATA_ROOT/pbf
 PROCESSED_DIR=$DATA_ROOT/processed

@@ -75,7 +75,9 @@ async function fetchRoadsInRadius(startLat, startLng, minKm, maxKm, winterMode =
 }
 
 // Explicit globalThis exports so the helpers load from non-script consumers
-// (vm.runInThisContext in tests) as well as the browser's window.
+// (vm.compileFunction in tests/helpers/load.js) as well as the browser's
+// window. That evaluator is function-scoped and does not hoist these
+// declarations onto globalThis.
 globalThis.POOL_TIMEOUT_MS = POOL_TIMEOUT_MS;
 globalThis.postJunctionsCache = postJunctionsCache;
 globalThis.fetchCandidatePool = fetchCandidatePool;

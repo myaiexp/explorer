@@ -53,7 +53,7 @@ function computeSpreadParams(sliderValue) {
 
 // Browser script tags hoist top-level function declarations to window; explicit
 // globalThis assignment also makes these loadable from non-script consumers
-// (e.g. vm.runInThisContext in tests).
+// (vm.compileFunction in tests/helpers/load.js).
 globalThis.bearingRad = bearingRad;
 globalThis.envelopeOffsetPoint = envelopeOffsetPoint;
 globalThis.generateRandomPointAnnulus = generateRandomPointAnnulus;

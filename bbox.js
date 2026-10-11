@@ -13,6 +13,6 @@ function inFinland(lat, lng) {
 
 // Browser script tags hoist top-level function declarations to window
 // automatically. Explicit globalThis assignment makes the helpers loadable
-// from non-script consumers (e.g. vm.runInThisContext in tests).
+// from non-script consumers (vm.compileFunction in tests/helpers/load.js).
 globalThis.FINLAND_BBOX = FINLAND_BBOX;
 globalThis.inFinland = inFinland;

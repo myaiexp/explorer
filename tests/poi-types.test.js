@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 /**
- * Tests for poi-types.js — the Overpass catalog behind the destination-type
- * dropdown, plus the one-time populateLocationTypeSelect IIFE (finding #7584).
+ * Tests for poi-types.js — the Overpass filters that describe the
+ * destination-type dropdown, plus the one-time populateLocationTypeSelect
+ * IIFE (finding #7584).
  *
- * destination-resolve.test.js installs a two-entry fake POI_TYPES, so a typo
- * in a production filter (e.g. amenity~pub|bar) or a dropped catalog key never
- * failed CI — Overpass returns empty and generate silently falls back to
- * random points. This file loads the real catalog.
+ * Those filter strings are the dropdown's description of each catalog key.
+ * poi-catalog-parity.test.js locksteps them with junctions-cache's
+ * poi-catalog.ts, which is what queries Overpass. any_poi does not union
+ * them: destination-resolve sends the selector 'all' and the service expands
+ * the catalog (destination-resolve.test.js).
  */
 import { describe, test, expect, beforeEach } from 'vitest';
 import { loadScripts } from './helpers/load.js';
@@ -16,8 +18,8 @@ beforeEach(() => {
     loadScripts('poi-types');
 });
 
-// Production snapshot: key → Overpass tag filter, in catalog order. any_poi
-// unions these in this order (destination-resolve maps POI_TYPES.map(p => p.filter)).
+// Production snapshot: key → Overpass tag filter, in catalog order. The
+// dropdown's description of each key, not the any_poi query.
 const FILTERS = {
     park: '["leisure"="park"]',
     nature_reserve: '["leisure"="nature_reserve"]',
@@ -42,7 +44,7 @@ describe('POI_TYPES catalog', () => {
         expect(POI_TYPES.map((p) => p.key)).toEqual(Object.keys(FILTERS));
     });
 
-    test('any_poi union is every catalog filter, in catalog order', () => {
+    test('flat catalog order is every category key, and every filter is a non-empty string', () => {
         expect(POI_TYPES.map((p) => p.filter)).toEqual(Object.values(FILTERS));
         expect(POI_TYPES.map((p) => p.key))
             .toEqual(POI_CATEGORIES.flatMap((c) => c.pois.map((p) => p.key)));
