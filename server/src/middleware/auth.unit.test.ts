@@ -53,6 +53,21 @@ describe('accountAuth hashes the presented bearer before comparing', () => {
     expect(res.status).toBe(401);
   });
 
+  // hashToken() is always 64 hex chars. A stored value of any other length is
+  // the comparison timingSafeEqual refuses to run — it throws — so this must
+  // be the same 401 as a wrong token, not an unhandled exception.
+  it.each(['abc', 'a'.repeat(63)])(
+    'rejects a stored token whose length is not a digest (%j)',
+    async (stored) => {
+      const app = appWithStored(stored);
+      const res = await app.request('/alice', {
+        headers: { Authorization: 'Bearer plaintext-not-the-digest' },
+      });
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: 'Unauthorized' });
+    },
+  );
+
   it('returns the same 401 for a missing account as for a wrong token', async () => {
     const app = appWithStored(null);
     const res = await app.request('/nobody', {

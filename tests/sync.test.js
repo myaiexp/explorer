@@ -616,4 +616,27 @@ describe('legacy /explorer URLs', () => {
             expect(window.WanderSync.getState().state).toBe('anonymous');
         }
     );
+
+    // The token is in the hash on purpose. A valid username with a token prompts
+    // to adopt; these segments fail USERNAME_RE and must not. Dropping the
+    // .test() in parseUrlAccount would make every one of them a Case 3 adopt.
+    test.each([
+        '/wander/ADMIN',
+        '/wander/rugged-pine-100',
+        '/explorer/..',
+    ])(
+        'a segment that fails USERNAME_RE is not an account link (%s)',
+        async (path) => {
+            setLocation(path, '#t=tok');
+            setLocalStorage({});
+            const confirmSpy = vi.spyOn(window, 'confirm');
+            const fetchSpy = vi.fn();
+            global.fetch = fetchSpy;
+            loadSync();
+            await window.WanderSync.init();
+            expect(confirmSpy).not.toHaveBeenCalled();
+            expect(fetchSpy).not.toHaveBeenCalled();
+            expect(window.WanderSync.getState().state).toBe('anonymous');
+        },
+    );
 });

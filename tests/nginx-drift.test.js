@@ -19,8 +19,8 @@
  *   `# deploy-into: <path>`  embedded in a bigger file      → contiguous containment
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { execDriftScript } from './helpers/drift-exec.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -78,22 +78,15 @@ describe('check-nginx-drift.sh', () => {
 
     // The script's two seams: which tree to scan, and a prefix in front of every
     // declared install path so a test can drive a fixture root. Both default to
-    // production (deploy/ and no prefix).
+    // production (deploy/ and no prefix). The spawn is bounded — ssh's
+    // ConnectTimeout does not cover DNS, and a blocking child never returns to
+    // vitest's timer (tests/helpers/drift-exec.js).
     function run() {
-        try {
-            const stdout = execFileSync('bash', [SCRIPT], {
-                env: {
-                    ...process.env,
-                    NGINX_SRC_DIR: join(dir, 'src'),
-                    NGINX_ROOT_PREFIX: join(dir, 'live'),
-                },
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'pipe'],
-            });
-            return { code: 0, out: stdout };
-        } catch (e) {
-            return { code: e.status, out: (e.stdout ?? '') + (e.stderr ?? '') };
-        }
+        return execDriftScript(SCRIPT, {
+            ...process.env,
+            NGINX_SRC_DIR: join(dir, 'src'),
+            NGINX_ROOT_PREFIX: join(dir, 'live'),
+        });
     }
 
     function src(name, body) {

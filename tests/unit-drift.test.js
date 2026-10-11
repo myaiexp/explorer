@@ -18,8 +18,8 @@
  *    through the script's two seams against a fixture tree.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { execDriftScript } from './helpers/drift-exec.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -69,22 +69,15 @@ describe('check-unit-drift.sh', () => {
     afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
     // The script's two seams: which tree to scan, and where a `local` unit is
-    // installed. Both default to the production paths.
+    // installed. Both default to the production paths. The spawn is bounded —
+    // ssh's ConnectTimeout does not cover DNS, and a blocking child never
+    // returns to vitest's timer (tests/helpers/drift-exec.js).
     function run() {
-        try {
-            const stdout = execFileSync('bash', [SCRIPT], {
-                env: {
-                    ...process.env,
-                    UNIT_SRC_DIR: join(dir, 'src'),
-                    SYSTEMD_UNIT_DIR: join(dir, 'installed'),
-                },
-                encoding: 'utf8',
-                stdio: ['ignore', 'pipe', 'pipe'],
-            });
-            return { code: 0, out: stdout };
-        } catch (e) {
-            return { code: e.status, out: (e.stdout ?? '') + (e.stderr ?? '') };
-        }
+        return execDriftScript(SCRIPT, {
+            ...process.env,
+            UNIT_SRC_DIR: join(dir, 'src'),
+            SYSTEMD_UNIT_DIR: join(dir, 'installed'),
+        });
     }
 
     function unit(name, body, { installed = null } = {}) {
