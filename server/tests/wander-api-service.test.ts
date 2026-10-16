@@ -54,4 +54,8 @@ describe('deploy/wander-api.socket — nginx is the only client (finding #10094)
   test('the sandbox still permits AF_UNIX', () => {
     expect(unit).toMatch(/^RestrictAddressFamilies=.*\bAF_UNIX\b/m);
   });
+
+  test('denies the link-local metadata range, and only that', () => {
+    expect(unit).toMatch(/^IPAddressDeny=169\.254\.0\.0\/16$/m);
+  });
 });

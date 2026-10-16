@@ -47,6 +47,10 @@ LockPersonality=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=
 MemoryMax=512M
+# Link-local only (the cloud-metadata range; house default for every unit).
+# Keep it narrow: a wider private-range deny stays green against local
+# Postgres while blackholing real calls.
+IPAddressDeny=169.254.0.0/16
 
 [Install]
 WantedBy=multi-user.target
