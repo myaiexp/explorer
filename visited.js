@@ -1,10 +1,11 @@
 // Visited walks — mark/undo the displayed route as visited, the visited counter,
 // and the map overlay's visibility toggle. Loaded after storage.js (getVisits/
-// VISITS_KEY), sync-helpers.js, session.js (snapshotSession, isMeasuredWalk),
-// visit-shape.js (visitRenderParts), map-view.js (renderVisitedLayer/
-// visitedLayerGroup), session-state.js and result-panel.js
-// (syncMarkVisitedBtn);
-// resolved as globals at call time.
+// VISITS_KEY), sync-helpers.js, session.js (snapshotSession, isMeasuredWalk)
+// and visit-shape.js (visitRenderParts).
+//
+// renderVisitedLayer and visitedLayerGroup live in map-view.js, and
+// syncMarkVisitedBtn lives in the result panel. Both are resolved as globals
+// at call time; the visited tests fake them, so they are not load deps.
 
 // Overlay visibility is UI state owned here; the overlay itself (renderVisitedLayer,
 // visitedLayerGroup) lives in map-view.js.
