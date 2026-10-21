@@ -20,7 +20,7 @@
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
-import { execDriftScript } from './helpers/drift-exec.js';
+import { execDriftScript, installFailingSsh } from './helpers/drift-exec.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -81,11 +81,12 @@ describe('check-nginx-drift.sh', () => {
     // production (deploy/ and no prefix). The spawn is bounded — ssh's
     // ConnectTimeout does not cover DNS, and a blocking child never returns to
     // vitest's timer (tests/helpers/drift-exec.js).
-    function run() {
+    function run(extraEnv = {}) {
         return execDriftScript(SCRIPT, {
             ...process.env,
             NGINX_SRC_DIR: join(dir, 'src'),
             NGINX_ROOT_PREFIX: join(dir, 'live'),
+            ...extraEnv,
         });
     }
 
@@ -276,7 +277,9 @@ describe('check-nginx-drift.sh', () => {
 
     test('an unreachable host warns without failing — an ssh outage is not drift', () => {
         src('a.conf', `# deploy-host: no-such-host-for-wander\n# deploy-as: /etc/nginx/own.conf\n${BLOCK}`);
-        const { code, out } = run();
+        const stub = installFailingSsh(dir);
+        const { code, out } = run({ PATH: `${stub.bin}:${process.env.PATH}` });
+        expect(readFileSync(stub.log, 'utf8')).toContain('no-such-host-for-wander');
         expect(out).toMatch(/a\.conf.*unreachable/i);
         expect(code).toBe(0);
     });

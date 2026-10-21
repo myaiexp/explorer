@@ -2,10 +2,12 @@
 /**
  * Pins tests/helpers/drift-exec.js.
  *
- * The deploy-drift suites really ssh. ConnectTimeout does not cover DNS, and a
- * blocking spawn never returns to vitest's timer, so the worker stays pinned
- * unless the spawn itself is killed — including the ssh inside $(...), which
- * SIGTERM to bash alone leaves running.
+ * execDriftScript bounds a drift-script spawn. ssh's ConnectTimeout does not
+ * cover getaddrinfo, and a blocking spawn never returns to vitest's timer, so
+ * the worker stays pinned unless the spawn itself is killed — including the
+ * ssh inside $(...), which SIGTERM to bash alone leaves running. The
+ * unreachable-host cases do not take that path: installFailingSsh is first
+ * on their PATH.
  */
 import { test, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -13,7 +15,7 @@ import { copyFileSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from '
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execDriftScript, DRIFT_SUBPROCESS_TIMEOUT_MS } from './drift-exec.js';
+import { execDriftScript, DRIFT_SUBPROCESS_TIMEOUT_MS, installFailingSsh } from './drift-exec.js';
 
 // TASK_COMM_LEN is 16 including the trailing NUL, so the marker is 15 chars
 // and pgrep -x matches this copy of sleep rather than any other sleeper.
@@ -41,6 +43,29 @@ afterEach(() => {
 
 test('the bound outlasts ssh ConnectTimeout and is finite', () => {
     expect(DRIFT_SUBPROCESS_TIMEOUT_MS).toBe(15_000);
+});
+
+// The unreachable-host cases must not wait on getaddrinfo. ConnectTimeout
+// starts after the lookup, so a slow negative answer blows vitest's 5s and
+// the test fails even though ssh did return.
+test('installFailingSsh exits 255 and records the host, without a lookup', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'drift-ssh-stub-'));
+    try {
+        const { bin, log } = installFailingSsh(dir);
+        let status = null;
+        try {
+            execFileSync(join(bin, 'ssh'), ['-n', 'no-such-host-for-wander', 'true'], {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+        } catch (e) {
+            status = e.status;
+        }
+        expect(status).toBe(255);
+        expect(readFileSync(log, 'utf8')).toContain('no-such-host-for-wander');
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('a stuck command-substitution child is signalled and not orphaned', () => {
