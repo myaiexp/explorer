@@ -70,9 +70,9 @@
     // visits and history are the trip shape visit-shape.js owns, so a synced-down
     // row goes through the same gate an uploaded backup file does (importVisits).
     // Without it, rows written before server-side validation existed (see
-    // server/src/lib/validate-rows.ts) land raw in localStorage, where
-    // renderVisitedLayer skips them on every render while updateVisitedCounter
-    // still counts them (#2735).
+    // server/src/lib/validate-rows.ts) land raw in localStorage. The map and the
+    // visited counter both skip a row visitRenderParts rejects, but other readers
+    // (novelty, the history list) still see whatever is stored (#2735).
     //
     // A row normalizeVisit rejects is dropped rather than stored: it has no
     // usable start/dest/distance, so nothing can ever draw it, and the cloud copy

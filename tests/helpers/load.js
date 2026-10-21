@@ -66,6 +66,9 @@ export const SCRIPT_DEPS = {
     // Overpass queries, so overpass.js no longer touches geo-utils.
     'overpass':     ['net'],
     'result-panel': ['session-state'],
+    // The visited counter counts rows visitRenderParts accepts. Other visited.js
+    // collaborators are faked by its tests; this one is the real predicate.
+    'visited':      ['visit-shape'],
     // geometry + result-panel are pure/real collaborators named in the header;
     // map-view / session / elevation / favorites are faked by route-view tests.
     // map-view.test.js loads map-view.js for real against a Leaflet stub, but

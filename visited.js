@@ -1,8 +1,9 @@
 // Visited walks — mark/undo the displayed route as visited, the visited counter,
 // and the map overlay's visibility toggle. Loaded after storage.js (getVisits/
 // VISITS_KEY), sync-helpers.js, session.js (snapshotSession, isMeasuredWalk),
-// map-view.js (renderVisitedLayer/visitedLayerGroup), session-state.js and
-// result-panel.js (syncMarkVisitedBtn);
+// visit-shape.js (visitRenderParts), map-view.js (renderVisitedLayer/
+// visitedLayerGroup), session-state.js and result-panel.js
+// (syncMarkVisitedBtn);
 // resolved as globals at call time.
 
 // Overlay visibility is UI state owned here; the overlay itself (renderVisitedLayer,
@@ -70,7 +71,9 @@ function toggleVisitedLayer() {
 }
 
 function updateVisitedCounter() {
-    const count = getVisits().length;
+    // Same rows the overlay draws. A legacy row visitRenderParts rejects is
+    // still stored, but it is not a place on the map, so it is not a count.
+    const count = getVisits().filter((v) => visitRenderParts(v)).length;
     document.getElementById('visitedCount').textContent = `${count} visited`;
 
     const exploredEl = document.getElementById('exploredCount');
