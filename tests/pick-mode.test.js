@@ -149,8 +149,10 @@ describe('handlePickClick — rejectIfBuilding before exitPickMode', () => {
 
         expect(pickBtn().textContent).toBe('Pick on map');
         expect(clickHandlers).toHaveLength(0);
-        expect(sessionClears).toBe(1);
-        expect(panelResets).toBe(1);
+        // The previous route stays up until buildAndDisplay has a replacement.
+        // Clearing here used to blank the session before a build that can throw.
+        expect(sessionClears).toBe(0);
+        expect(panelResets).toBe(0);
         expect(resolveStart).toHaveBeenCalledOnce();
         expect(buildAndDisplay).toHaveBeenCalledOnce();
         expect(buildAndDisplay.mock.calls[0][0]).toBe(62.24);
@@ -172,8 +174,21 @@ describe('handlePickClick — rejectIfBuilding before exitPickMode', () => {
 
         expect(errors).toEqual(['Could not geocode that location.']);
         expect(buildAndDisplay).not.toHaveBeenCalled();
+        expect(sessionClears).toBe(0);
+        expect(panelResets).toBe(0);
         // Exit still happens first — the click consumed the armed mode.
         expect(pickBtn().textContent).toBe('Pick on map');
         expect(clickHandlers).toHaveLength(0);
+    });
+
+    test('a throwing build does not clear the session or the panel', async () => {
+        togglePickMode();
+        buildAndDisplay.mockRejectedValue(new Error('osrm down'));
+
+        await handlePickClick({ latlng: { lat: 62.3, lng: 25.8 } });
+
+        expect(errors).toEqual(['osrm down']);
+        expect(sessionClears).toBe(0);
+        expect(panelResets).toBe(0);
     });
 });
