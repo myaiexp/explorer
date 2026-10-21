@@ -352,6 +352,24 @@ describe('pipeline wiring', () => {
     expect(errors).toEqual(['geocode failed']);
     expect(displayRouteCalls).toHaveLength(0);
     expect(saveToHistoryCalls).toHaveLength(0);
+    // The previous route stays. Clearing before resolveStart left a null
+    // session and a reset panel over whatever was still on the map.
+    expect(sessionClears).toBe(0);
+    expect(panelResets).toBe(0);
+    expect(clearMapCalls).toBe(0);
+  });
+
+  test('a throw during the build leaves the previous session and map in place', async () => {
+    buildRouteForDestination.mockRejectedValue(new Error('osrm down'));
+
+    await generate();
+
+    expect(errors).toEqual(['osrm down']);
+    expect(displayRouteCalls).toHaveLength(0);
+    expect(saveToHistoryCalls).toHaveLength(0);
+    expect(clearMapCalls).toBe(0);
+    expect(sessionClears).toBe(0);
+    expect(panelResets).toBe(0);
   });
 });
 

@@ -1,7 +1,9 @@
 // Pick-on-map mode — click the map to route to a destination of your choosing.
-// Loaded after map-view.js (map), loading.js, location-input.js (resolveStart),
-// route-restore.js (buildAndDisplay) and result-panel.js (resetResultPanel);
-// resolved as globals at call time.
+// Loaded after map-view.js (map), loading.js, location-input.js (resolveStart)
+// and route-restore.js (buildAndDisplay); resolved as globals at call time.
+// buildAndDisplay clears the map only once the replacement is in hand. Blanking
+// the session here first would leave a throw with the panel describing a route
+// the map still showed and the session no longer held.
 
 let pickMode = false;
 
@@ -18,8 +20,6 @@ async function handlePickClick(e) {
     exitPickMode();
     const destLat = e.latlng.lat;
     const destLng = e.latlng.lng;
-    setCurrentSession(null);
-    resetResultPanel();
 
     await withLoading(async (onProgress) => {
         try {

@@ -502,9 +502,9 @@ describe('isLocalStorageEmpty', () => {
 // (visits-io.js) gates an uploaded backup file through it. The sync-down path
 // had no such gate: server rows went straight to writeStoredArray. Rows written
 // before server/src/lib/validate-rows.ts existed can therefore still land
-// malformed in localStorage, where renderVisitedLayer silently skips them on
-// every overlay render while updateVisitedCounter keeps counting them — an
-// inflated "N visited" for a walk that never appears on the map.
+// malformed in localStorage. The map and the visited counter both skip a row
+// visitRenderParts rejects; other readers still see the stored row, which is
+// why the sync-down gate exists.
 
 describe('#2735 cloud-synced trip rows go through normalizeVisit', () => {
     // Init Case 2: URL username matches the stored accepted account → GET →

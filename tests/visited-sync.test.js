@@ -69,6 +69,10 @@ function baseSession(over = {}) {
     startLat: 62.1, startLng: 25.7, startLabel: 'Home',
     destLat: 62.2, destLng: 25.8, destName: 'Park',
     tripMode: 'round', distance: 3,
+    // Measured end to end. markAsVisited refuses a session whose distance is
+    // still a crow-flies stand-in (isMeasuredWalk).
+    routeCoords: [[62.1, 25.7], [62.2, 25.8]],
+    returnRouteCoords: [[62.2, 25.8], [62.1, 25.7]],
     ...over,
   };
 }
@@ -106,6 +110,28 @@ describe('markAsVisited — create', () => {
     expect('poiCategory' in stored).toBe(true);
     expect(stored.poiCategory).toBeNull();
     expect(putCalls[0].data.poiCategory).toBeNull();
+  });
+
+  test('an unrouted session is not stored and not mirrored', () => {
+    setCurrentSession(baseSession({ routeCoords: null, returnRouteCoords: null }));
+    markAsVisited();
+    expect(storedVisits()).toHaveLength(0);
+    expect(putCalls).toHaveLength(0);
+    expect(consentCalls).toBe(0);
+  });
+
+  test('a round trip with only the outbound routed is not stored', () => {
+    setCurrentSession(baseSession({ returnRouteCoords: null }));
+    markAsVisited();
+    expect(storedVisits()).toHaveLength(0);
+    expect(putCalls).toHaveLength(0);
+  });
+
+  test('a one-way with an outbound route is stored', () => {
+    setCurrentSession(baseSession({ tripMode: 'one-way', returnRouteCoords: null }));
+    markAsVisited();
+    expect(storedVisits()).toHaveLength(1);
+    expect(putCalls).toHaveLength(1);
   });
 
   test('never writes the button label directly — it delegates to syncMarkVisitedBtn', () => {
@@ -222,12 +248,16 @@ describe('markAsVisited — hard-quota write failure (audit #5721 #5711)', () =>
   });
 });
 
+function drawableVisit(id) {
+  return { id, startLat: 62.1, startLng: 25.7, destLat: 62.2, destLng: 25.8 };
+}
+
 describe('updateVisitedCounter', () => {
   const counterText = () => document.getElementById('visitedCount').textContent;
   const exploredEl = () => document.getElementById('exploredCount');
 
   test('singular: exactly one visit reads "1 place explored"', () => {
-    localStorage.setItem(VISITS_KEY, JSON.stringify([{ id: 'a' }]));
+    localStorage.setItem(VISITS_KEY, JSON.stringify([drawableVisit('a')]));
     updateVisitedCounter();
     expect(counterText()).toBe('1 visited');
     expect(exploredEl().textContent).toBe('1 place explored');
@@ -235,11 +265,23 @@ describe('updateVisitedCounter', () => {
   });
 
   test('plural: two or more visits read "N places explored"', () => {
-    localStorage.setItem(VISITS_KEY, JSON.stringify([{ id: 'a' }, { id: 'b' }]));
+    localStorage.setItem(VISITS_KEY, JSON.stringify([drawableVisit('a'), drawableVisit('b')]));
     updateVisitedCounter();
     expect(counterText()).toBe('2 visited');
     expect(exploredEl().textContent).toBe('2 places explored');
     expect(exploredEl().style.display).toBe('block');
+  });
+
+  test('a stored row the map cannot draw is not counted', () => {
+    // visitRenderParts rejects a row with no start/dest. The badge and
+    // "N places explored" count the same rows the overlay can draw.
+    localStorage.setItem(VISITS_KEY, JSON.stringify([
+      drawableVisit('ok'),
+      { id: 'legacy' },
+    ]));
+    updateVisitedCounter();
+    expect(counterText()).toBe('1 visited');
+    expect(exploredEl().textContent).toBe('1 place explored');
   });
 
   test('zero visits: counter still reads "0 visited" but the explored line is hidden', () => {

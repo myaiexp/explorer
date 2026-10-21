@@ -2,7 +2,7 @@
 // display and persist it. The one entry point that picks a *new* destination
 // (pick-mode.js and share-link.js route to a destination the user already chose).
 // Loaded after loading.js, location-input.js, destination-resolve.js,
-// route-view.js (readRouteBuildOptions), result-panel.js, history.js and
+// route-view.js (readRouteBuildOptions), history.js and
 // session-state.js; resolved as globals at call time.
 
 // Every visited destination, as [lat, lng] pairs — passed down as `existingDests`
@@ -48,13 +48,10 @@ async function generateDestination() {
     if (minKm >= maxKm) { showError('Minimum distance must be less than maximum distance.'); return; }
 
     document.getElementById('notification').classList.remove('active');
-    setCurrentSession(null);
-    resetResultPanel();
 
     await withLoading(async (onProgress) => {
         try {
             const { startLat, startLng, locationInput } = await resolveStart();
-            clearMap();
 
             const existingDests = getAllExistingDestinations();
             const tripMode = document.querySelector('input[name="tripMode"]:checked').value;
@@ -99,6 +96,11 @@ async function generateDestination() {
                 existingDests, maxKm, tripMode, spread, winterMode, degraded, avoidBacktracking, onProgress });
             const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
+            // Clear only now that the replacement is in hand (#4043). Same rule
+            // as buildAndDisplay (#3663): a throw before this leaves the previous
+            // route on the map and in the session. displayRoute adds layers; it
+            // does not replace them, so the clear still has to happen first.
+            clearMap();
             const session = displayRoute({
                 startLat, startLng, destLat: dest.lat, destLng: dest.lng,
                 outbound: outboundRoute, ret: returnRoute,

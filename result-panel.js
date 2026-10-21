@@ -13,12 +13,27 @@
 // branch and silently recorded the restored route as an extra walk; and a spread
 // reroute cleared the label while keeping visitId, so the next click deleted a
 // visit the button said had never been made.
+// Same end-to-end rule as isMeasuredWalk (session.js), inlined. result-panel is
+// not a session.js dependency: route-view tests stub those helpers, and a
+// SCRIPT_DEP would overwrite the stubs when the script loads.
+function sessionRoutedEndToEnd(session) {
+    if (!session?.routeCoords?.length) return false;
+    if (session.tripMode !== 'one-way' && !session.returnRouteCoords?.length) return false;
+    return true;
+}
+
 function syncMarkVisitedBtn() {
     const session = getCurrentSession();
     const visited = Boolean(session && session.visitId);
     const btn = document.getElementById('markVisitedBtn');
+    // Undo stays available even when the stored walk has no geometry. A new
+    // mark does not: the distance would be the crow-flies stand-in.
+    const canMark = visited || sessionRoutedEndToEnd(session);
     btn.classList.toggle('marked', visited);
-    btn.disabled = false;
+    btn.disabled = !canMark;
+    btn.title = canMark
+        ? ''
+        : 'This route was not fully routed, so its distance is an estimate and is not saved as a walk.';
     btn.textContent = visited ? 'Visited! (undo)' : 'Mark as visited';
 }
 
