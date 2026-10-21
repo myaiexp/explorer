@@ -63,12 +63,61 @@ describe('syncMarkVisitedBtn', () => {
     expect(btn().classList.contains('marked')).toBe(false);
   });
 
-  test('no session at all reads as unvisited', () => {
+  test('no session at all reads as unvisited and cannot be clicked', () => {
     setCurrentSession({ visitId: 'v1' });
     syncMarkVisitedBtn();
     setCurrentSession(null);
     syncMarkVisitedBtn();
     expect(btn().textContent).toBe('Mark as visited');
+    expect(btn().disabled).toBe(true);
+  });
+
+  test('an estimated route cannot be marked visited', () => {
+    // No route geometry: the distance badge is a crow-flies guess (session.js
+    // isMeasuredWalk). Recording it would store that guess as walked km.
+    setCurrentSession({ tripMode: 'round', destLat: 62, destLng: 25, distance: 4 });
+    syncMarkVisitedBtn();
+    expect(btn().disabled).toBe(true);
+    expect(btn().textContent).toBe('Mark as visited');
+    expect(btn().title).toMatch(/estimate/i);
+  });
+
+  test('a round trip missing its return leg cannot be marked', () => {
+    setCurrentSession({
+      tripMode: 'round',
+      routeCoords: [[62, 25], [62.1, 25.1]],
+    });
+    syncMarkVisitedBtn();
+    expect(btn().disabled).toBe(true);
+  });
+
+  test('a fully routed round trip can be marked, with no leftover refusal title', () => {
+    setCurrentSession({ tripMode: 'round', destLat: 62, destLng: 25 });
+    syncMarkVisitedBtn();
+    setCurrentSession({
+      tripMode: 'round',
+      routeCoords: [[62, 25], [62.1, 25.1]],
+      returnRouteCoords: [[62.1, 25.1], [62, 25]],
+    });
+    syncMarkVisitedBtn();
+    expect(btn().disabled).toBe(false);
+    expect(btn().title).toBe('');
+  });
+
+  test('a one-way with only the outbound routed can be marked', () => {
+    setCurrentSession({
+      tripMode: 'one-way',
+      routeCoords: [[62, 25], [62.1, 25.1]],
+    });
+    syncMarkVisitedBtn();
+    expect(btn().disabled).toBe(false);
+  });
+
+  test('undo stays available when an already-marked session has no route geometry', () => {
+    setCurrentSession({ visitId: 'v1', tripMode: 'round' });
+    syncMarkVisitedBtn();
+    expect(btn().disabled).toBe(false);
+    expect(btn().textContent).toBe('Visited! (undo)');
   });
 
   test('resetResultPanel clears the label and hides a stale elevation chart', () => {

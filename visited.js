@@ -1,8 +1,9 @@
 // Visited walks — mark/undo the displayed route as visited, the visited counter,
 // and the map overlay's visibility toggle. Loaded after storage.js (getVisits/
-// VISITS_KEY), sync-helpers.js, session.js (snapshotSession), map-view.js
-// (renderVisitedLayer/visitedLayerGroup), session-state.js and result-panel.js
-// (syncMarkVisitedBtn); resolved as globals at call time.
+// VISITS_KEY), sync-helpers.js, session.js (snapshotSession, isMeasuredWalk),
+// map-view.js (renderVisitedLayer/visitedLayerGroup), session-state.js and
+// result-panel.js (syncMarkVisitedBtn);
+// resolved as globals at call time.
 
 // Overlay visibility is UI state owned here; the overlay itself (renderVisitedLayer,
 // visitedLayerGroup) lives in map-view.js.
@@ -26,6 +27,15 @@ function markAsVisited() {
         renderVisitedLayer();
         return;
     }
+
+    // Create only. An estimate's distance is a crow-flies stand-in (session.js);
+    // the button is already disabled, and this refuses a direct call too.
+    // Undo above stays open so a walk marked before this gate can still be removed.
+    if (!isMeasuredWalk(
+        session.routeCoords?.length ? { coords: session.routeCoords } : null,
+        session.returnRouteCoords?.length ? { coords: session.returnRouteCoords } : null,
+        session.tripMode,
+    )) return;
 
     const visit = snapshotSession(session, {
         poiCategory: session.poiCategory || null,

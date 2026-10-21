@@ -69,6 +69,10 @@ function baseSession(over = {}) {
     startLat: 62.1, startLng: 25.7, startLabel: 'Home',
     destLat: 62.2, destLng: 25.8, destName: 'Park',
     tripMode: 'round', distance: 3,
+    // Measured end to end. markAsVisited refuses a session whose distance is
+    // still a crow-flies stand-in (isMeasuredWalk).
+    routeCoords: [[62.1, 25.7], [62.2, 25.8]],
+    returnRouteCoords: [[62.2, 25.8], [62.1, 25.7]],
     ...over,
   };
 }
@@ -106,6 +110,28 @@ describe('markAsVisited — create', () => {
     expect('poiCategory' in stored).toBe(true);
     expect(stored.poiCategory).toBeNull();
     expect(putCalls[0].data.poiCategory).toBeNull();
+  });
+
+  test('an unrouted session is not stored and not mirrored', () => {
+    setCurrentSession(baseSession({ routeCoords: null, returnRouteCoords: null }));
+    markAsVisited();
+    expect(storedVisits()).toHaveLength(0);
+    expect(putCalls).toHaveLength(0);
+    expect(consentCalls).toBe(0);
+  });
+
+  test('a round trip with only the outbound routed is not stored', () => {
+    setCurrentSession(baseSession({ returnRouteCoords: null }));
+    markAsVisited();
+    expect(storedVisits()).toHaveLength(0);
+    expect(putCalls).toHaveLength(0);
+  });
+
+  test('a one-way with an outbound route is stored', () => {
+    setCurrentSession(baseSession({ tripMode: 'one-way', returnRouteCoords: null }));
+    markAsVisited();
+    expect(storedVisits()).toHaveLength(1);
+    expect(putCalls).toHaveLength(1);
   });
 
   test('never writes the button label directly — it delegates to syncMarkVisitedBtn', () => {
