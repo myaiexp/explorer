@@ -11,7 +11,7 @@
  */
 import { test, expect, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -90,10 +90,13 @@ test('a stuck command-substitution child is signalled and not orphaned', () => {
     expect(markerPids()).toEqual([]);
 });
 
-test('both drift suites spawn only through execDriftScript', () => {
-    for (const name of ['unit-drift.test.js', 'nginx-drift.test.js']) {
+// Derived from the directory, so a drift suite added later is held to it too.
+test('every drift suite spawns only through execDriftScript', () => {
+    const suites = readdirSync(TESTS_DIR).filter((n) => /drift.*\.test\.js$/.test(n));
+    expect(suites).toEqual(expect.arrayContaining(['unit-drift.test.js', 'nginx-drift.test.js', 'drift-remote-read.test.js']));
+    for (const name of suites) {
         const src = readFileSync(join(TESTS_DIR, name), 'utf8');
-        expect(src).toContain('execDriftScript(SCRIPT,');
+        expect(src).toMatch(/execDriftScript\((SCRIPT|script),/);
         expect(src).not.toContain('execFileSync');
     }
 });

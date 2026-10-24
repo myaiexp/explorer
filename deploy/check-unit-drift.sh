@@ -16,9 +16,11 @@
 # rather than being skipped — opt-in would reproduce exactly the silence this
 # exists to end.
 #
-# Exit 1 on DRIFT, MISSING or an undeclared host. An UNREACHABLE host only warns:
-# ssh being down is not evidence about drift, and a shelly outage should not fail
-# a VPS deploy — but the line is printed every run, so it cannot go quiet.
+# Exit 1 on DRIFT, MISSING, a read ERROR or an undeclared host. An UNREACHABLE
+# host only warns: ssh being down is not evidence about drift, and a shelly
+# outage should not fail a VPS deploy — but the line is printed every run, so it
+# cannot go quiet. A dead host is dialled once per run, under a bounded timeout
+# (lib/read-installed.sh).
 #
 # Reports only. Installing is deliberate (a unit change usually wants the matching
 # installer, e.g. deploy/install-wander-junctions.sh, which also creates users and
@@ -31,39 +33,12 @@ set -uo pipefail
 UNIT_SRC_DIR="${UNIT_SRC_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
-# -n is load-bearing, not tidiness: this ssh runs INSIDE a `while read` loop fed
-# by find, and without it ssh drains that stdin and the loop silently stops after
-# the first remote unit. The first run of this script checked 2 of 6 units and
-# reported a clean-looking partial answer — the exact failure mode the script
-# exists to end.
-SSH_OPTS=(-n -o BatchMode=yes -o ConnectTimeout=10)
+# read_installed + mark_unreachable: the bounded ssh read and its exit codes.
+# shellcheck source=lib/read-installed.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/read-installed.sh"
 
 failed=0
 checked=0
-
-# stdout of the installed copy, or a non-zero exit distinguishing absent from
-# unreachable: 10 = no such file, 11 = host unreachable.
-read_installed() {
-    local host="$1" path="$2"
-    if [[ "$host" == "local" ]]; then
-        [[ -f "$path" ]] || return 10
-        cat "$path"
-        return 0
-    fi
-    # One ssh, two outcomes. `test -f` first so a missing file is reported as
-    # MISSING rather than folded into the connection failure.
-    local out rc
-    out=$(ssh "${SSH_OPTS[@]}" "$host" "test -f '$path' && cat '$path'" 2>/dev/null)
-    rc=$?
-    if [[ $rc -eq 0 ]]; then
-        printf '%s\n' "$out"
-        return 0
-    fi
-    # ssh reports 255 for its own failures; anything else came from the remote
-    # command, i.e. we reached the host and the file was not there.
-    [[ $rc -eq 255 ]] && return 11
-    return 10
-}
 
 report() {
     printf '  %-40s %s\n' "$1" "$2"
@@ -95,7 +70,8 @@ while IFS= read -r src; do
     else
         case $? in
             10) report "$name" "MISSING — not installed at $host:$installed_path"; failed=1 ;;
-            11) report "$name" "unreachable — could not ssh to $host (not checked)" ;;
+            11) report "$name" "unreachable — could not ssh to $host (not checked)"; mark_unreachable "$host" ;;
+            12) report "$name" "ERROR — reading $host:$installed_path failed ($installed)"; failed=1 ;;
         esac
     fi
 done < <(find "$UNIT_SRC_DIR" -type f \( -name '*.service' -o -name '*.timer' -o -name '*.socket' \) | sort)

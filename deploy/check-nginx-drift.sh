@@ -37,10 +37,11 @@
 # `#` opens a comment at the start of a line or after whitespace only, so a '#'
 # inside a directive value stays content and a difference after it still counts.
 #
-# Exit 1 on DRIFT, MISSING or an undeclared header. An UNREACHABLE host only
-# warns: ssh being down is not evidence about drift, and a shelly outage should
-# not fail a VPS deploy — but the line is printed every run, so it cannot go
-# quiet.
+# Exit 1 on DRIFT, MISSING, a read ERROR or an undeclared header. An
+# UNREACHABLE host only warns: ssh being down is not evidence about drift, and a
+# shelly outage should not fail a VPS deploy — but the line is printed every
+# run, so it cannot go quiet. A dead host is dialled once per run, under a
+# bounded timeout (lib/read-installed.sh).
 #
 # Reports only. Installing nginx config is deliberate: a fragment has to be
 # spliced into a vhost by hand and `nginx -t` run before reload.
@@ -52,11 +53,9 @@ set -uo pipefail
 NGINX_SRC_DIR="${NGINX_SRC_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 NGINX_ROOT_PREFIX="${NGINX_ROOT_PREFIX:-}"
 
-# -n is load-bearing, not tidiness: this ssh runs INSIDE a `while read` loop fed
-# by find, and without it ssh drains that stdin and the loop silently stops after
-# the first remote conf. See the same note in check-unit-drift.sh — it cost that
-# script a clean-looking partial answer on its first real run.
-SSH_OPTS=(-n -o BatchMode=yes -o ConnectTimeout=10)
+# read_installed + mark_unreachable: the bounded ssh read and its exit codes.
+# shellcheck source=lib/read-installed.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/read-installed.sh"
 
 failed=0
 checked=0
@@ -67,30 +66,6 @@ checked=0
 normalize() {
     sed -E 's/(^|[[:space:]])#.*$//' |
         awk '{ gsub(/[[:space:]]+/, " "); gsub(/^ | $/, ""); if ($0 != "") print }'
-}
-
-# stdout of the installed copy, or a non-zero exit distinguishing absent from
-# unreachable: 10 = no such file, 11 = host unreachable.
-read_installed() {
-    local host="$1" path="$2"
-    if [[ "$host" == "local" ]]; then
-        [[ -f "$path" ]] || return 10
-        cat "$path"
-        return 0
-    fi
-    # One ssh, two outcomes. `test -f` first so a missing file is reported as
-    # MISSING rather than folded into the connection failure.
-    local out rc
-    out=$(ssh "${SSH_OPTS[@]}" "$host" "test -f '$path' && cat '$path'" 2>/dev/null)
-    rc=$?
-    if [[ $rc -eq 0 ]]; then
-        printf '%s\n' "$out"
-        return 0
-    fi
-    # ssh reports 255 for its own failures; anything else came from the remote
-    # command, i.e. we reached the host and the file was not there.
-    [[ $rc -eq 255 ]] && return 11
-    return 10
 }
 
 header() {
@@ -156,7 +131,8 @@ while IFS= read -r src; do
     else
         case $? in
             10) report "$name" "MISSING — not installed at $host:$declared"; failed=1 ;;
-            11) report "$name" "unreachable — could not ssh to $host (not checked)" ;;
+            11) report "$name" "unreachable — could not ssh to $host (not checked)"; mark_unreachable "$host" ;;
+            12) report "$name" "ERROR — reading $host:$declared failed ($installed)"; failed=1 ;;
         esac
     fi
 done < <(find "$NGINX_SRC_DIR" -type f -name '*.conf' | sort)

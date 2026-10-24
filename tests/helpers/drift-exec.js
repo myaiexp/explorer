@@ -7,6 +7,8 @@
 // timeout, which owns the process group and forwards the signal. Its own
 // timer sits behind the caller's bound, so a refused host still fails inside
 // ConnectTimeout and reports unreachable; only a stuck resolver hits this.
+// The scripts bound their own ssh too (deploy/lib/read-installed.sh, 20s),
+// but that bound sits past this one, so it is not what keeps a test inside it.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,11 +51,18 @@ export function execDriftScript(script, env, timeoutMs = DRIFT_SUBPROCESS_TIMEOU
 // ran: a fast resolver would also report unreachable, and the test would
 // stay green while looking the name up again.
 export function installFailingSsh(dir) {
+    return installSsh(dir, 'exit 255');
+}
+
+// An ssh stand-in that logs its argv, one call per line, then runs `body` as
+// sh. The remote-read tests use it to play each outcome read_installed has to
+// tell apart: a hung lookup, a sentinel "no such file", a stray remote error.
+export function installSsh(dir, body) {
     const bin = join(dir, 'ssh-bin');
     // log is single-quoted into the stub. mkdtemp paths have neither quotes
     // nor newlines; a caller that passes one would break the script.
     const log = join(dir, 'ssh-stub.log');
     mkdirSync(bin);
-    writeFileSync(join(bin, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 255\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n${body}\n`, { mode: 0o755 });
     return { bin, log };
 }
