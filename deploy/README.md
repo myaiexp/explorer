@@ -23,7 +23,7 @@ The project was renamed `explorer` → `wander` (2026-09-01). `helm`'s `forgejo-
 - `check-unit-drift.sh` — diffs every committed unit against the copy installed on its `# deploy-host:`. Run by `scripts/post-deploy.sh`; pinned by `tests/unit-drift.test.js`.
 - `check-nginx-drift.sh` — the same check for the nginx snippets, whose comparison differs enough to be its own script (see **Config drift** below). Run by `scripts/post-deploy.sh`; pinned by `tests/nginx-drift.test.js`.
 - `lib/read-installed.sh` — the installed-copy read both drift scripts source: local or bounded ssh, and the exit codes that tell MISSING, unreachable and ERROR apart. Pinned through both scripts by `tests/drift-remote-read.test.js`.
-- `shelly-osrm/` — self-hosted OSRM-foot service, refresh timer, and install script for the shelly box.
+- `shelly-osrm/` — self-hosted OSRM-foot on shelly: the pinned osrm-backend image, the weekly refresh that builds each set with it, and the unit that serves each set with the image recorded in its `osrm.env` stamp. Its own README covers the stamp contract and how to upgrade.
 - `shelly-overpass/` — self-hosted Overpass API (pinned `wiktorn/overpass-api` container over the Geofabrik Finland extract) on shelly's `127.0.0.1:5002`, the upstream `wander-junctions` queries before falling back to public Overpass. Unit + installer + its own README. Loopback-only: junctions-cache runs natively on that host and is the sole consumer.
 
 ## Config drift
@@ -47,4 +47,4 @@ Exactly one, and neither-or-both **fails**. The two are not interchangeable: con
 
 `wander-overpass.service` installs with `scp -r deploy/shelly-overpass shelly:/tmp/ && ssh shelly 'bash /tmp/shelly-overpass/install.sh'` — copied rather than piped through `bash -s`, because the script reads the unit file from beside itself and stdin leaves `BASH_SOURCE` unset. It returns as soon as the unit is up; the initial import runs for hours inside the container (timing and size: `deploy/shelly-overpass/README.md`) and junctions-cache's fallback covers that window.
 
-`osrm-foot` installs the same way: `scp -r deploy/shelly-osrm shelly:/tmp/ && ssh shelly 'bash /tmp/shelly-osrm/install.sh'`. `deploy/shelly-osrm/install.sh` reads `osrm-foot.service` from beside itself and exits before any download when that file is missing, so it cannot be piped through `bash -s` either.
+`osrm-foot` installs the same way: `scp -r deploy/shelly-osrm shelly:/tmp/ && ssh shelly 'bash /tmp/shelly-osrm/install.sh'`. `deploy/shelly-osrm/install.sh` reads the units and `osrm-refresh.sh` from beside itself and exits before touching the box when any is missing, so it cannot be piped through `bash -s` either. Rerunning it is also how an osrm-backend image bump lands (`deploy/shelly-osrm/README.md`).

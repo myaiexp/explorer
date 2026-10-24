@@ -4,23 +4,27 @@
 # Run via:
 #   scp -r deploy/shelly-osrm shelly:/tmp/ && ssh shelly 'bash /tmp/shelly-osrm/install.sh'
 #
-# It needs osrm-foot.service sitting beside it, so it cannot be piped in
-# over `bash -s` — stdin leaves BASH_SOURCE unset and the unit unreachable.
-# Copying the directory keeps the unit single-sourced from the repo.
+# It needs the units and osrm-refresh.sh sitting beside it, so it cannot be
+# piped in over `bash -s` — stdin leaves BASH_SOURCE unset and they become
+# unreachable. Copying the directory keeps them single-sourced from the repo.
 #
-# Idempotent: safe to rerun. Pass --update-data to force a fresh extract.
+# Idempotent: safe to rerun, and rerunning is how an image bump in
+# osrm-refresh.sh lands. Whenever `current` was not built by the pinned image,
+# it runs a refresh, which builds a set with that image, swaps image and data
+# together, and smoke-tests. Pass --update-data to rebuild regardless.
 set -euo pipefail
 
-# Refuse before yay or the Geofabrik download. Under `bash -s`, BASH_SOURCE is
+# Refuse before anything touches the box. Under `bash -s`, BASH_SOURCE is
 # unset and ${BASH_SOURCE[0]} inside $(...) does not abort (set -e is ignored
-# for that assignment), so REPO_DIR would be the login cwd and the unit copy
-# would fail only after the preprocess.
+# for that assignment), so REPO_DIR would be the login cwd.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-if [[ ! -f "$REPO_DIR/osrm-foot.service" ]]; then
-    echo "[install] ERROR: osrm-foot.service not found next to this script." >&2
-    echo "[install] Copy the whole directory over; do not pipe this script into bash." >&2
-    exit 1
-fi
+for f in osrm-foot.service osrm-refresh.service osrm-refresh.timer osrm-refresh.sh; do
+    if [[ ! -f "$REPO_DIR/$f" ]]; then
+        echo "[install] ERROR: $f not found next to this script." >&2
+        echo "[install] Copy the whole directory over; do not pipe this script into bash." >&2
+        exit 1
+    fi
+done
 
 UPDATE_DATA=0
 for arg in "$@"; do
@@ -31,44 +35,23 @@ for arg in "$@"; do
 done
 
 DATA_ROOT=/srv/osrm/finland
-PBF_DIR=$DATA_ROOT/pbf
-PROCESSED_DIR=$DATA_ROOT/processed
-GEOFABRIK_URL="https://download.geofabrik.de/europe/finland-latest.osm.pbf"
 TAILSCALE_IP=100.69.160.113
 
 log() { echo "[install] $*"; }
 
-# 1. Install osrm-backend (AUR), wget, curl.
-if ! command -v osrm-extract >/dev/null 2>&1; then
-    log "installing osrm-backend from AUR via yay"
-    yay -S --needed --noconfirm osrm-backend
-else
-    log "osrm-backend already installed"
+# 1. Docker must be present and running; osrm-backend is a pinned image, not
+#    a pacman package (see README.md for why).
+if ! command -v docker >/dev/null 2>&1; then
+    log "ERROR: docker is not installed" >&2
+    exit 1
+fi
+if ! systemctl is-active --quiet docker; then
+    log "starting docker"
+    sudo systemctl enable --now docker
 fi
 sudo pacman -S --needed --noconfirm wget curl >/dev/null
 
-# 2. Locate the foot profile (the AUR package may install under different paths).
-FOOT_PROFILE=""
-for candidate in \
-    /usr/share/osrm/profiles/foot.lua \
-    /usr/share/osrm-backend/profiles/foot.lua \
-    /opt/osrm-backend/profiles/foot.lua; do
-    if [[ -f "$candidate" ]]; then FOOT_PROFILE="$candidate"; break; fi
-done
-if [[ -z "$FOOT_PROFILE" ]]; then
-    log "ERROR: foot.lua profile not found in common locations" >&2
-    exit 1
-fi
-log "using profile: $FOOT_PROFILE"
-
-# 3. Verify osrm-routed flag spelling. Recent builds use --ip, older use --host.
-if osrm-routed --help 2>&1 | grep -qE '^\s*--ip\b|-i \['; then
-    log "osrm-routed supports --ip (expected)"
-else
-    log "WARNING: osrm-routed does not advertise --ip; check unit's ExecStart manually" >&2
-fi
-
-# 4. Create system user.
+# 2. System user that owns the data (and that the container runs as).
 if ! id -u osrm >/dev/null 2>&1; then
     log "creating system user osrm"
     sudo useradd --system --no-create-home --shell /usr/sbin/nologin osrm
@@ -76,61 +59,47 @@ else
     log "user osrm already exists"
 fi
 
-# 5. Directory tree.
-sudo mkdir -p "$PBF_DIR" "$PROCESSED_DIR"
-sudo chown -R osrm:osrm "$DATA_ROOT"
+# 3. Directory tree.
+sudo mkdir -p "$DATA_ROOT/pbf" "$DATA_ROOT/processed"
+sudo chown osrm:osrm "$DATA_ROOT" "$DATA_ROOT/pbf" "$DATA_ROOT/processed"
 
-# 6. Download Geofabrik extract (skip if already present and not --update-data).
-PBF_FILE=$PBF_DIR/finland-latest.osm.pbf
-if [[ ! -f $PBF_FILE || $UPDATE_DATA -eq 1 ]]; then
-    log "downloading $GEOFABRIK_URL"
-    sudo -u osrm wget -O "$PBF_FILE" "$GEOFABRIK_URL"
-else
-    log "pbf already present; reuse (pass --update-data to refresh)"
-fi
-
-# 7. Preprocess into a fresh timestamped dir if no current symlink yet,
-#    or if --update-data was passed.
-CURRENT_LINK=$PROCESSED_DIR/current
-if [[ ! -L $CURRENT_LINK || $UPDATE_DATA -eq 1 ]]; then
-    STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-    STAGING=$PROCESSED_DIR/$STAMP
-    log "preprocessing into $STAGING"
-    sudo -u osrm mkdir -p "$STAGING"
-    sudo -u osrm cp "$PBF_FILE" "$STAGING/finland-latest.osm.pbf"
-    (
-        cd "$STAGING"
-        sudo -u osrm osrm-extract -p "$FOOT_PROFILE" finland-latest.osm.pbf
-        sudo -u osrm osrm-partition finland-latest.osrm
-        sudo -u osrm osrm-customize finland-latest.osrm
-    )
-    sudo -u osrm ln -sfn "$STAMP" "$CURRENT_LINK"
-    log "current → $STAMP"
-else
-    log "processed/current symlink already present; skipping preprocessing"
-fi
-
-# 8. Install systemd units (osrm-foot only here; refresh trio installed by Task 2).
-log "installing systemd unit osrm-foot.service"
-sudo cp "$REPO_DIR/osrm-foot.service" /etc/systemd/system/osrm-foot.service
-if [[ -f $REPO_DIR/osrm-refresh.service ]]; then
-    sudo cp "$REPO_DIR/osrm-refresh.service" /etc/systemd/system/osrm-refresh.service
-    sudo cp "$REPO_DIR/osrm-refresh.timer"   /etc/systemd/system/osrm-refresh.timer
-    sudo install -m 0755 "$REPO_DIR/osrm-refresh.sh" /usr/local/bin/osrm-refresh
-fi
+# 4. Units and the refresh script. osrm-foot is enabled but not started here:
+#    with no stamped set yet it refuses to start, so until the first refresh
+#    below succeeds, nothing can (re)start it — an already-running process
+#    keeps serving, but a crash or reboot in that window means no OSRM until
+#    the build lands. Wander falls back to public OSRM meanwhile.
+log "installing osrm-refresh and the systemd units"
+sudo install -m 0755 "$REPO_DIR/osrm-refresh.sh" /usr/local/bin/osrm-refresh
+for unit in osrm-foot.service osrm-refresh.service osrm-refresh.timer; do
+    sudo cp "$REPO_DIR/$unit" "/etc/systemd/system/$unit"
+done
 sudo systemctl daemon-reload
-sudo systemctl enable --now osrm-foot.service
-if [[ -f /etc/systemd/system/osrm-refresh.timer ]]; then
-    sudo systemctl enable --now osrm-refresh.timer
+sudo systemctl enable osrm-foot.service
+sudo systemctl enable --now osrm-refresh.timer
+
+# 5. Build when `current` was not built by the pinned image. Through the unit,
+#    not the script directly, so it cannot overlap a timer-started refresh;
+#    `start` on a oneshot blocks until it finishes (a Finland build is ~20 min).
+if [[ $UPDATE_DATA -eq 1 ]] || ! sudo /usr/local/bin/osrm-refresh --check; then
+    log "building a set with the pinned image (follow: journalctl -fu osrm-refresh)"
+    if ! sudo systemctl start osrm-refresh.service; then
+        log "ERROR — refresh failed; check 'journalctl -u osrm-refresh.service'" >&2
+        exit 1
+    fi
+else
+    # Apply a changed osrm-foot.service; the set itself is already current.
+    sudo systemctl restart osrm-foot.service
 fi
 
-# 9. Smoke test.
+# 6. Smoke test. The set takes a few seconds to load after a restart.
 log "smoke-testing OSRM endpoint"
-sleep 2
-if curl -fsS "http://$TAILSCALE_IP:5000/route/v1/foot/24.9384,60.1699;24.9405,60.1717?overview=full" \
-     | grep -q '"code":"Ok"'; then
-    log "OK — OSRM-foot is serving routes on $TAILSCALE_IP:5000"
-else
-    log "ERROR — smoke test failed; check 'journalctl -u osrm-foot.service'" >&2
-    exit 1
-fi
+for _ in $(seq 1 30); do
+    if curl -fsS "http://$TAILSCALE_IP:5000/route/v1/foot/24.9384,60.1699;24.9405,60.1717?overview=full" 2>/dev/null \
+         | grep -q '"code":"Ok"'; then
+        log "OK — OSRM-foot is serving routes on $TAILSCALE_IP:5000"
+        exit 0
+    fi
+    sleep 2
+done
+log "ERROR — smoke test failed; check 'journalctl -u osrm-foot.service'" >&2
+exit 1

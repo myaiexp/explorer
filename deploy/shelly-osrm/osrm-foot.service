@@ -2,40 +2,49 @@
 # Read by deploy/check-unit-drift.sh, which diffs this file against
 # /etc/systemd/system/ on that host every deploy. `local` is the VPS.
 # OSRM-foot routing service for Finland (Wander self-hosted endpoint)
+#
+# Serves `current` with the image that BUILT it, never a fixed one. osrm-routed
+# loads only a set built by its own major.minor, so binary and data must move
+# together. osrm-refresh writes osrm.env into each set as its last step, after
+# that image trial-loaded the set: OSRM_IMAGE is the digest, OSRM_SET the set's
+# own directory, OSRM_USER its owner (.fileIndex is 0700). The image and the
+# mount come from that one file, so a start can never pair a set with another
+# binary, and pacman cannot change what serves. Upgrading is bumping IMAGE in
+# osrm-refresh.sh — see deploy/shelly-osrm/README.md.
+#
+# The sandbox is on the container, not on this unit: only the docker CLI runs
+# in this unit's cgroup, so systemd's Protect*/MemoryMax/IPAddressDeny would
+# confine the client and leave osrm-routed untouched. Host networking keeps the
+# listener on the tailscale address alone, as the native binary had it.
+# Memory: journal peak 2.5G on 2026-10-09 (cgroup peak 2.12 GiB); 4x is 10G,
+# past the 8G rung, so 16G. This box has 62 GiB.
 [Unit]
 Description=OSRM-foot routing service (Finland)
-After=network-online.target
+After=network-online.target docker.service
 Wants=network-online.target
+Requires=docker.service
 
 [Service]
 Type=simple
-User=osrm
-Group=osrm
-ExecStart=/usr/bin/osrm-routed --algorithm mld --ip 100.69.160.113 --port 5000 /srv/osrm/finland/processed/current/finland-latest.osrm
+# No leading `-`: a set without a stamp was built by an unknown binary, and
+# refusing to start is the point.
+EnvironmentFile=/srv/osrm/finland/processed/current/osrm.env
+# A crash or unclean shutdown leaves the named container behind, and
+# `docker run --name` then fails forever with "name already in use".
+ExecStartPre=-/usr/bin/docker rm -f osrm-foot
+ExecStart=/usr/bin/docker run --rm --name osrm-foot \
+    --network host \
+    --user ${OSRM_USER} \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --memory 16g \
+    -v /srv/osrm/finland/processed/${OSRM_SET}:/data:ro \
+    ${OSRM_IMAGE} \
+    osrm-routed --algorithm mld --ip 100.69.160.113 --port 5000 /data/finland-latest.osrm
+ExecStop=/usr/bin/docker stop osrm-foot
 Restart=always
 RestartSec=10
-# Journal peak 2.5G on 2026-10-09 (cgroup peak 2.12 GiB). 4x is 10G, past
-# the 8G rung, so 16G. This box has 62 GiB. No MemoryDenyWriteExecute.
-# Listens on the tailscale address. Deny only link-local: a private-range
-# deny would reject the tailnet clients this process exists to serve.
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=tmpfs
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-CapabilityBoundingSet=
-IPAddressDeny=169.254.0.0/16
-MemoryMax=16G
 
 [Install]
 WantedBy=multi-user.target
