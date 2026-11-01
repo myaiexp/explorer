@@ -66,10 +66,12 @@ function restoreResult(entry) {
             distance: (hasLegDist ? entry.routeDistance : entry.distance) * 1000,
             duration: entry.routeDuration || 0 }
         : null;
-    const ret = entry.returnRouteCoords
-        ? { coords: entry.returnRouteCoords,
+    let ret = null;
+    if (entry.returnRouteCoords) {
+        ret = { coords: entry.returnRouteCoords,
             distance: (hasLegDist ? (entry.returnRouteDistance || 0) : 0) * 1000,
-            duration: entry.returnRouteDuration || 0 }
+            duration: entry.returnRouteDuration || 0 };
+    } else if (outbound && entry.tripMode !== 'one-way') {
         // A round trip with an outbound but no return geometry still has a
         // COMPLETE stored total — entry.distance already covers the whole walk.
         // Passing null would make computeRouteTotals substitute the crow-flies
@@ -77,9 +79,8 @@ function restoreResult(entry) {
         // it was opened (idea #3807). A zero-distance stub says "measured,
         // contributes nothing". Only when the outbound exists: with neither leg
         // stored, the straight-line double IS the intended display.
-        : (outbound && entry.tripMode !== 'one-way'
-            ? { coords: [], distance: 0, duration: 0 }
-            : null);
+        ret = { coords: [], distance: 0, duration: 0 };
+    }
     // No saveToHistory here: re-displaying an existing history/favorite entry
     // must not create a new one (the old side effect in displayRoute did).
     displayRoute({
