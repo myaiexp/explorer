@@ -1,54 +1,34 @@
 // POST /pois + POST /roads — start-anchored candidate pools, sampled to POOL_CAP.
 
 import type { Hono, Context } from 'hono';
-import { overpassMsOf, type AnchoredLookupResult } from '../cache.js';
+import type { AnchoredLookupResult } from '../cache.js';
 import { ipRateLimit } from '../rate-limit.js';
-import { log } from '../log.js';
 import { parsePoiRequest, parseRoadRequest, type PoolAnchor } from '../lib/parse-pool-request.js';
-import { readJsonBody, queryHasAnchor, QUERY_ANCHOR_ERROR } from '../lib/post-body.js';
+import { readParsedBody } from '../lib/post-body.js';
 import { filtersForTypes } from '../poi-catalog.js';
 import { POOL_CAP, samplePool } from '../lib/pool.js';
 import { getPoisAnchored, getRoadsAnchored } from '../lookups.js';
+import { logStart, respondLookup } from './respond.js';
 
 // The cached set is the whole annulus; the response is a fresh random slice of
 // it, so a cache hit still re-rolls rather than replaying the same candidates.
-async function respondWithPool(
+// `total` stays the size of the cached set.
+function respondWithPool(
     c: Context,
     kind: 'pois' | 'roads',
     anchor: PoolAnchor,
     select: string,
     lookup: () => Promise<AnchoredLookupResult>,
 ) {
-    // Never at full precision — a start is usually the walker's home
-    // (finding #7559), and these lines land in the service log.
-    const start = `${anchor.startLat.toFixed(3)},${anchor.startLng.toFixed(3)}`;
-    try {
+    const sampled = async () => {
         const result = await lookup();
-        const candidates = samplePool(result.junctions, POOL_CAP);
-        log('INFO', {
-            event: 'pool_lookup',
-            kind,
-            cache: result.cache,
-            start,
-            minKm: anchor.minKm,
-            maxKm: anchor.maxKm,
-            select,
-            count: candidates.length,
-            total: result.total,
-            overpass_ms: overpassMsOf(result),
-        });
-        return c.json({
-            cache: result.cache,
-            count: candidates.length,
-            total: result.total,
-            overpassMs: overpassMsOf(result),
-            candidates,
-        });
-    } catch (e) {
-        const err = e as Error;
-        log('ERROR', { event: 'pool_lookup_failed', kind, start, select, err: err.message });
-        return c.json({ error: 'POI search is busy. Please try again.' }, 502);
-    }
+        return { ...result, junctions: samplePool(result.junctions, POOL_CAP) };
+    };
+    return respondLookup(c, sampled, {
+        event: 'pool_lookup',
+        pointsKey: 'candidates',
+        logFields: { kind, start: logStart(anchor), minKm: anchor.minKm, maxKm: anchor.maxKm, select },
+    });
 }
 
 // Called once per createApp(), so the rate-limit buckets are per-instance
@@ -60,11 +40,8 @@ export function registerPoolRoutes(app: Hono): void {
     const roadsRateLimit = ipRateLimit(60);
 
     app.post('/pois', poisRateLimit, async c => {
-        if (queryHasAnchor(c)) return c.json({ error: QUERY_ANCHOR_ERROR }, 400);
-        const read = await readJsonBody(c);
-        if (!read.ok) return c.json({ error: read.error }, read.status);
-        const parsed = parsePoiRequest(read.body);
-        if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+        const parsed = await readParsedBody(c, parsePoiRequest);
+        if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
         // Re-resolved rather than threaded through the parser: filtersForTypes is
         // the single place a catalog key becomes an Overpass filter, and it has
         // already rejected anything unknown above.
@@ -75,11 +52,8 @@ export function registerPoolRoutes(app: Hono): void {
     });
 
     app.post('/roads', roadsRateLimit, async c => {
-        if (queryHasAnchor(c)) return c.json({ error: QUERY_ANCHOR_ERROR }, 400);
-        const read = await readJsonBody(c);
-        if (!read.ok) return c.json({ error: read.error }, read.status);
-        const parsed = parseRoadRequest(read.body);
-        if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+        const parsed = await readParsedBody(c, parseRoadRequest);
+        if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
         return respondWithPool(c, 'roads', parsed.anchor, parsed.exclude,
             () => getRoadsAnchored(parsed.anchor, parsed.exclude));
     });

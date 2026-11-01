@@ -1,64 +1,31 @@
 // GET + POST /junctions — road-junction lookups, bbox or start-anchored.
 
 import type { Hono, Context } from 'hono';
-import { getJunctions, getJunctionsAnchored, overpassMsOf } from '../cache.js';
+import { getJunctions, getJunctionsAnchored } from '../cache.js';
 import { ipRateLimit } from '../rate-limit.js';
-import { log } from '../log.js';
 import {
+    parseJunctionsBody,
     parseJunctionsQuery,
-    fieldsFromUnknown,
     type ParsedJunctionsQuery,
 } from '../lib/parse-request.js';
-import { readJsonBody, queryHasAnchor, QUERY_ANCHOR_ERROR } from '../lib/post-body.js';
+import { queryHasAnchor, QUERY_ANCHOR_ERROR, readParsedBody } from '../lib/post-body.js';
+import { logStart, respondLookup } from './respond.js';
 
-async function lookupJunctions(c: Context, parsed: ParsedJunctionsQuery) {
+function lookupJunctions(c: Context, parsed: ParsedJunctionsQuery) {
     const { bbox, exclude, bboxLog, anchor } = parsed;
-    const mode = anchor ? 'anchored' : 'bbox';
-    try {
-        if (anchor) {
-            const result = await getJunctionsAnchored(anchor, exclude, bbox);
-            log('INFO', {
-                event: 'lookup',
-                mode,
-                cache: result.cache,
-                start: `${anchor.startLat.toFixed(3)},${anchor.startLng.toFixed(3)}`,
-                maxKm: Math.ceil(anchor.maxKm),
-                bbox: bboxLog,
-                exclude,
-                count: result.junctions.length,
-                total: result.total,
-                overpass_ms: overpassMsOf(result),
-            });
-            return c.json({
-                cache: result.cache,
-                count: result.junctions.length,
-                total: result.total,
-                overpassMs: overpassMsOf(result),
-                junctions: result.junctions,
-            });
-        }
-
-        const result = await getJunctions(bbox, exclude);
-        log('INFO', {
+    const scope = { bbox: bboxLog, exclude };
+    if (anchor) {
+        return respondLookup(c, () => getJunctionsAnchored(anchor, exclude, bbox), {
             event: 'lookup',
-            mode,
-            cache: result.cache,
-            bbox: bboxLog,
-            exclude,
-            count: result.junctions.length,
-            overpass_ms: overpassMsOf(result),
+            pointsKey: 'junctions',
+            logFields: { mode: 'anchored', start: logStart(anchor), maxKm: Math.ceil(anchor.maxKm), ...scope },
         });
-        return c.json({
-            cache: result.cache,
-            count: result.junctions.length,
-            overpassMs: overpassMsOf(result),
-            junctions: result.junctions,
-        });
-    } catch (e) {
-        const err = e as Error;
-        log('ERROR', { event: 'lookup_failed', mode, bbox: bboxLog, exclude, err: err.message });
-        return c.json({ error: 'POI search is busy. Please try again.' }, 502);
     }
+    return respondLookup(c, () => getJunctions(bbox, exclude), {
+        event: 'lookup',
+        pointsKey: 'junctions',
+        logFields: { mode: 'bbox', ...scope },
+    });
 }
 
 // Called once per createApp(), so the rate-limit bucket map is per-instance
@@ -79,13 +46,8 @@ export function registerJunctionsRoutes(app: Hono): void {
     });
 
     app.post('/junctions', junctionsRateLimit, async c => {
-        if (queryHasAnchor(c)) return c.json({ error: QUERY_ANCHOR_ERROR }, 400);
-        const read = await readJsonBody(c);
-        if (!read.ok) return c.json({ error: read.error }, read.status);
-        const fields = fieldsFromUnknown(read.body);
-        if (!fields.ok) return c.json({ error: fields.error }, 400);
-        const parsed = parseJunctionsQuery(fields.fields);
-        if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+        const parsed = await readParsedBody(c, parseJunctionsBody);
+        if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status);
         return lookupJunctions(c, parsed);
     });
 }

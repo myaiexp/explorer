@@ -55,6 +55,11 @@ export function fieldsFromUnknown(body: unknown): FieldsResult {
     };
 }
 
+export function parseJunctionsBody(body: unknown): ParsedJunctionsQuery | ParseFailure {
+    const fields = fieldsFromUnknown(body);
+    return fields.ok ? parseJunctionsQuery(fields.fields) : fields;
+}
+
 export function parseJunctionsQuery(q: JunctionsQuery): ParsedJunctionsQuery | ParseFailure {
     const bboxStr = q.bbox;
     const excludeStr = q.exclude ?? 'default';
