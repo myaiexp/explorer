@@ -4,7 +4,7 @@
 # reads that field — it warns "The following keys were ignored: pnpm.overrides" and
 # carries on, so the security pin below would silently stop applying. pnpm 10 and 11
 # both read this file, so it is the location that works on every version.
-# Guarded by tests/pnpm-workspace-settings.test.js. Idea #3194.
+# Guarded by tests/pnpm-workspace-settings.test.js.
 
 # Empty on purpose. server/, junctions-cache/ and tools/ are INDEPENDENT pnpm projects
 # with their own lockfiles, not workspace members — each carries its own

@@ -14,7 +14,7 @@ function maybeRequestConsent() {
 // Persist a synced collection and mirror the change to the cloud outbox in one
 // step. writeStoredArray (storage.js) owns the localStorage write; these keep the
 // persist-and-mirror invariant in one place so a new call site can't save locally
-// while forgetting to replicate (the bug class fixed in #2065). Every mutation of
+// while forgetting to replicate. Every mutation of
 // the four synced collections (savedLocations, favorites, history, visits) goes
 // through one of these — except importVisits' batch put (visits-io.js), which
 // writes once and mirrors each row in a loop.

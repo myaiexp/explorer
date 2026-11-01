@@ -34,8 +34,8 @@ type UserTable = PgTable & { username: PgColumn };
 // map any { error } to null. `nullOnError` names that once, so a fifth section
 // is a one-liner. One wrapper per section, all `import*Row`; history is the
 // trip shape (no poiCategory) so it reuses importTripRow. Coordinate-shape
-// validation lives inside validateTripRow, so these no longer need the
-// assertRouteCoords try/catch the import loops used to repeat.
+// validation lives inside validateTripRow, so the import loops need no
+// assertRouteCoords try/catch.
 function nullOnError<T>(
   validate: (id: unknown, username: string, body: AnyRecord) => RowResult<T>,
 ): (row: unknown, username: string) => T | null {
@@ -54,11 +54,11 @@ export const importSavedLocationRow = nullOnError(validateSavedLocationRow);
 export function importRoutes(db: Db, opts: { maxStoredBytes?: number } = {}): Hono {
   // Production leaves this unset. Tests pass a tiny cap: MAX_IMPORT_BODY_BYTES
   // is below MAX_STORED_BYTES, so a live POST cannot carry enough jsonb to
-  // trip the quota below (finding #12626).
+  // trip the quota below.
   const maxStoredBytes = opts.maxStoredBytes ?? MAX_STORED_BYTES;
   const app = new Hono();
 
-  // Reject oversized bodies before c.req.json() buffers them (audit #1343).
+  // Reject oversized bodies before c.req.json() buffers them.
   // Larger than the per-row PUT cap because a full-account backup is four
   // sections; still hard-bounded so memory can't grow with attacker intent.
   const importBodyLimit = bodyLimit({
@@ -126,8 +126,8 @@ export function importRoutes(db: Db, opts: { maxStoredBytes?: number } = {}): Ho
 
     // Validate every row up front — a single bad row 400s before any write.
     // Also reject duplicate ids within a section: the composite PK (username, id)
-    // would abort the insert with an opaque 500 otherwise (idea #2485).
-    // Per-section row cap (audit #1343 / finding #7278) — same MAX_ROWS_PER_SECTION
+    // would abort the insert with an opaque 500 otherwise.
+    // Per-section row cap — same MAX_ROWS_PER_SECTION
     // as the per-row PUT insert gate — rejects huge arrays before we allocate
     // the validated-row buffers; routeCoords length is already capped inside
     // validateTripRow → assertRouteCoords.
@@ -156,7 +156,7 @@ export function importRoutes(db: Db, opts: { maxStoredBytes?: number } = {}): Ho
       collected.push({ table, rows });
     }
 
-    // Per-account stored-jsonb budget (finding #7756). Import replaces every
+    // Per-account stored-jsonb budget. Import replaces every
     // section, so charge the incoming jsonb only — the rows it deletes are not
     // added on top. wouldExceedStoredBudget's current and old-row arguments
     // stay 0 for that reason; the cap is the argument tests override.

@@ -4,12 +4,13 @@
 // backup file through normalizeVisit before anything is persisted, and
 // renderVisitedLayer (map-view.js) asks visitRenderParts what it can safely draw
 // for a row that is ALREADY in storage. Sharing the rules is what guarantees a
-// row that survives import can always be rendered — the two used to disagree
-// (import accepted anything array-shaped, render dereferenced fields blind), and
-// a single bad row aborted app.js's top-level init on every later page load.
+// row that survives import can always be rendered — separate rules could
+// disagree (import accepting anything array-shaped, render dereferencing fields
+// blind), and a single bad row would abort app.js's top-level init on every
+// later page load.
 // destCoordsOrNull is the dest-only slice of that gate: favorites.js and
-// history.js skip a stored row that lacks drawable dest coords the same way
-// (finding #7307). Pure: no DOM, no network, no storage — depends on nothing, so
+// history.js skip a stored row that lacks drawable dest coords the same way.
+// Pure: no DOM, no network, no storage — depends on nothing, so
 // it only has to be loaded before its consumers (map-view.js, favorites.js,
 // history.js, then visits-io.js).
 
@@ -80,7 +81,7 @@ function stringOrNull(v, max) {
 // stringify. Anything else is rejected rather than repaired, because an id is not
 // just a local key — it becomes a path segment in an authenticated cloud-backup
 // write (sync-flush.js), and it is a primary-key column server-side. sync.js's
-// apiPath percent-encodes it, so a stray '/' can no longer redirect the request,
+// apiPath percent-encodes it, so a stray '/' cannot redirect the request,
 // but dot-segments survive encoding intact ('..' encodes to '..') and would still
 // be normalized away by the browser — so the charset check is what closes that,
 // with the encoding as defence in depth.

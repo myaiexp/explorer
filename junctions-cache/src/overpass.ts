@@ -10,7 +10,7 @@ const ATTEMPT_TIMEOUT_MS = 30_000;
 const STATUS_TIMEOUT_MS = 5_000;
 const MAX_ATTEMPTS = 3;
 // Hard cap before JSON.parse so a runaway Overpass dump cannot OOM the
-// process (finding #7755). 32 MiB is above a typical walk-bbox response
+// process. 32 MiB is above a typical walk-bbox response
 // and well under MemoryMax=512M.
 export const OVERPASS_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -29,7 +29,7 @@ export class OverpassHttpError extends Error {
 // beside truncated or empty `elements`. Its own class because failurePolicy has
 // to tell it apart from a connection failure, which latches local down. A
 // too-big query is not an unhealthy instance, and it would fail identically on
-// the fallback (idea #3160).
+// the fallback.
 export class OverpassIncompleteError extends Error {
     constructor(public readonly remark: string) {
         super(`overpass incomplete: ${remark}`);
@@ -49,15 +49,11 @@ export type OverpassElement = {
     tags?: Record<string, string>;
 };
 
-// The road-filter presets. NO LONGER A TWIN: wander/overpass.js used to carry
-// byte-identical HIGHWAY_EXCLUDE_DEFAULT / _WINTER copies plus its own
-// status-parse + retry loop, kept in lockstep by
-// wander/tests/overpass-exclude-parity.test.js. The frontend now POSTs /pois
-// and /roads and names a preset by keyword ('default' | 'winter'), so this is
-// the single copy and that parity test is gone with its twin. Do not
-// reintroduce a client-side copy: a client that can only name a preset cannot
-// inject a filter into our own Overpass instance. (The live twin that remains
-// is poi-catalog.ts ↔ wander/poi-types.js.)
+// The road-filter presets. The frontend POSTs /pois and /roads and names a
+// preset by keyword ('default' | 'winter'); this is the only copy. Keep it
+// server-side: a client that can only name a preset cannot inject a filter into
+// our own Overpass instance. (The twin that must stay in step is
+// poi-catalog.ts <-> wander/poi-types.js.)
 export type ExcludePreset = 'default' | 'winter';
 export const HIGHWAY_EXCLUDE: Record<ExcludePreset, string> = {
     default: 'motorway|motorway_link|trunk|trunk_link|service|steps',
@@ -161,8 +157,7 @@ async function attemptQuery(target: Target, query: string, attempt: number): Pro
         // 200, as a `remark` beside a truncated or empty `elements`. Taken at
         // face value that is a silently partial pool — and a non-empty one would
         // then sit in the cache for the full 30-day TTL. Treat it as a failed
-        // attempt so the retry budget applies and the caller sees a reason
-        // (idea #3160).
+        // attempt so the retry budget applies and the caller sees a reason.
         if (typeof data.remark === 'string' && data.remark.trim() !== '') {
             log('WARN', {
                 event: 'overpass_remark',
@@ -187,7 +182,7 @@ function isPushback(err: Error): err is OverpassHttpError {
 // and whether another attempt could go differently.
 function failurePolicy(err: Error): { latchLocal: boolean; retry: boolean } {
     // A body over the cap will not shrink on retry, so stop rather than burn two
-    // more Overpass slots (finding #7755). It is our bbox being too big, not
+    // more Overpass slots. It is our bbox being too big, not
     // local being unhealthy.
     if (err instanceof BodyTooLargeError) return { latchLocal: false, retry: false };
     // A remark means the query was too big for its timeout, not that the
@@ -195,7 +190,7 @@ function failurePolicy(err: Error): { latchLocal: boolean; retry: boolean } {
     if (err instanceof OverpassIncompleteError) return { latchLocal: false, retry: true };
     if (err instanceof OverpassHttpError) {
         // A 4xx will not change on retry, so skip the status-endpoint fetches and
-        // back-off sleeps (idea #1601). It would also fail identically against
+        // back-off sleeps. It would also fail identically against
         // the fallback, so latching would ship our bad query to a public server
         // and cost five minutes of local for nothing. 429 is the exception: a
         // slot/rate signal, retryable on the same target.
@@ -215,7 +210,7 @@ export async function runOverpassQuery(query: string): Promise<OverpassElement[]
     let lastErr: Error | null = null;
     // Kept apart from lastErr so that a failure with its own clear message wins
     // the terminal throw, and all-pushback exhaustion still names *which*
-    // upstream condition exhausted us (audit #3158).
+    // upstream condition exhausted us.
     let lastRetryStatus: number | null = null;
     // Whether the attempt just finished actually went to the public instance.
     // Only such an attempt can have produced a slot signal worth waiting on.

@@ -96,8 +96,8 @@ async function generateDestination() {
                 existingDests, maxKm, tripMode, spread, winterMode, degraded, avoidBacktracking, onProgress });
             const { dest, destName, outbound: outboundRoute, return: returnRoute, junctions, overlap } = built;
 
-            // Clear only now that the replacement is in hand (#4043). Same rule
-            // as buildAndDisplay (#3663): a throw before this leaves the previous
+            // Clear only now that the replacement is in hand. Same rule
+            // as buildAndDisplay: a throw before this leaves the previous
             // route on the map and in the session. displayRoute adds layers; it
             // does not replace them, so the clear still has to happen first.
             clearMap();

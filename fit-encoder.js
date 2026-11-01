@@ -95,7 +95,7 @@
         if (!coords || coords.length < 2) throw new Error('encodeCourse: need >=2 coordinates');
         // One altitude per coord, or none. A short sampled series would stamp
         // the first N records with every-Nth vertex's height and the rest as
-        // sea level (finding #7300) — drop the field rather than invent 0 m.
+        // sea level — drop the field rather than invent 0 m.
         const elevations = (input.elevations && input.elevations.length === coords.length)
             ? input.elevations
             : null;

@@ -13,9 +13,8 @@ export const MAX_DATE_LEN = 40; // ISO-8601 timestamps are ≤ ~29 chars
 // Row ids become URL path segments (PUT /:username/<section>/:id) and PK
 // columns. Mirror visit-shape.js idOrNull: RFC 3986 unreserved charset, 128-char
 // cap, and reject dot-only segments ('.' / '..' survive percent-encoding and
-// would be normalized away by the browser). Finding #7061 — import had no
-// bound, so an authenticated client could persist arbitrarily large or
-// punctuation-heavy ids.
+// would be normalized away by the browser). The bound stops an authenticated
+// client from persisting arbitrarily large or punctuation-heavy ids.
 export const MAX_ID_LEN = 128;
 export const SAFE_ID = /^[A-Za-z0-9._~-]+$/;
 

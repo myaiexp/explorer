@@ -19,10 +19,10 @@ function parseLimit(raw: string | undefined): number | null {
 export function accountArchiveRoutes(db: Db): Hono {
   const app = new Hono();
 
-  // The escape hatch for an archive that GET /:username?geometry=full 413s on
-  // (idea #3715): one section at a time, newest-first, keyset-paged on
-  // (sort column, id), with stored geometry intact. The 413 stays where it is —
-  // it is the backstop for the unbounded dump, and this is the bounded walk.
+  // The escape hatch for an archive that GET /:username?geometry=full 413s on:
+  // one section at a time, newest-first, keyset-paged on
+  // (sort column, id), with stored geometry intact. The 413 is the backstop
+  // for the unbounded dump, and this is the bounded walk.
   //
   // Archive recovery only; the frontend never calls it. Same IP read limit and
   // per-account token as every other read.

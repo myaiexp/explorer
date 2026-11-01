@@ -4,11 +4,11 @@
 // The fetchers take all inputs as params and return plain {lat,lng[,name]} arrays.
 //
 // Query assembly, the Overpass retry + status-slot loop, OSM element extraction
-// and the annulus filter all used to live in this file. They now live in
-// junctions-cache (src/overpass-pools.ts, src/lookups.ts, src/routes/pools.ts)
-// behind POST /api/junctions/pois and POST /api/junctions/roads, so the browser
-// receives a sampled pool of coordinates instead of the raw OSM elements: a
-// 3.85 km road query was 5.2 MB / 14,043 elements over mobile data.
+// and the annulus filter live in junctions-cache (src/overpass-pools.ts,
+// src/lookups.ts, src/routes/pools.ts) behind POST /api/junctions/pois and
+// POST /api/junctions/roads, so the browser receives a sampled pool of
+// coordinates instead of the raw OSM elements: a 3.85 km road query is
+// 5.2 MB / 14,043 elements over mobile data.
 //
 // The service takes catalog KEYS and preset NAMES, never Overpass filter
 // strings — a client that could name a filter could inject a query against our
@@ -16,9 +16,9 @@
 // browser only to describe the dropdown.
 //
 // Start coordinates travel in the POST body, never the query string, so nginx
-// access logs cannot persist a walker's home (#7559).
+// access logs cannot persist a walker's home.
 
-// One request per pool now, not a 3-attempt client retry budget — the service
+// One request per pool, no client retry budget — the service
 // owns the retries and the slot waiting. 60s matches the proxy_read_timeout in
 // deploy/nginx-junctions.conf, which is the real ceiling on a cache miss that
 // has to reach Overpass.
@@ -76,7 +76,7 @@ async function fetchRoadsInRadius(startLat, startLng, minKm, maxKm, winterMode =
 
 // Fetch OSM junctions in the start/dest corridor via the shelly cache
 // (mase.fi/api/junctions). Start/radius go in the POST body — never the
-// query string — so nginx access logs cannot persist home coords (#7559).
+// query string — so nginx access logs cannot persist home coords.
 // maxKm is the caller's budget (passed in, never read from the DOM) so
 // the cache key matches the radius the caller works in.
 async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode = false) {

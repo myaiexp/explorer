@@ -20,9 +20,9 @@ function haversineM(lat1, lng1, lat2, lng2) {
 }
 
 // km→degree projection (the small-angle "111 km per degree" approximation) —
-// the single named owner of a formula that was previously copied across
-// overpass.js, osrm.js, and geometry.js. Latitude spacing is ~constant; a fix
-// or precision change to the projection now happens in one place.
+// the single named owner of the formula, shared by overpass.js, osrm.js, and
+// geometry.js. Latitude spacing is ~constant; a fix or precision change to the
+// projection happens in one place.
 
 // Kilometres → degrees of latitude.
 function kmToDegLat(km) {

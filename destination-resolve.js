@@ -227,7 +227,7 @@ async function findBestLoop(startLat, startLng, {
 
 // Build the route for a resolved destination. Every non-degraded round trip
 // runs the novelty-retry loop (findBestLoop) unconditionally — smart routing
-// is no longer a caller-supplied toggle, it IS round-trip routing — which may
+// is part of round-trip routing and takes no caller toggle — which may
 // substitute a different, lower-overlap destination; one-way always, and a
 // degraded round trip, dispatch straight through buildRouteForMode instead.
 // `winterMode`/`degraded` are passed in (read from the DOM/latch by the

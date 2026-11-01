@@ -87,7 +87,7 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
     // Upsert scoped to the OWNER: the conflict target is the composite PK
     // (username, id), so a PUT of an id that already exists under a DIFFERENT
     // account inserts a fresh row under the caller instead of rewriting the
-    // other account's row (audit #4832/#4855). The conflict set updates every
+    // other account's row. The conflict set updates every
     // column except the PK keys (username, id) — derived from the row itself, so
     // there's no second hand-maintained field list to drift from buildRow — plus
     // a fresh updatedAt (buildRow omits it), which the client's last-write-wins
@@ -97,7 +97,7 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
     const { id: _id, username: _username, ...cols } = built.row as AnyRecord;
     const set = { ...cols, updatedAt: sql`now()` };
 
-    // Row-count gate on INSERT (finding #7278). Updates of an existing id are
+    // Row-count gate on INSERT. Updates of an existing id are
     // always allowed so a full account can still edit. Lock the account row so
     // two concurrent new-id PUTs cannot both observe count < cap and both insert.
     const capError = await db.transaction(async (tx) => {
@@ -117,7 +117,7 @@ function registerSection<T extends PgTable & { id: PgColumn; username: PgColumn 
           return `section exceeds maximum of ${MAX_ROWS_PER_SECTION} rows`;
         }
       }
-      // Per-account stored-jsonb budget (finding #7756). Same estimator GET
+      // Per-account stored-jsonb budget. Same estimator GET
       // uses; charged as a delta so an update is not double-counted. Shrinks
       // skip the SUM entirely. The account-row lock above serializes concurrent
       // growth so two PUTs cannot both observe current < cap and both insert.

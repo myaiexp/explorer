@@ -91,7 +91,7 @@ export function parseJunctionsQuery(q: JunctionsQuery): ParsedJunctionsQuery | P
     // Anchor params are all-or-nothing: startLat, startLng and maxKm must be
     // supplied together. A partial set is a malformed request — silently falling
     // through to bbox mode would look like success while ignoring the intended
-    // anchoring (audit #3159).
+    // anchoring.
     const anchorEntries: [string, string | undefined][] = [
         ['startLat', startLatStr],
         ['startLng', startLngStr],

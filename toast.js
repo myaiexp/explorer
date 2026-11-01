@@ -4,8 +4,7 @@
 // Per-variant config. `styles` is the exact set of inline style writes applied
 // on show (insertion order = write order). `reset` lists the style props the
 // hide-timeout clears. The 'error' variant deliberately writes no borderColor
-// and resets nothing on hide — preserving the original three functions' exact
-// DOM-mutation sets (audit #1266).
+// and resets nothing on hide.
 const TOAST_VARIANTS = {
     error: {
         styles: { color: '', background: '' },

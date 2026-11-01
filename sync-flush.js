@@ -19,7 +19,7 @@
     // off globalThis at call time because storage.js loads AFTER this script —
     // both are defined well before any outbox op runs. writeStoredArray's quota
     // handler frees space by trimming old visit geometry, so a full localStorage
-    // no longer silently drops queued mutations here either. Returns the boolean
+    // does not silently drop queued mutations here either. Returns the boolean
     // so callers can skip scheduleFlush when the durable queue write failed —
     // otherwise flush would run against a queue that never accepted the entry.
     function parseOutbox() {
@@ -63,7 +63,7 @@
         // microtask). Every caller — enqueue, the post-request reschedule, the
         // online handler, the host's load-time nudge — goes through this, so
         // there is one place where a flush can start. An auth block freezes the
-        // pump without dropping entries (audit #6223).
+        // pump without dropping entries.
         function scheduleFlush(delayMs) {
             if (_destroyed || _authBlocked) { return; }
             if (_backoffTimer !== null) { return; }
@@ -89,8 +89,7 @@
         }
 
         // Resolve any pending whenDrained() promises once the queue is fully
-        // drained and no request is in flight. The event-based completion signal
-        // that replaces the old 10 ms polling loop.
+        // drained and no request is in flight. This is the event-based completion signal.
         function settleFlushWaiters() {
             if (_flushing) { return; }
             if (parseOutbox().length > 0) { return; }
@@ -164,8 +163,8 @@
 
                 // 401/403: wrong/missing token or deleted account — not an
                 // entry-level reject. Dropping the whole durable queue would
-                // silently diverge cloud from local with only a console.warn
-                // (audit #6223). Hard-stop: keep the head, toast once, freeze
+                // silently diverge cloud from local with only a console.warn.
+                // Hard-stop: keep the head, toast once, freeze
                 // the pump until resume() after consent is re-bound.
                 if (res.status === 401 || res.status === 403) {
                     _backoffMs = 0;

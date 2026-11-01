@@ -10,8 +10,8 @@ export default defineConfig({
         fileParallelism: false,
         // …and every WORKTREE shares that same wander_test, because Helm copies
         // server/.env verbatim into each one. fileParallelism only serializes
-        // files within one process, so a second session's suite truncated this
-        // one's rows mid-test (idea #4042). global-setup.ts holds a Postgres
+        // files within one process, so a second session's suite would truncate this
+        // one's rows mid-test. global-setup.ts holds a Postgres
         // advisory lock on the resolved test database for the length of the run.
         globalSetup: './tests/global-setup.ts',
         // Enforced by `pnpm test:coverage`; plain `pnpm test` and path-filtered

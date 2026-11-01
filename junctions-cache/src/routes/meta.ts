@@ -11,10 +11,10 @@ import { getFreshness } from '../overpass-freshness.js';
 // /logs serves recent request events back to a remote caller (debugging). Those
 // events include the walker's anchored `start` at ~110 m precision (≈ home) and
 // roaming radius, and the endpoint is publicly reachable via the VPS proxy at
-// /api/junctions/logs — so it is CLOSED by default (audit: unauthenticated log
-// dump leaking home coords). Set LOGS_TOKEN to reopen it behind a constant-time
-// bearer-token check; unset ⇒ refuse. journald (`ssh shelly journalctl -u
-// wander-junctions`) remains the primary, already-authenticated log path.
+// /api/junctions/logs — so it is CLOSED by default. Set LOGS_TOKEN to reopen it
+// behind a constant-time bearer-token check; unset ⇒ refuse. journald
+// (`ssh shelly journalctl -u wander-junctions`) remains the primary,
+// already-authenticated log path.
 export function logsTokenOk(c: Context): boolean {
     const expected = process.env.LOGS_TOKEN;
     if (!expected) return false;

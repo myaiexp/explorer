@@ -2,7 +2,7 @@
 //
 // Production: wander-api.socket owns /run/wander-api.sock (0660 root:www-data)
 // and passes it down as fd 3, so the uid boundary is the socket file's mode,
-// not a TCP port every local uid can reach (finding #10094). Dev and tests
+// not a TCP port every local uid can reach. Dev and tests
 // bind 127.0.0.1:PORT and never trust forwarding headers there.
 import type { Server } from 'node:http';
 import { createAdaptorServer, serve } from '@hono/node-server';

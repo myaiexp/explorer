@@ -15,11 +15,11 @@
 // Per-leg + total walking distance/duration from an outbound/return route pair.
 // A missing leg falls back to the straight-line distance — EXCEPT a one-way
 // trip's (absent) return leg, which contributes 0 (there is no return). This is
-// the correct rule; displayRoute previously inlined a copy that omitted the
-// one-way guard and so double-counted one-way distances.
+// the rule displayRoute and every other caller share; without the one-way
+// guard a one-way distance would be double-counted.
 //
 // `estimated` reports whether that substitution happened, so a caller never has
-// to re-derive it (idea #3807). It is true when any leg the trip mode expects is
+// to re-derive it. It is true when any leg the trip mode expects is
 // missing, and it says two things about the numbers: totalWalkKm is part
 // crow-flies guess, and totalDuration counts ONLY the legs that routed — a round
 // trip with a failed return under-reports the walk time by roughly half. Neither
@@ -40,7 +40,7 @@ function computeRouteTotals(outbound, ret, straightKm, tripMode) {
 // stores that as plain measured km with nothing marking it.
 //
 // Coords, not truthiness: a truthy leg with empty coords is a failed route in a
-// route object's clothing (finding #7926) and drew nothing on the map either.
+// route object's clothing and draws nothing on the map either.
 // computeRouteTotals deliberately stays on truthiness — restoreResult hands it a
 // zero-distance, coord-less return stub to mean "measured, contributes nothing".
 function isMeasuredWalk(outbound, ret, tripMode) {

@@ -6,14 +6,14 @@
 // here breaks the deployed code and stays broken until that branch deploys. helm lived
 // this on 2026-08-22: four columns gone from a worktree, 25 minutes of HTTP 500.
 //
-// The fix is not a new pipeline: forgejo-deploy ALREADY runs `pnpm drizzle-kit migrate`
+// No new pipeline is needed: forgejo-deploy ALREADY runs `pnpm drizzle-kit migrate`
 // in ~/Projects/wander/server the moment a push lands, straight after the build. So
 // the destructive half simply belongs there, and this guard's whole job is to send it
 // there. Additive DDL still applies straight from a worktree, because that is what a
 // session developing against a new column needs. Note forgejo-deploy calls the drizzle
 // binary, not this script — the deploy path cannot be wedged by the guard.
 //
-// Ported from helm's src/db/migrate-guard.ts (idea #3965).
+// Ported from helm's src/db/migrate-guard.ts.
 import type { DestructiveStatement } from './destructive-ddl.js';
 
 /** A migration drizzle-kit is about to apply, with whatever the scan found in it. */

@@ -18,7 +18,7 @@ export function accountDataRoutes(db: Db): Hono {
   // and favorite payloads older than GET_GEOMETRY_KEEP are stripped so the
   // init-path merge (sync.js Case 2) stays bounded. `?geometry=full` returns
   // the archive only when stored jsonb is under GET_SNAPSHOT_MAX_BYTES;
-  // otherwise 413 so Node never JSON-encodes a multi-GB fill (finding #7558).
+  // otherwise 413 so Node never JSON-encodes a multi-GB fill.
   app.get('/:username', readRateLimit(), accountAuth(db), async (c) => {
     const username = c.req.param('username')!;
     const fullGeometry = c.req.query('geometry') === 'full';

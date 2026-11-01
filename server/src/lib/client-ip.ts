@@ -9,13 +9,13 @@
 // service /run/wander-api.sock, 0660 root:www-data, so only nginx can connect,
 // and index.ts marks every request accepted there with PROXY_SOCKET_FLAG.
 // Loopback TCP is deliberately NOT trusted: every uid on the box can reach
-// 127.0.0.1, and trusting it let any of them mint a fresh rate-limit key per
-// request with X-Real-IP (finding #10094).
+// 127.0.0.1, and trusting it would let any of them mint a fresh rate-limit key per
+// request with X-Real-IP.
 //
 // Behind a trusted proxy, prefer X-Real-IP (nginx overwrites it with
 // $remote_addr) then the *last* X-Forwarded-For hop (the address nginx
 // appended). The leftmost XFF hops are client-supplied and must not key
-// buckets or ipFirstSeen (finding #7895).
+// buckets or ipFirstSeen.
 
 import type { Context } from 'hono';
 

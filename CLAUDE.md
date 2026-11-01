@@ -58,6 +58,8 @@ pnpm db:migrate        # PROD — guarded: refuses destructive DDL from a worktr
 pnpm build             # tsc → dist/
 ```
 
+Comments state the current contract and the non-obvious why. Ticket tags (`finding #N`, `idea #N`) and accounts of removed code go in the commit message: neither resolves from the repo.
+
 Four independent pnpm lockfiles (root, `server/`, `junctions-cache/`, `tools/`) so pnpm does not hoist — layout, the silent-absorb trap, and the `*_test` hard-throw: `tests/README.md`. Only `server/` (forgejo-deploy) and `junctions-cache/` (shelly hook) are `pnpm install`ed on deploy; root and `tools/` are local/dev only.
 
 Deploy with `deploy` (push → forgejo-deploy builds the server, migrates, copies frontend; local script restarts `wander-api`). Canonical nginx/systemd files, unit-install caveat, and `ProtectHome=tmpfs`: `deploy/README.md`. Junctions-cache deploys separately (`junctions-cache/README.md`).

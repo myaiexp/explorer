@@ -27,8 +27,8 @@ import {
 export type RowResult<T> = { error: string } | { row: T };
 
 // Scalar lat/lng: same finite + WGS-84 bounds as assertRouteCoords, so a PUT
-// cannot persist a start/dest the client latOrNull/lngOrNull would drop
-// (finding #7775). Non-number keeps the historical "Missing required field"
+// cannot persist a start/dest the client latOrNull/lngOrNull would drop.
+// Non-number keeps the historical "Missing required field"
 // wording; non-finite and out-of-range get their own reasons.
 function parseCoord(
   name: string,
@@ -125,7 +125,7 @@ export function validateVisitRow(
 
 // `source` is the favorite object as received: the wrapped shape { id, payload }
 // or the client's flat favorite (no payload key → the object itself is stored as
-// the JSONB payload; #2065). A present-but-null payload is malformed and rejected
+// the JSONB payload). A present-but-null payload is malformed and rejected
 // (favorites.payload is NOT NULL). `id` comes from the caller, not from `source`.
 export function validateFavoriteRow(
   id: unknown,
@@ -138,7 +138,7 @@ export function validateFavoriteRow(
   if (payload === undefined || payload === null) return { error: 'Missing required field: payload' };
   // JSONB will accept an array or a string, but the client unwraps payload as
   // an object and the list renderer toFixed's destLat. A 204 of [] / "x" is a
-  // row the UI cannot draw and that used to abort first paint (#7307).
+  // row the UI cannot draw, and one would abort first paint.
   if (typeof payload !== 'object' || Array.isArray(payload))
     return { error: 'payload must be an object' };
   if (payloadLength(payload) > MAX_FAVORITE_PAYLOAD_LEN)

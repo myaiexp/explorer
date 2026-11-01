@@ -7,7 +7,7 @@
 // Called from every path that swaps the session (displayRoute) or the visit
 // (markAsVisited).
 //
-// It used to be set imperatively at each site, which desynced two ways: opening
+// Setting it imperatively at each site desyncs two ways: opening
 // a history entry after marking a route visited kept the 'Visited! (undo)' label
 // over a session with no visitId, so the undo click fell through to the create
 // branch and silently recorded the restored route as an extra walk; and a spread

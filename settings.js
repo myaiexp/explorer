@@ -10,13 +10,11 @@ const SETTINGS_KEY = 'walk_settings';
 // inputs) are only restored when non-empty so a blank saved value never clobbers
 // a default. The tripMode radio pair and the distance-label sync stay explicit
 // in restoreSettings — they don't fit the one-element/one-prop shape.
-// smartRouting used to live here (a checkbox) — smart routing is no longer a
-// user toggle (it is unconditional for round trips; see route-view.js), the
-// #smartRouting element is gone, and this array drives initSettingsListeners'
-// unconditional getElementById(f.id) below, so a stale entry here throws at
-// bootstrap the moment the element disappears. A previously-stored
-// smartRouting value in localStorage is simply never read again — no
-// migration needed, restoreSettings only ever reads keys still in this list.
+// smartRouting is not a setting — it is unconditional for round trips (see
+// route-view.js) and there is no #smartRouting element. This array drives
+// initSettingsListeners' unconditional getElementById(f.id) below, so an entry
+// for a missing element throws at bootstrap. A smartRouting value left in
+// localStorage is never read: restoreSettings only reads keys in this list.
 const SETTINGS_FIELDS = [
     { key: 'location',     id: 'location',           prop: 'value',   skipEmpty: true },
     { key: 'minDistance',  id: 'minDistance',        prop: 'value' },

@@ -20,7 +20,7 @@
 // MAX_BUCKETS (10k here vs 50k there), the extra periodic sweeper there,
 // factory-owned vs module-level maps, and how a request earns trust for its
 // forwarding headers — the TRUSTED_PROXIES peer list here vs a root:www-data
-// unix-socket listener there, which trusts no TCP peer at all (finding #10094).
+// unix-socket listener there, which trusts no TCP peer at all.
 
 import type { Context, Next } from 'hono';
 
@@ -86,10 +86,10 @@ function ipv6BucketKey(ip: string): string {
  * Client IP for the rate-limit key. Trust forwarding headers only when the TCP
  * peer is a known reverse proxy — otherwise a caller who reaches this service
  * directly (tailnet, misconfigured firewall) can cycle XFF / X-Real-IP values
- * to bypass the per-IP bucket (audit #1342; mirrored from wander-api
+ * to bypass the per-IP bucket (mirrored from wander-api
  * lib/client-ip.ts). Behind a trusted proxy prefer X-Real-IP (nginx overwrites
  * it with $remote_addr), then the last X-Forwarded-For hop — never the
- * client-supplied first hop (finding #7895).
+ * client-supplied first hop.
  */
 function forwardedClientIp(c: Context): string | undefined {
     const real = c.req.header('x-real-ip')?.trim();

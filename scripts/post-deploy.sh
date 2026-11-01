@@ -4,7 +4,7 @@
 #
 # Wander's deployed artifacts span three places (VPS nginx + wander-api, shelly
 # osrm-foot + wander-overpass + wander-junctions), and `deploy` restarts units it
-# never installs. That gap hid the #7755 hardening on shelly for months while its
+# never installs. That gap hid a hardened unit from shelly for months while its
 # test passed against the repo copy. So the one thing this hook does is say
 # whether what is running matches what just landed.
 

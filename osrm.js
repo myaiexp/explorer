@@ -24,9 +24,7 @@ const PUBLIC_MIN_GAP_MS = 1100;
 
 // A tiny local sleep backs the public-fallback throttle. NOT named `sleep`:
 // these are classic scripts sharing one global scope, so a bare `sleep` here
-// would silently redefine any other file's. overpass.js used to own one for its
-// Overpass retry backoff (that loop is server-side now, so the collision is
-// gone) — the specific name is retired, the hazard is not.
+// would silently redefine any other file's.
 // tests/global-collisions.test.js is the enforcement.
 function throttleSleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
@@ -90,7 +88,7 @@ function parseRouteResponse(data) {
     if (!data.routes || data.routes.length === 0) return null;
     const r = data.routes[0];
     const coords = r.geometry && r.geometry.coordinates;
-    // Missing or empty geometry is a failed route, not a 0-length walk (#7785 #7926).
+    // Missing or empty geometry is a failed route, not a 0-length walk.
     if (!Array.isArray(coords) || coords.length === 0) return null;
     const steps = r.legs ? r.legs.flatMap(leg => leg.steps || []) : null;
     // UNITS: `distance` is METRES and `duration` seconds, straight off OSRM.

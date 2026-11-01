@@ -4,9 +4,9 @@
 // time (the browser exposes top-level function declarations on window; tests
 // install fakes on globalThis).
 
-// Dispatch a single route build for the given trip mode. Replaces the if/else
-// block that was duplicated across generateDestination, the pick-on-map
-// handler, restoreFromHash and rerouteWithCurrentSpread.
+// Dispatch a single route build for the given trip mode. Shared by
+// generateDestination, the pick-on-map handler, restoreFromHash and
+// rerouteWithCurrentSpread.
 //
 // opts:
 //   tripMode         'one-way' | anything-else (a loop). One-way returns before

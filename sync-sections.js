@@ -64,15 +64,15 @@
     // where payload is the flat favorite blob; every other section already comes back
     // flat (typed columns). Unwrap favorites to the flat shape the app + renderer read
     // (f.destLat, f.destName, …), preserving id + updatedAt for last-write-wins. Without
-    // this a synced-down favorite stays {id, payload:{…}} and destLat is undefined
-    // (#2065). The list renderer skips that row instead of throwing (#7307), but
+    // this a synced-down favorite stays {id, payload:{…}} and destLat is undefined.
+    // The list renderer skips that row instead of throwing, but
     // the star button still needs the flat shape to match.
     // visits and history are the trip shape visit-shape.js owns, so a synced-down
     // row goes through the same gate an uploaded backup file does (importVisits).
     // Without it, rows written before server-side validation existed (see
     // server/src/lib/validate-rows.ts) land raw in localStorage. The map and the
     // visited counter both skip a row visitRenderParts rejects, but other readers
-    // (novelty, the history list) still see whatever is stored (#2735).
+    // (novelty, the history list) still see whatever is stored.
     //
     // A row normalizeVisit rejects is dropped rather than stored: it has no
     // usable start/dest/distance, so nothing can ever draw it, and the cloud copy

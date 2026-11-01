@@ -44,7 +44,7 @@ async function screenCandidates(start, candidates, { tableFn }) {
         return { survivors: [], bestRejected: null, diagnostics: [] };
     }
 
-    // Single OSRM /table call replaces the old N nearest + N route calls.
+    // One OSRM /table call covers every candidate.
     // tableFn must return an array aligned with `candidates`; each entry is
     // `{snapM, routeM}` (numbers or null) or `null` if the row could not be
     // resolved at all. A throw here lets the caller fall back to unscreened.
