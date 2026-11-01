@@ -194,9 +194,9 @@ describe('getJunctions', () => {
         const [r1, r2] = await Promise.all([p1, p2]);
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(r1).toEqual({ cache: 'miss', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
+        expect(r1).toEqual({ cache: 'miss', points: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
         // Waiter joined the in-flight Overpass fetch — not an in-memory hit.
-        expect(r2).toEqual({ cache: 'coalesced', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
+        expect(r2).toEqual({ cache: 'coalesced', points: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
     });
 
     test('a rejecting Overpass fetch rejects every concurrent waiter with the same error, then clears inflight (audit #3157)', async () => {
@@ -227,7 +227,7 @@ describe('getJunctions', () => {
         // fresh call re-fetches rather than re-awaiting the dead rejected promise.
         fetchMock.mockResolvedValueOnce([{ lat: 60.5, lng: 24.5 }]);
         const retry = await cache.getJunctions(BBOX, 'default');
-        expect(retry).toEqual({ cache: 'miss', junctions: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
+        expect(retry).toEqual({ cache: 'miss', points: [{ lat: 60.5, lng: 24.5 }], overpassMs: expect.any(Number) });
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
@@ -240,7 +240,7 @@ describe('getJunctions', () => {
         const second = await cache.getJunctions(BBOX, 'default');
 
         expect(first.cache).toBe('miss');
-        expect(second).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+        expect(second).toEqual({ cache: 'hit', points: [{ lat: 60.5, lng: 24.5 }] });
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
@@ -290,7 +290,7 @@ describe('getJunctionsAnchored', () => {
 
         expect(r.cache).toBe('miss');
         expect(r.total).toBe(4);                                   // full stored set
-        expect(r.junctions).toEqual([{ lat: 60.0, lng: 24.0 }, { lat: 60.5, lng: 24.5 }]);
+        expect(r.points).toEqual([{ lat: 60.0, lng: 24.0 }, { lat: 60.5, lng: 24.5 }]);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         // The fetch is issued against wideBboxFromStart(start), not `requested`.
         expect(fetchMock).toHaveBeenCalledWith(wideBboxFromStart(start), 'default');
@@ -310,7 +310,7 @@ describe('getJunctionsAnchored', () => {
         expect(r.cache).toBe('hit');
         expect(fetchMock).toHaveBeenCalledTimes(1);                // no second fetch
         expect(r.total).toBe(4);
-        expect(r.junctions).toEqual([{ lat: 60.5, lng: 24.5 }]);   // only this one in `narrow`
+        expect(r.points).toEqual([{ lat: 60.5, lng: 24.5 }]);   // only this one in `narrow`
     });
 
     test('two concurrent anchored requests for the same start share one fetch', async () => {
@@ -330,7 +330,7 @@ describe('getJunctionsAnchored', () => {
         expect(r1.cache).toBe('miss');
         expect(r2).toEqual({
             cache: 'coalesced',
-            junctions: [{ lat: 60.0, lng: 24.0 }, { lat: 60.5, lng: 24.5 }],
+            points: [{ lat: 60.0, lng: 24.0 }, { lat: 60.5, lng: 24.5 }],
             total: 4,
             overpassMs: expect.any(Number),
         });
@@ -373,7 +373,7 @@ describe('filterToBbox boundary inclusivity', () => {
         const r = await cache.getJunctionsAnchored(start, 'default', requested);
 
         // >= / <= on every edge → no on-edge point is filtered out.
-        expect(r.junctions).toEqual(onBoundary);
+        expect(r.points).toEqual(onBoundary);
         expect(r.total).toBe(6);
     });
 
@@ -391,7 +391,7 @@ describe('filterToBbox boundary inclusivity', () => {
         const r = await cache.getJunctionsAnchored(start, 'default', requested);
 
         // Each point fails exactly one comparison → all four are excluded.
-        expect(r.junctions).toEqual([]);
+        expect(r.points).toEqual([]);
         expect(r.total).toBe(4);   // the full set is still stored; only the window is empty
     });
 
@@ -408,7 +408,7 @@ describe('filterToBbox boundary inclusivity', () => {
 
         const r = await cache.getJunctionsAnchored(start, 'default', requested);
 
-        expect(r.junctions).toEqual([{ lat: 60, lng: 24 }, { lat: 61, lng: 25 }]);
+        expect(r.points).toEqual([{ lat: 60, lng: 24 }, { lat: 61, lng: 25 }]);
         expect(r.total).toBe(4);
     });
 });
@@ -445,7 +445,7 @@ describe('loadCache', () => {
         expect(log).toHaveBeenCalledWith('INFO', expect.objectContaining({ event: 'cache_loaded', entries: 1 }));
 
         const r = await cache.getJunctions(BBOX, 'default');
-        expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+        expect(r).toEqual({ cache: 'hit', points: [{ lat: 60.5, lng: 24.5 }] });
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -527,7 +527,7 @@ describe('saveCache (driven via a getJunctions miss)', () => {
         await fresh.cache.loadCache();
         expect(fresh.cache.cacheSize()).toBe(1);
         const r = await fresh.cache.getJunctions(BBOX, 'default'); // 'hit' ⇒ served from the loaded file, not re-fetched
-        expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+        expect(r).toEqual({ cache: 'hit', points: [{ lat: 60.5, lng: 24.5 }] });
     });
 
     test('the snapshot is owner-read/write only even when umask would allow 0644 (finding #12871)', async () => {
@@ -588,7 +588,7 @@ describe('TTL on read', () => {
         vi.setSystemTime(Date.now() + 61_000);        // advance the clock past the TTL
         const afterTtl = await cache.getJunctions(BBOX, 'default');
         expect(afterTtl.cache).toBe('miss');          // expired → refetched, not served stale
-        expect(afterTtl.junctions).toEqual([{ lat: 61.5, lng: 25.5 }]);  // the fresh fetch, not the old data
+        expect(afterTtl.points).toEqual([{ lat: 61.5, lng: 25.5 }]);  // the fresh fetch, not the old data
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
@@ -603,7 +603,7 @@ describe('TTL on read', () => {
         vi.setSystemTime(Date.now() + 61_000);
         await cache.getJunctions(BBOX, 'default');    // expired → refetch → {2,2}
         const next = await cache.getJunctions(BBOX, 'default');
-        expect(next).toEqual({ cache: 'hit', junctions: [{ lat: 2, lng: 2 }] }); // fresh value now cached
+        expect(next).toEqual({ cache: 'hit', points: [{ lat: 2, lng: 2 }] }); // fresh value now cached
     });
 });
 
@@ -635,7 +635,7 @@ describe('empty-result TTL', () => {
         vi.setSystemTime(Date.now() + 6_000);   // past the empty TTL, inside the full one
         const empty = await cache.getJunctions(EMPTY, 'default');
         expect(empty.cache).toBe('miss');
-        expect(empty.junctions).toEqual([{ lat: 2, lng: 2 }]);   // the transient empty is gone
+        expect(empty.points).toEqual([{ lat: 2, lng: 2 }]);   // the transient empty is gone
         expect((await cache.getJunctions(FULL, 'default')).cache).toBe('hit');
     });
 
@@ -805,7 +805,7 @@ describe('loadCache pruning (TTL + cap on the snapshot)', () => {
 
         expect(cache.cacheSize()).toBe(1);
         const r = await cache.getJunctions(BBOX, 'default');
-        expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }, { lat: 60.6, lng: 24.6 }] });
+        expect(r).toEqual({ cache: 'hit', points: [{ lat: 60.5, lng: 24.5 }, { lat: 60.6, lng: 24.6 }] });
         await waitFor(() => Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length === 1);
     });
 
@@ -827,7 +827,7 @@ describe('loadCache pruning (TTL + cap on the snapshot)', () => {
         expect(cache.cacheSize()).toBe(1);
         // The newer entry survived the cap; the older one was evicted.
         const r = await cache.getJunctions(BBOX, 'default');
-        expect(r).toEqual({ cache: 'hit', junctions: [{ lat: 60.5, lng: 24.5 }] });
+        expect(r).toEqual({ cache: 'hit', points: [{ lat: 60.5, lng: 24.5 }] });
         // Drain the prune-on-load save (real timer) so its debounced write can't
         // leak past this test into a later one's JSON.stringify save counter.
         await waitFor(() => Object.keys(JSON.parse(readFileSync(file, 'utf8'))).length === 1);

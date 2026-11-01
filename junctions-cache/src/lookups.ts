@@ -48,7 +48,7 @@ export async function getPoisAnchored(
         const pois = await fetchPoisFromOverpass(wide, filters);
         return filterToAnnulus(pois, anchor.startLat, anchor.startLng, anchor.minKm, anchor.maxKm);
     });
-    return { ...result, total: result.junctions.length };
+    return { ...result, total: result.points.length };
 }
 
 export async function getRoadsAnchored(
@@ -61,5 +61,5 @@ export async function getRoadsAnchored(
         const roads = await fetchRoadsFromOverpass(wide, exclude);
         return filterToAnnulus(roads, anchor.startLat, anchor.startLng, anchor.minKm, anchor.maxKm);
     });
-    return { ...result, total: result.junctions.length };
+    return { ...result, total: result.points.length };
 }

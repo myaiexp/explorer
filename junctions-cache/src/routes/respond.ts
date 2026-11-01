@@ -25,11 +25,11 @@ export async function respondLookup(
 ) {
     try {
         const result = await lookup();
-        const count = result.junctions.length;
+        const count = result.points.length;
         const total = 'total' in result ? result.total : undefined;
         const overpassMs = overpassMsOf(result);
         log('INFO', { event, ...logFields, cache: result.cache, count, total, overpass_ms: overpassMs });
-        return c.json({ cache: result.cache, count, total, overpassMs, [pointsKey]: result.junctions });
+        return c.json({ cache: result.cache, count, total, overpassMs, [pointsKey]: result.points });
     } catch (e) {
         const err = e as Error;
         log('ERROR', { event: `${event}_failed`, ...logFields, err: err.message });

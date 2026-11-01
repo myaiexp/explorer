@@ -11,6 +11,7 @@
 // The bbox path serves GET and bbox-only POST; anchored clients POST
 // startLat/startLng/maxKm in the JSON body.
 
+import type { Anchor } from './lib/parse-request.js';
 import type { Bbox, ExcludePreset } from './overpass.js';
 import { fetchJunctionsFromOverpass } from './overpass.js';
 import { runWithOverpassSlot } from './overpass-limit.js';
@@ -34,51 +35,52 @@ function keyFor(bbox: Bbox, exclude: ExcludePreset): string {
     return `${quantizeCoord(bbox.minLat)},${quantizeCoord(bbox.minLng)},${quantizeCoord(bbox.maxLat)},${quantizeCoord(bbox.maxLng)}|${exclude}`;
 }
 
-export type StartParams = { startLat: number; startLng: number; maxKm: number };
-
 // Anchored key fragment shared by every start-anchored query kind. The caller
 // supplies the kind prefix and the query-specific discriminator (exclude preset,
 // POI types key) so two kinds can never collide on one entry.
-export function anchoredKey(kind: string, start: StartParams, discriminator: string): string {
-    const lat = start.startLat.toFixed(START_QUANTIZE_DECIMALS);
-    const lng = start.startLng.toFixed(START_QUANTIZE_DECIMALS);
+export function anchoredKey(kind: string, anchor: Anchor, discriminator: string): string {
+    const lat = anchor.startLat.toFixed(START_QUANTIZE_DECIMALS);
+    const lng = anchor.startLng.toFixed(START_QUANTIZE_DECIMALS);
     // Bucket maxKm to whole km — small variations shouldn't fragment the cache.
-    const km = Math.ceil(start.maxKm);
+    const km = Math.ceil(anchor.maxKm);
     return `${kind}|${lat},${lng}|${km}|${discriminator}`;
 }
 
-function startKeyFor(start: StartParams, exclude: ExcludePreset): string {
-    return anchoredKey('s', start, exclude);
+function startKeyFor(anchor: Anchor, exclude: ExcludePreset): string {
+    return anchoredKey('s', anchor, exclude);
 }
 
 // Wide bbox that covers every possible destination within maxKm of start.
 // Slightly conservative on lng padding (uses cos at the start lat).
-export function wideBboxFromStart(start: StartParams): Bbox {
-    const km = Math.ceil(start.maxKm);
+export function wideBboxFromStart(anchor: Anchor): Bbox {
+    const km = Math.ceil(anchor.maxKm);
     const latPad = km / 111;
-    const lngPad = km / (111 * Math.max(0.05, Math.cos(start.startLat * Math.PI / 180)));
+    const lngPad = km / (111 * Math.max(0.05, Math.cos(anchor.startLat * Math.PI / 180)));
     return {
-        minLat: Math.max(-90, start.startLat - latPad),
-        minLng: Math.max(-180, start.startLng - lngPad),
-        maxLat: Math.min(90, start.startLat + latPad),
-        maxLng: Math.min(180, start.startLng + lngPad)
+        minLat: Math.max(-90, anchor.startLat - latPad),
+        minLng: Math.max(-180, anchor.startLng - lngPad),
+        maxLat: Math.min(90, anchor.startLat + latPad),
+        maxLng: Math.min(180, anchor.startLng + lngPad)
     };
 }
 
-function filterToBbox(junctions: CachedPoint[], bbox: Bbox): CachedPoint[] {
+function filterToBbox(points: CachedPoint[], bbox: Bbox): CachedPoint[] {
     const out: CachedPoint[] = [];
-    for (const j of junctions) {
-        if (j.lat >= bbox.minLat && j.lat <= bbox.maxLat
-            && j.lng >= bbox.minLng && j.lng <= bbox.maxLng) {
-            out.push(j);
+    for (const p of points) {
+        if (p.lat >= bbox.minLat && p.lat <= bbox.maxLat
+            && p.lng >= bbox.minLng && p.lng <= bbox.maxLng) {
+            out.push(p);
         }
     }
     return out;
 }
 
+// `points` holds whatever the key's query kind caches: junctions, POIs or road
+// centroids. lookupOrFetch is the one place it meets the persisted
+// Entry.junctions name.
 export type LookupResult =
-    | { cache: 'hit'; junctions: CachedPoint[] }
-    | { cache: 'miss' | 'coalesced'; junctions: CachedPoint[]; overpassMs: number };
+    | { cache: 'hit'; points: CachedPoint[] }
+    | { cache: 'miss' | 'coalesced'; points: CachedPoint[]; overpassMs: number };
 
 export type AnchoredLookupResult = LookupResult & { total: number };
 
@@ -96,13 +98,13 @@ export async function lookupOrFetch(
     fetchFn: () => Promise<CachedPoint[]>,
 ): Promise<LookupResult> {
     const cached = readFresh(key);
-    if (cached) return { cache: 'hit', junctions: cached.junctions };
+    if (cached) return { cache: 'hit', points: cached.junctions };
 
     const existing = inflight.get(key);
     if (existing) {
         const t0 = Date.now();
-        const junctions = await existing;
-        return { cache: 'coalesced', junctions, overpassMs: Date.now() - t0 };
+        const points = await existing;
+        return { cache: 'coalesced', points, overpassMs: Date.now() - t0 };
     }
 
     // t0 spans any throttle-queue wait too, so overpassMs reflects total miss
@@ -111,12 +113,12 @@ export async function lookupOrFetch(
     const promise = runWithOverpassSlot(fetchFn);
     inflight.set(key, promise);
     try {
-        const junctions = await promise;
+        const points = await promise;
         const overpassMs = Date.now() - t0;
-        setEntry(key, { junctions, cachedAt: Date.now() });
+        setEntry(key, { junctions: points, cachedAt: Date.now() });
         prune(Date.now());
         bumpAndSave();
-        return { cache: 'miss', junctions, overpassMs };
+        return { cache: 'miss', points, overpassMs };
     } finally {
         inflight.delete(key);
     }
@@ -129,19 +131,19 @@ export async function getJunctions(bbox: Bbox, exclude: ExcludePreset): Promise<
 // Cache a wide-bbox fetch by (start, maxKm, exclude); filter to `requested`
 // before returning so the wire payload stays small.
 export async function getJunctionsAnchored(
-    start: StartParams,
+    anchor: Anchor,
     exclude: ExcludePreset,
     requested: Bbox
 ): Promise<AnchoredLookupResult> {
-    const wide = wideBboxFromStart(start);
+    const wide = wideBboxFromStart(anchor);
     const result = await lookupOrFetch(
-        startKeyFor(start, exclude),
+        startKeyFor(anchor, exclude),
         () => fetchJunctionsFromOverpass(wide, exclude)
     );
     const projected = {
         ...result,
-        junctions: filterToBbox(result.junctions, requested),
-        total: result.junctions.length
+        points: filterToBbox(result.points, requested),
+        total: result.points.length
     };
     return projected;
 }
