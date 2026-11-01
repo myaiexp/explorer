@@ -34,7 +34,7 @@ export function createApp(db: Db): Hono {
   }
 
   // Explicit allowHeaders so preflight never parses attacker-controlled
-  // Access-Control-Request-Headers (CVE-2026-69207 / finding #7896). The
+  // Access-Control-Request-Headers (CVE-2026-69207). The
   // client sends Authorization + Content-Type; X-Account-Token is the
   // auth fallback header.
   app.use(

@@ -8,8 +8,8 @@
 // serve junction points as road candidates:
 //   bbox-keyed (legacy):  "minLat,minLng,maxLat,maxLng|exclude"
 //   start-anchored:       "s|lat,lng|maxKm|exclude"
-// The bbox path is kept for GET / bbox-only POST; new clients POST
-// startLat/startLng/maxKm in the JSON body and hit the anchored path.
+// The bbox path serves GET and bbox-only POST; anchored clients POST
+// startLat/startLng/maxKm in the JSON body.
 
 import type { Bbox, ExcludePreset } from './overpass.js';
 import { fetchJunctionsFromOverpass } from './overpass.js';

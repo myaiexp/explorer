@@ -33,8 +33,8 @@ function getLoopShapeOptions() {
 }
 
 // Routing-mode form state — the one DOM read for winter / maxKm / spread.
-// buildAndDisplay, rerouteWithCurrentSpread, and generateDestination used to
-// each re-read these. A round trip is a junction loop unless degraded; one-way
+// Shared by buildAndDisplay, rerouteWithCurrentSpread, and generateDestination.
+// A round trip is a junction loop unless degraded; one-way
 // never is. That choice lives in route-dispatch.js (tripMode, then !degraded),
 // not in a flag computed here. generate.js's round-trip path does not dispatch
 // through buildRouteForMode — destination-resolve.js runs the junction-snap
@@ -75,7 +75,7 @@ function syncDistanceLabel() {
 // `estimated` is the wider question that covers it: ANY substituted leg,
 // including the partial case (a round trip whose return alone failed), where
 // half the total is a guess and totalDuration counts only the leg that routed
-// — so the walk badge would under-report by roughly half. Idea #3807: mark the
+// — so the walk badge would under-report by roughly half. Mark the
 // distance and drop every time derived from it; only the leg count differs
 // between the two cases, so only the label does.
 function updateDurationBadges(totalWalkKm, walkDurationSec, tripMode, { noRoute = false, estimated = noRoute } = {}) {
@@ -182,8 +182,8 @@ function renderRouteTail(startLat, startLng, destLat, destLng, outbound, ret, tr
 // session. Pure display + session build — it does NOT persist. Callers that
 // create a genuinely new route (generateDestination, buildAndDisplay) call
 // saveToHistory(session) themselves; restoreResult re-displays an existing entry
-// and so must NOT (this function used to unshift a duplicate history entry and
-// sync it to the cloud as a side effect of every history/favorite click).
+// and so must NOT: that would unshift a duplicate history entry and sync it to
+// the cloud on every history/favorite click.
 // Returns the built session (also stored via session-state.js).
 function displayRoute({ startLat, startLng, destLat, destLng, outbound, ret,
                         locationInput, destName, tripMode, straightMax = 0, straightMin = 0,

@@ -7,7 +7,7 @@
 // checkout moments after the push lands, which is the exact case this guard exists to
 // route work TO, and a node shim in that path could only ever wedge a deploy.
 //
-// Ported from helm's scripts/db-migrate.ts (idea #3965).
+// Ported from helm's scripts/db-migrate.ts.
 //
 // Usage: pnpm db:migrate [--force] [drizzle-kit args…]
 import { execFileSync, spawnSync } from 'node:child_process';

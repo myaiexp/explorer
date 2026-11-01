@@ -3,14 +3,13 @@
 # against the copy on the host its header names.
 #
 # The caller's ssh runs INSIDE a `while read` loop fed by find, and without -n
-# ssh drains that stdin and the loop silently stops after the first remote file.
-# The first run of check-unit-drift.sh checked 2 of 6 units that way and
-# reported a clean-looking partial answer — the failure these scripts exist to
-# end.
+# ssh drains that stdin and the loop silently stops after the first remote file,
+# leaving a clean-looking partial answer (2 of 6 units checked) — the failure
+# these scripts exist to end.
 #
 # ConnectTimeout starts after getaddrinfo, so on its own it does not bound a
-# dead resolver, and `deploy` runs these scripts with nothing around them
-# (idea #6279). GNU timeout bounds the whole ssh. 20s default: ConnectTimeout's
+# dead resolver, and `deploy` runs these scripts with nothing around them.
+# GNU timeout bounds the whole ssh. 20s default: ConnectTimeout's
 # 10s, then auth and the cat. DRIFT_SSH_TIMEOUT is the test seam.
 DRIFT_SSH_TIMEOUT="${DRIFT_SSH_TIMEOUT:-20}"
 DRIFT_SSH_OPTS=(-n -o BatchMode=yes -o ConnectTimeout=10)

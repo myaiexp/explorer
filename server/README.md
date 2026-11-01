@@ -56,7 +56,7 @@ Every read/write requires `Authorization: Bearer <token>` (or the
 The per-IP key is nginx's `X-Real-IP` only for requests that arrived on the
 proxy socket (`src/lib/client-ip.ts`). Every other connection — loopback TCP
 included, since any local uid can reach it — is keyed on its own peer address
-and never records `ipFirstSeen` (finding #10094). `TRUSTED_PROXIES=ip,ip`
+and never records `ipFirstSeen`. `TRUSTED_PROXIES=ip,ip`
 opts a remote TCP proxy in. Each bucket map is capped at 50k keys on insert.
 
 The human-readable username is only a public handle, not a credential.
@@ -71,8 +71,8 @@ failed-auth probing is throttled before the Postgres lookup.
   (`MAX_ROWS_PER_SECTION`). Updates of an existing id are always allowed.
 - Per-account stored jsonb is capped at 32 MiB (`MAX_STORED_BYTES`, same
   `octet_length` estimator as GET). Growing PUTs 409, growing imports 400;
-  shrinks and saved-location writes still go through. Finding #7756: row ×
-  per-row caps alone allowed ~5 GiB of favorites JSONB.
+  shrinks and saved-location writes still go through. Row count × per-row
+  caps alone would allow ~5 GiB of favorites JSONB.
 - Default `GET /api/:username` omits visit/history polylines and favorite route
   geometry older than the newest 50 (`GET_GEOMETRY_KEEP`). The DB still stores
   full rows up to `MAX_STORED_BYTES` — cloud is the archive.
@@ -109,7 +109,7 @@ Size and paging budgets live in `src/lib/limits.ts`. Field-shape checks live
 in `src/lib/validate-fields.ts` / `src/lib/validate-rows.ts`. Trip-row scalar coords (`startLat` / `startLng` /
 `destLat` / `destLng`) must be finite and inside the same WGS-84 bounds as
 `routeCoords` (`[-90, 90]` / `[-180, 180]`); `distance` must be finite and
-≥ 0. Finding #7775: `typeof === 'number'` used to accept lat 999 and Infinity.
+≥ 0; a bare `typeof === 'number'` check would accept lat 999 and Infinity.
 
 ## Client contract
 

@@ -1,15 +1,16 @@
-// Candidate-pool primitives — annulus filtering and random down-sampling,
-// moved off the browser so a generate ships kilobytes instead of megabytes.
+// Candidate-pool primitives — annulus filtering and random down-sampling.
+// They run here, not in the browser, so a generate ships kilobytes instead of
+// megabytes.
 
 // Mirrors the frontend's SCREENING_POOL_CAP (screening.js). The client still
 // calls capPool defensively — it bounds its own OSRM /table fan-out whatever a
-// server sends — but this is now where the cut actually happens.
+// server sends — but this is where the cut actually happens.
 export const POOL_CAP = 45;
 
 export type Point = { lat: number; lng: number };
 
-// The same haversine the frontend used (geo-utils.js), so the candidate set is
-// unchanged from today's client-side filtering. Do not re-derive the formula.
+// The same haversine as the frontend's (geo-utils.js), so both measure a
+// candidate's distance alike. Do not re-derive the formula.
 export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;

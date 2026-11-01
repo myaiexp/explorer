@@ -29,8 +29,8 @@ export function accountsRoutes(db: Db): Hono {
 
   // DELETE /:username — cascade deletes all child rows via FK.
   // IP read limit runs first (same 60/min bucket as GET /:username) so
-  // unauthenticated probing is throttled before the Postgres lookup (finding
-  // #7057). accountAuth already 401s any missing account (identical to a wrong
+  // unauthenticated probing is throttled before the Postgres lookup.
+  // accountAuth already 401s any missing account (identical to a wrong
   // token, by the anti-enumeration design), so the handler may assume :username
   // exists — same convention as sections.ts. No existence re-check here.
   app.delete('/:username', readRateLimit(), accountAuth(db), async (c) => {

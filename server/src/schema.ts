@@ -11,7 +11,7 @@ import {
 
 export const accounts = pgTable('accounts', {
   username: text('username').primaryKey(),
-  // SHA-256 hex digest of the 32-byte base64url bearer (audit #7058). The
+  // SHA-256 hex digest of the 32-byte base64url bearer. The
   // plaintext is returned once at POST /accounts and never stored. Unique so
   // two accounts cannot share a credential even after hashing.
   token: text('token').notNull().unique(),
@@ -20,8 +20,8 @@ export const accounts = pgTable('accounts', {
 });
 
 // Composite PK (username, id): the client-supplied id is unique only WITHIN an
-// account, not globally. A bare `id` PK let one account's PUT conflict on and
-// silently overwrite another account's row (audit #4832/#4855); it also aborted
+// account, not globally. A bare `id` PK would let one account's PUT conflict on and
+// silently overwrite another account's row, and would abort
 // imports of a shared walks-export JSON, where two accounts carry identical ids.
 // (username, id) makes cross-tenant collision structurally impossible — the same
 // id under two owners is two rows. The PK's leading `username` column also serves

@@ -2,13 +2,13 @@
 # Compare every systemd unit committed under deploy/ against the copy actually
 # installed on its host.
 #
-# WHY (idea #4018): wander-junctions.service ran on shelly for months as the old
-# pre-#7755 unit — no dedicated user, cache still under /home/shelly — while its
-# hardening test passed on every run. Both were true at once: the test read the
-# REPO copy, and `deploy` / the post-receive hook restart a unit but never
-# install it. A test that reads a repo file proves the intent, never the
-# deployment. It was found by accident, and only because copying the canonical
-# unit in made the service fail 217/USER.
+# WHY: a unit that is committed but not installed keeps running as an old copy.
+# wander-junctions.service ran on shelly for months as an earlier unit — no
+# dedicated user, cache still under /home/shelly — while its hardening test
+# passed on every run. Both are true at once: the test reads the REPO copy, and
+# `deploy` / the post-receive hook restart a unit but never install it. A test
+# that reads a repo file proves the intent, never the deployment, so this
+# script reads the installed copy.
 #
 # Each unit names its own host in a `# deploy-host: <host>` header, so a unit
 # added later joins this check without anyone remembering a list. `local` means

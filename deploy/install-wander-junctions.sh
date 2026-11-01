@@ -21,7 +21,7 @@ if [[ ! -f $UNIT_SRC ]]; then
     exit 1
 fi
 
-# 1. Dedicated nologin user (finding #7755).
+# 1. Dedicated nologin user.
 if ! id -u wander-junctions >/dev/null 2>&1; then
     log "creating system user wander-junctions"
     sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin wander-junctions
@@ -71,7 +71,7 @@ fi
 #    was written with (0644 under the old umask) until something rewrites it,
 #    and a startup prune's debounced save may not have landed yet. sudo test,
 #    because the installing user cannot see into the 0750 directory. The keys
-#    are walker starts at ~111 m (finding #12871).
+#    are walker starts at ~111 m.
 if sudo test -f "$STATE_DIR/cache.json"; then
     sudo chmod 0600 "$STATE_DIR/cache.json"
 fi

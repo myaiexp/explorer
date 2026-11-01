@@ -7,7 +7,7 @@
 #
 # Unlike the root, this project has no `packageManager` pin, so a pnpm-11 host runs
 # pnpm 11 here rather than self-switching to 10 — the drift is live, not latent.
-# Guarded by tests/pnpm-workspace-settings.test.js. Idea #3194.
+# Guarded by tests/pnpm-workspace-settings.test.js.
 packages: []
 
 overrides:

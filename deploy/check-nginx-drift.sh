@@ -2,7 +2,7 @@
 # Compare every nginx conf committed under deploy/ against the copy actually
 # installed on its host.
 #
-# WHY (idea #4047): this is check-unit-drift.sh's argument applied to the other
+# WHY: this is check-unit-drift.sh's argument applied to the other
 # half of the deployment. deploy/nginx-*.conf are the reviewable source of truth
 # — tests/nginx-security.test.js reads them and asserts the CSP, the rate limits
 # and the XFF overwrite — while the live vhost is hand-edited to match and

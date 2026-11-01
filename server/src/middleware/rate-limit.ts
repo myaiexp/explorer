@@ -12,7 +12,7 @@
 // here vs 10k there), the extra periodic sweeper here, module-level maps +
 // REGISTRY here vs factory-owned maps there, and how a request earns trust for
 // its forwarding headers — the /run/wander-api.sock listener here (loopback is
-// NOT trusted, finding #10094) vs the TRUSTED_PROXIES peer list there.
+// NOT trusted) vs the TRUSTED_PROXIES peer list there.
 import type { Context, Next } from 'hono';
 import { clientIp } from '../lib/client-ip.js';
 
@@ -93,7 +93,7 @@ function consume(
     // Cap on insert, not only in the 5-minute sweep: a flood of fresh keys
     // would otherwise grow the map without bound between sweeps. A new key
     // that still finds the map full after stale eviction is refused rather
-    // than displacing a live bucket (finding #10094).
+    // than displacing a live bucket.
     if (buckets.size >= maxBuckets) {
       evictStale(buckets, windowMs, now);
       if (buckets.size >= maxBuckets) return false;

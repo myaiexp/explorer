@@ -17,15 +17,15 @@ function envPositiveInt(name: string, fallback: number): number {
 
 // Freshness + size bounds so neither the in-memory store nor the JSON snapshot
 // grows without limit (env-overridable for tuning on shelly, parity with
-// CACHE_PATH). Without these every distinct quantized bbox/start key minted a
-// permanent entry, cachedAt was never read (stale OSM roads served forever), and
-// saveCache re-serialized an ever-growing store on every write.
+// CACHE_PATH). Without these every distinct quantized bbox/start key is a
+// permanent entry, stale OSM roads are served forever, and saveCache
+// re-serializes an ever-growing store on every write.
 //   TTL: OSM road-junction data changes slowly; 30 days keeps entries useful
 //        while forcing an eventual refetch of stale roads.
 //   CAPS: a 50 km anchored fetch can hold tens of thousands of points, so bound
 //         both the entry COUNT and the total POINT count and evict oldest
-//         (by cachedAt) first. Entry count alone left 500 × ~30k-point sets
-//         free to grow toward a gigabyte.
+//         (by cachedAt) first. Entry count alone lets 500 × ~30k-point sets
+//         grow toward a gigabyte.
 const CACHE_TTL_MS = envPositiveInt('CACHE_TTL_MS', 30 * 24 * 60 * 60 * 1000);
 // An empty answer is cached like any other — a genuinely bare area shouldn't
 // re-hit Overpass on every request — but it is also what a mid-diff-update or
@@ -43,7 +43,7 @@ const CACHE_SAVE_DEBOUNCE_MS = envPositiveInt('CACHE_SAVE_DEBOUNCE_MS', 2000);
 // centroids carry coordinates alone.
 export type CachedPoint = { lat: number; lng: number; name?: string };
 
-// The persisted field stays named `junctions` even though it now holds POI and
+// The persisted field stays named `junctions` even though it holds POI and
 // road points too. Renaming it would make isValidEntry drop every row in the
 // on-disk snapshot on the next load.
 export type Entry = { junctions: CachedPoint[]; cachedAt: number };
@@ -136,7 +136,7 @@ async function saveCache(): Promise<void> {
     // tmp from a crash keeps whatever mode it already had; chmod is not masked
     // by umask either, which is what makes this 0600 when the process umask is
     // the usual 0022. The unit's UMask=0077 covers every other file this
-    // process creates (finding #12871).
+    // process creates.
     await writeFile(tmp, JSON.stringify(obj), { mode: 0o600 });
     await chmod(tmp, 0o600);
     await rename(tmp, CACHE_PATH);

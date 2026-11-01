@@ -8,14 +8,11 @@
 
 osrm-routed loads only a set built by its own major.minor
 (`FingerPrint::IsDataCompatible`; 26.10 on a 26.8 set exits 8 on
-`osrm_fingerprint.meta`). When the binary was the AUR `osrm-backend` package,
-pacman (shelly's 04:00 `omarchy-auto-update`) or a reboot could start a newer
-binary on last Sunday's graph and crash-loop it. Sunday's refresh could not
-repair that, because it extracts before restarting and a reboot never gets that
-far. The package was held with `IgnorePkg`, and every boost-libs bump needed a
-local rebuild.
-
-osrm-backend now runs from the official image, pinned in exactly one place:
+`osrm_fingerprint.meta`). A distro-packaged binary breaks that: pacman
+(shelly's 04:00 `omarchy-auto-update`) or a reboot can start a newer binary on
+last Sunday's graph and crash-loop it. Sunday's refresh cannot repair that,
+because it extracts before restarting and a reboot never gets that far. So
+osrm-backend runs from the official image, pinned in exactly one place:
 `IMAGE=` in `osrm-refresh.sh`. Each refresh:
 
 1. builds a timestamped set under `/srv/osrm/finland/processed/` with that

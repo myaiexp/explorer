@@ -1,5 +1,5 @@
 // Stored-JSONB size estimate for GET /:username ?geometry=full and the
-// per-account write budget (finding #7756).
+// per-account write budget.
 import { sql, type SQLWrapper } from 'drizzle-orm';
 import { schema } from '../db.js';
 import { FAVORITE_PAYLOAD_BYTES_SQL, ROUTE_PAIR_BYTES_SQL } from './jsonb-bytes-sql.js';
@@ -133,8 +133,7 @@ export function incomingJsonbBytes(table: unknown, row: object): number {
 // per-account budget. Shrinks and no-ops pass even if the account is already
 // over (so a legacy fill can still be repaired). Exact equality is allowed.
 // `budget` defaults to MAX_STORED_BYTES. Import passes a smaller one in tests:
-// the body cap sits under the production quota, so a live POST cannot reach it
-// (finding #12626).
+// the body cap sits under the production quota, so a live POST cannot reach it.
 export function wouldExceedStoredBudget(
   incomingBytes: number,
   currentBytes = 0,

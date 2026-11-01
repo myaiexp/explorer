@@ -8,9 +8,8 @@
 let pickMode = false;
 
 // Map-click handler installed while pick mode is active: resolve the start,
-// build a route to the clicked point, and render it. Hoisted to module scope
-// (was an inline closure in togglePickMode) so exitPickMode can detach it by
-// reference with map.off('click', handlePickClick).
+// build a route to the clicked point, and render it. Module scope so
+// exitPickMode can detach it by reference with map.off('click', handlePickClick).
 async function handlePickClick(e) {
     // Checked before exitPickMode so a click during a build leaves pick mode
     // armed — the user's next click after the build lands works as intended

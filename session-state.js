@@ -1,9 +1,9 @@
 // The current route session — the single owner of "what route is on screen".
 
-// A plain module-level `let` in app.js used to hold this, which made app.js both
-// the top of the load order and a library its own dependents (export.js,
-// favorites.js) reached back into. It lives here instead: every reader goes
-// through getCurrentSession(), so the ownership is one-directional.
+// It lives here rather than in app.js, which would make app.js both the top of
+// the load order and a library its own dependents (export.js, favorites.js)
+// reach back into: every reader goes through getCurrentSession(), so the
+// ownership is one-directional.
 //
 // The session object itself stays mutable by design — markAsVisited stamps
 // visitId onto the live object, generateDestination stamps junctions — so

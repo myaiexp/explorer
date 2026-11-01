@@ -47,8 +47,8 @@ async function rerouteWithCurrentSpread() {
             // tryOsrm returns {outbound:null,return:null} on HTTP/parse failure
             // rather than throwing. A usable replacement is an outbound — and,
             // for loops, a return too. Clearing the polylines before the await
-            // used to blank the map, and a one-sided null then overwrote the
-            // session coords (finding #7301). Keep the previous view until the
+            // would blank the map, and a one-sided null would overwrite the
+            // session coords. Keep the previous view until the
             // replacement exists.
             if (!outbound || (tripMode !== 'one-way' && !ret)) {
                 throw new Error('Failed to adjust route.');

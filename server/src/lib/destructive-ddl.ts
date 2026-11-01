@@ -14,7 +14,7 @@
 // negative is helm's 2026-08-22 incident — four columns dropped from a worktree, 25
 // minutes of HTTP 500 — reproduced here.
 //
-// Ported from helm's src/db/destructive-ddl.ts (idea #3965). Kept a copy rather than a
+// Ported from helm's src/db/destructive-ddl.ts. Kept a copy rather than a
 // shared package because the two repos share no build; the unit tests are the parity.
 
 /** One destructive statement found in a migration file. */

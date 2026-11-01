@@ -2,6 +2,7 @@
 
 import type { Context } from 'hono';
 import { BodyTooLargeError, readTextCapped } from './read-capped.js';
+import type { ParseFailure } from './parse-request.js';
 
 // Match nginx client_max_body_size 16k so a direct tailnet POST cannot
 // dump an unbounded JSON body that the proxy would have refused.
@@ -30,12 +31,27 @@ export async function readJsonBody(c: Context): Promise<BodyResult> {
 }
 
 // startLat/startLng on the request line land in nginx access logs at full JS
-// precision (often home). GET is bbox-only; anchored lookups go through POST
-// (finding #7559). A leftover query-string start on POST is refused the same way.
+// precision (often home). GET is bbox-only; anchored lookups go through POST. A
+// leftover query-string start on POST is refused the same way.
 export const QUERY_ANCHOR_ERROR = 'startLat, startLng, maxKm must be sent in the POST body';
 
 export function queryHasAnchor(c: Context): boolean {
     return c.req.query('startLat') != null
         || c.req.query('startLng') != null
         || c.req.query('maxKm') != null;
+}
+
+export type ParsedBodyFailure = { ok: false; status: 400 | 413; error: string };
+
+// Every POST route's prelude: refuse a query-string anchor, read the capped
+// body, run the route's parser.
+export async function readParsedBody<T extends { ok: true }>(
+    c: Context,
+    parse: (body: unknown) => T | ParseFailure,
+): Promise<T | ParsedBodyFailure> {
+    if (queryHasAnchor(c)) return { ok: false, status: 400, error: QUERY_ANCHOR_ERROR };
+    const read = await readJsonBody(c);
+    if (!read.ok) return read;
+    const parsed = parse(read.body);
+    return parsed.ok ? parsed : { ok: false, status: 400, error: parsed.error };
 }

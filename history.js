@@ -45,8 +45,7 @@ function deleteHistoryEntry(index) {
 }
 
 // restoreResult — re-displaying a stored entry — lives in route-restore.js: it is a
-// render, not history CRUD, and favorites.js used to depend on this module solely
-// to reach it.
+// render, not history CRUD, so favorites.js does not depend on this module.
 
 function renderHistorySection() {
     const history = getHistory();

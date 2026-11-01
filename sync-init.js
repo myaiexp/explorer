@@ -166,8 +166,8 @@
                     if (onSuccess) { onSuccess(); }
                 });
             }).catch(function (e) {
-                // Fetch/JSON failures only — apply errors are handled above, so this no
-                // longer silently swallows a data-loss bug as if it were a network blip.
+                // Fetch/JSON failures only — apply errors are handled above, so this does
+                // not silently swallow a data-loss bug as if it were a network blip.
                 console.warn('[sync] could not load account ' + username, e);
                 if (onFail) { onFail(); }
             });
@@ -193,7 +193,7 @@
             }
             // The adopt failed after the token was set tentatively: fall back to
             // whatever this device was already bound to. Nulling only the token
-            // (the old behaviour) left an accepted device stranded at 'anonymous'.
+            // would leave an accepted device stranded at 'anonymous'.
             function rollbackAdopt() { restoreFromConsent(consent); }
 
             // ── Case 1: no URL segment ──────────────────────────────────────────

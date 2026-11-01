@@ -1,10 +1,7 @@
 // Overpass queries + element extraction for the POI and road candidate pools.
 //
-// TWIN: wander/overpass.js carried fetchPOIsInRadius / fetchRoadsInRadius with
-// exactly these queries and exactly this extraction — this is that logic moved
-// server-side so a generate ships kilobytes of candidates instead of megabytes
-// of OSM elements. The queries MUST stay equivalent to the frontend's or a
-// server-picked destination stops matching what the client used to find.
+// The queries and the extraction run here, not in the browser, so a generate
+// ships kilobytes of candidates instead of megabytes of OSM elements.
 //
 // Distance filtering is NOT here: these fetchers cover the wide bbox and the
 // caller (lookups.ts) narrows to the annulus, because the annulus-filtered set
@@ -19,9 +16,9 @@ import {
     type OverpassElement,
 } from './overpass.js';
 
-// `name` is present only when the OSM element carries one. The frontend stored
-// `el.tags?.name || null`; on the wire the field is omitted instead, and the
-// client normalizes an absent name back to null.
+// `name` is present only when the OSM element carries one. On the wire the
+// field is omitted for an unnamed element, and the client normalizes an absent
+// name to null.
 export type PoiPoint = { lat: number; lng: number; name?: string };
 
 function bboxLiteral(bbox: Bbox): string {
@@ -46,7 +43,7 @@ export function buildRoadQuery(bbox: Bbox, exclude: ExcludePreset): string {
 
 // A `node` contributes its own coordinates, a `way` its centroid. Everything
 // else — a relation, or a way whose centroid Overpass did not return — is
-// dropped, exactly as the frontend did.
+// dropped.
 export function parsePois(elements: OverpassElement[]): PoiPoint[] {
     const out: PoiPoint[] = [];
     for (const el of elements) {

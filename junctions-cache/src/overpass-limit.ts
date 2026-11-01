@@ -3,7 +3,7 @@
 // The cache's in-flight dedup only collapses *identical* keys; a client that
 // sends many DISTINCT bboxes triggers one live Overpass fetch each, so a burst
 // of distinct misses can fan out into many parallel queries and get our shared
-// public Overpass instance rate-limited or banned (audit: /junctions abuse).
+// public Overpass instance rate-limited or banned.
 //
 // This gate is source-independent: it holds even when the per-IP HTTP limiter is
 // evaded (spoofed X-Forwarded-For) or bypassed entirely (direct tailnet access

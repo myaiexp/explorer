@@ -23,12 +23,12 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
         cachedJunctions: null,
         buildingMessage,
     });
-    // Clear only now that the replacement is in hand (#3663). Clearing before
-    // the await meant a throwing build left a blank map — displayRoute is never
+    // Clear only now that the replacement is in hand. Clearing before the
+    // await would let a throwing build leave a blank map — displayRoute is never
     // reached, so its dashed straight-line fallback never runs either — while
     // the result panel and the session still described the route that had just
     // been wiped off the map. Same principle as the spread reroute's
-    // keep-the-previous-view fix (finding #7303). It must still run BEFORE
+    // keep-the-previous-view rule. It must still run BEFORE
     // displayRoute, which adds markers/circles/lines on top rather than
     // replacing them.
     clearMap();
@@ -46,8 +46,8 @@ async function buildAndDisplay(startLat, startLng, destLat, destLng, {
 }
 
 // Re-display a stored history/favorite entry. Lives here rather than in
-// history.js because it is a render, not history CRUD — favorites.js used to
-// depend on history.js solely to reach it.
+// history.js because it is a render, not history CRUD — favorites.js does
+// not depend on history.js.
 function restoreResult(entry) {
     clearMap();
     // Prefer the real per-leg distances when the entry has them. Legacy entries
@@ -75,14 +75,14 @@ function restoreResult(entry) {
         // A round trip with an outbound but no return geometry still has a
         // COMPLETE stored total — entry.distance already covers the whole walk.
         // Passing null would make computeRouteTotals substitute the crow-flies
-        // distance on top of it, so the entry grew by a straight line every time
-        // it was opened (idea #3807). A zero-distance stub says "measured,
+        // distance on top of it, so the entry would grow by a straight line every
+        // time it was opened. A zero-distance stub says "measured,
         // contributes nothing". Only when the outbound exists: with neither leg
         // stored, the straight-line double IS the intended display.
         ret = { coords: [], distance: 0, duration: 0 };
     }
     // No saveToHistory here: re-displaying an existing history/favorite entry
-    // must not create a new one (the old side effect in displayRoute did).
+    // must not create a new one.
     displayRoute({
         startLat: entry.startLat, startLng: entry.startLng,
         destLat: entry.destLat, destLng: entry.destLng,

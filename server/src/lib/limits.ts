@@ -13,14 +13,14 @@ export const MAX_WRITE_BODY_BYTES = 1_048_576;
 
 // Bulk-import body cap (5 MiB) — full-account backups are legitimately larger
 // than a single-row PUT, but still bounded so a flood of authenticated imports
-// cannot pin multi-hundred-MB JSON blobs in process memory (audit #1343).
+// cannot pin multi-hundred-MB JSON blobs in process memory.
 // Aligns roughly with typical browser localStorage ceilings the client backs up.
 export const MAX_IMPORT_BODY_BYTES = 5 * 1_048_576;
 
 // Per-section row cap — PUT insert and bulk import. Independent of body bytes,
 // so a million tiny rows (or years of per-walk PUTs) still get rejected.
 // Updates of an existing id are always allowed so a full account can still
-// edit. Finding #7278: the per-row PUT used to have no count bound at all.
+// edit.
 export const MAX_ROWS_PER_SECTION = 10_000;
 
 // Newest N visit/history rows on GET /:username keep full polylines; older ones
@@ -35,13 +35,13 @@ export const MAX_ROWS_PER_SECTION = 10_000;
 export const GET_GEOMETRY_KEEP = 50;
 
 // Uncompressed JSON-text budget for `?geometry=full`. Above this, GET 413s
-// rather than JSON-encoding the archive (finding #7558). Default GET never
+// rather than JSON-encoding the archive. Default GET never
 // consults this — it uses the keep window. 8 MiB is well under MemoryMax and
 // still covers a small account's archive dump; the client never sends the flag.
 export const GET_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 
 // GET /:username/archive/:section — the cursor-paged escape hatch for an
-// archive too big for `?geometry=full` (idea #3715). The 413 stays as the
+// archive too big for `?geometry=full`. The 413 is the
 // unbounded-dump backstop; this walks the same rows a bounded page at a time.
 //
 // Both bounds are load-bearing and neither subsumes the other. Rows alone do
@@ -58,7 +58,7 @@ export const ARCHIVE_PAGE_MAX_ROWS = 1_000;
 // still sit far under the service's MemoryMax=512M.
 export const ARCHIVE_PAGE_MAX_BYTES = 2 * 1024 * 1024;
 
-// Per-account stored-jsonb budget (finding #7756). Same estimator GET uses
+// Per-account stored-jsonb budget. Same estimator GET uses
 // (sum of octet_length(::text) on visits/history polylines + favorite payloads).
 // Row × per-row caps still allow ~5 GiB of favorites JSONB; this is the disk
 // bound. 32 MiB is larger than GET_SNAPSHOT_MAX_BYTES (cloud is the archive;

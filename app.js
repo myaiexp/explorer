@@ -1,7 +1,7 @@
 // Entry point — wires the modules together and paints the first frame.
 //
 // app.js owns no feature: it is the last script in index.html and does nothing
-// but composition. Every concern it used to carry lives in a sibling now —
+// but composition. Every concern lives in a sibling:
 // session-state.js (the current route), loading.js (the spinner + the one-build
 // mutex), route-view.js (render a route), route-restore.js (route to a known
 // destination), result-panel.js (the panel's derived button state), generate.js

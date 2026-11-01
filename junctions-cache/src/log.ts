@@ -2,7 +2,7 @@
 // buffer so a debug endpoint can serve recent events back to a remote
 // caller (i.e. me reading via mase.fi/api/junctions/logs).
 
-type Fields = Record<string, string | number | boolean | null | undefined>;
+export type Fields = Record<string, string | number | boolean | null | undefined>;
 type Entry = { ts: string; level: string; fields: Record<string, string | number | boolean> };
 
 const RING_SIZE = 500;

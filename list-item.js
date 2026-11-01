@@ -59,8 +59,8 @@ function renderDestRows(entries, list, { meta, onSelect, onDelete, warnLabel }) 
     let rendered = 0;
     entries.forEach((entry, i) => {
         // Skip rather than throw: both callers run from app.js's top level, so one
-        // unusable stored row used to abort hash restore and the rest of init —
-        // the same class visitRenderParts closed for visits.
+        // unusable stored row would abort hash restore and the rest of init —
+        // the same class visitRenderParts guards for visits.
         const dest = destCoordsOrNull(entry);
         if (!dest) { skipped++; return; }
         list.appendChild(buildListItem(destListLabel(entry, dest), meta(entry),

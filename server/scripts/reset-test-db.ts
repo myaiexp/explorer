@@ -1,11 +1,11 @@
 // Rebuild wander_test from the migration chain — schema AND drizzle journal.
 //
-// Idea #3615: wander_test had every table but zero rows in
-// drizzle.__drizzle_migrations, so `drizzle-kit migrate` against it replayed
-// 0000 CREATE TABLE and died. That state is unreachable from here: the script
-// drops the schema and replays the whole chain through drizzle-orm's migrator,
-// which writes the journal as it goes. Idempotent — run it whenever
-// tests/migrations.test.ts goes red, and on a fresh box after `createdb`.
+// A wander_test with every table but zero rows in drizzle.__drizzle_migrations
+// makes `drizzle-kit migrate` replay 0000 CREATE TABLE and die. That state is
+// unreachable from here: the script drops the schema and replays the whole
+// chain through drizzle-orm's migrator, which writes the journal as it goes.
+// Idempotent — run it whenever tests/migrations.test.ts goes red, and on a
+// fresh box after `createdb`.
 //
 // It DROPS EVERYTHING in the target database. The only thing standing between
 // that and production is resolveTestDatabaseUrl's hard `_test`-suffix throw
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   const url = resolveTestDatabaseUrl();
   const name = dbNameOf(url);
 
-  // Same lock the suite holds (idea #4042). Every worktree resolves to this one
+  // Same lock the suite holds. Every worktree resolves to this one
   // database, and dropping the schema out from under a sibling session's running
   // suite is the worst case of that contention — worse than the truncate races,
   // because the tables come back empty AND the journal is rewritten.
