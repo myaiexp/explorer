@@ -392,9 +392,8 @@ describe('runOverpassQuery — local-first with public fallback', () => {
     });
 
     test('a local 504 is both retryable and a latch trip — the retry lands on public', async () => {
-        // 504 takes the retryable `continue` branch rather than the throw path,
-        // so the latch has to be set there too or the retry goes back to a
-        // gateway we already know is timing out.
+        // 504 is pushback and a 5xx at once. It has to latch as well as retry, or
+        // the retry goes back to a gateway we already know is timing out.
         const fetchMock = installFetch({
             local: [errStatus(504)],
             fallback: [okJson(ONE_NODE)],
