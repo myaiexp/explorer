@@ -37,7 +37,7 @@
 //                    directly, so the gate has to exist here too. Default false.
 //   avoidBacktracking  bool — the #avoidBacktracking checkbox, read by
 //                    route-view.js's readRouteBuildOptions. Widens the loop
-//                    envelope and keeps the via snap inside it (see osrm.js's
+//                    envelope and keeps the via snap inside it (see geometry.js's
 //                    loop envelope constants). Forwarded to BOTH loop branches:
 //                    it is pure geometry, so it applies equally to a junction
 //                    loop and a plain one, and one-way has no envelope to widen.

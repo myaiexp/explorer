@@ -1,7 +1,8 @@
 // @vitest-environment node
 /**
- * Tests for overpass.js — the two POSTs to the server-side Overpass cache
- * (/api/junctions/pois, /api/junctions/roads).
+ * Tests for overpass.js — the two pool POSTs to the server-side Overpass cache
+ * (/api/junctions/pois, /api/junctions/roads). The third, the corridor junctions,
+ * is pinned in corridor-junctions.test.js.
  *
  * What used to be tested here (the 3-attempt retry loop, the status-slot probe)
  * and in overpass-parse.test.js (element extraction, the annulus filter, query

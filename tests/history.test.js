@@ -39,7 +39,7 @@ beforeEach(() => {
 
   // Real list-item.js so name-vs-× clicks exercise the production handlers
   // (finding #7579). Other collaborators stay stubbed.
-  loadScripts('list-item', 'visit-shape', 'history');
+  loadScripts('list-item', 'history');
 });
 
 // A session whose entry sorts by date: larger i ⇒ newer. destName/destLat keep

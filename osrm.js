@@ -1,9 +1,9 @@
 // OSRM routing + loop building — self-hosted OSRM-foot wrappers (route / nearest
 // / table), road/junction snapping, and the envelope/junction loop builders.
 // No DOM: callers pass a precomputed `spread`. Loaded after net.js (for
-// fetchWithTimeout), overpass.js (postJunctionsCache), geometry.js (for
-// envelopeOffsetPoint), geo-utils.js (haversineKm / kmToDegLat) and
-// loop-quality.js (loopOverlapFraction), before route-dispatch.js + app.js.
+// fetchWithTimeout), overpass.js (fetchCorridorJunctions), geometry.js (for
+// loopVias), geo-utils.js (haversineKm) and loop-quality.js
+// (loopOverlapFraction), before route-dispatch.js + app.js.
 
 // Self-hosted OSRM-foot for Finland.
 const OSRM_FI_BASE    = 'https://mase.fi/api/osrm-fi/route/v1/foot';
@@ -234,80 +234,6 @@ async function screeningTableFn(start, candidates) {
     }, false, 'osrm table');
 }
 
-// ── Loop envelope constants ────────────────────────────────────────────────
-//
-// The legacy pair. offsetKm is floored at 100 m while the snap radius is
-// floored at 300 m — so for every trip under ~2.5 km at the default spread the
-// snap radius is WIDER than the envelope, and a via meant to sit 150 m off-axis
-// can be dragged 300 m to reach a junction, back across the A→B line. Measured
-// on real Jämsä destinations (2026-08-31, live OSRM): 44–83% leg overlap at the
-// bottom of the spread slider, with each leg detouring off-corridor to touch
-// its via and returning — the dead-end spurs. Kept as the avoidBacktracking:false
-// behaviour so the toggle has something to compare against.
-const LEGACY_LOOP_OFFSET_KM = 0.1;
-const LEGACY_SNAP_FLOOR_KM  = 0.3;
-
-// The avoidBacktracking pair. MIN is ADDED to the spread-scaled offset rather
-// than max()'d with it: a flat floor would swallow the bottom half of the
-// slider (0% and 25% already produce byte-identical routes today), whereas
-// adding keeps the slider live across its whole range with 300 m as the
-// narrowest loop. 300 m is where the measured overlap collapses — it is roughly
-// the block spacing, i.e. the width at which OSRM stops having to reuse the
-// outbound streets for the return leg.
-const MIN_LOOP_OFFSET_KM = 0.3;
-// A snap may never move a via further than the envelope pushed it out, or the
-// snap undoes the loop it was placed to create. Half the offset leaves room to
-// reach a junction while keeping the via on its own side of the A→B line.
-const SNAP_FRACTION_OF_OFFSET = 0.5;
-
-// Shared geometry for the two loop builders. Derives the per-side offset, the
-// A/B endpoints, the via t-positions, and the snap radius from start/dest + the
-// spread params. `avoidBacktracking` selects between the two constant pairs
-// above — it widens the envelope and ties the snap radius to it, instead of the
-// legacy flat 300 m floor that could exceed the envelope entirely. Pure — no DOM.
-function buildLoopSetup(startLat, startLng, destLat, destLng, spread, { avoidBacktracking = false } = {}) {
-    const straightKm = haversineKm(startLat, startLng, destLat, destLng);
-    // spread is required. Production always passes getSpreadParams(), which itself
-    // defaults NaN/undefined slider values to the 50% params — so the graceful
-    // fallback already lives at the source. A missing spread here is a caller bug:
-    // destructure it directly so it throws loudly instead of silently substituting
-    // a spread the user never picked.
-    const { offsetMult, viaTs } = spread;
-    const scaled = straightKm * offsetMult;
-    const offsetKm = avoidBacktracking
-        ? MIN_LOOP_OFFSET_KM + scaled
-        : Math.max(LEGACY_LOOP_OFFSET_KM, scaled);
-    return {
-        offsetKm,
-        viaTs,
-        A: { lat: startLat, lng: startLng },
-        B: { lat: destLat,  lng: destLng },
-        snapRadius: avoidBacktracking
-            ? offsetKm * SNAP_FRACTION_OF_OFFSET
-            : Math.max(LEGACY_SNAP_FLOOR_KM, offsetKm * 0.5),
-    };
-}
-
-// Pure loop envelope geometry — the single source for the sin-envelope via
-// points, shared by both loop builders here and buildDirectionsUrl
-// (which draws the Google Maps link along the same oval). Built on
-// buildLoopSetup so the offset formula lives in exactly one place.
-// rightVias/leftVias are in forward (A→B) t-order; a leg that walks a side back
-// toward A reverses that side at the call site (self-documenting). Spreads the
-// setup fields (A, B, snapRadius, offsetKm, viaTs) so callers don't re-derive
-// them. `opts` carries avoidBacktracking straight through to buildLoopSetup —
-// route-view.js's buildDirectionsUrl passes it too, so the Google Maps link
-// traces the same oval the in-app route does. Pure — no DOM, no network.
-function loopVias(startLat, startLng, destLat, destLng, spread, opts = {}) {
-    const setup = buildLoopSetup(startLat, startLng, destLat, destLng, spread, opts);
-    const { offsetKm, viaTs } = setup;
-    const rightVias = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, -1));
-    const leftVias = viaTs.map(t =>
-        envelopeOffsetPoint(startLat, startLng, destLat, destLng, t, offsetKm, +1));
-    return { rightVias, leftVias, ...setup };
-}
-
 // Build a full oval loop: A → (right vias) → B → (left vias) → A.
 // Returns { outbound, return } where each is {coords, duration, distance} or null.
 // Builds a single chirality (right-side out, left-side back); buildJunctionLoop
@@ -342,32 +268,6 @@ async function buildLoop(startLat, startLng, destLat, destLng, spread, { degrade
     const outbound = await fetchRouteThrough([A, ...snappedRight, B]);
     const ret      = await fetchRouteThrough([B, ...snappedLeft, A]);
     return { outbound, return: ret };
-}
-
-// Fetch OSM junctions in the start/dest corridor via the shelly cache
-// (mase.fi/api/junctions). Start/radius go in the POST body — never the
-// query string — so nginx access logs cannot persist home coords (#7559).
-// maxKm is the caller's budget (passed in, never read from the DOM) so
-// the cache key matches the radius the caller works in.
-async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode = false) {
-    const minLat = Math.min(startLat, destLat);
-    const maxLat = Math.max(startLat, destLat);
-    const minLng = Math.min(startLng, destLng);
-    const maxLng = Math.max(startLng, destLng);
-    const midLat = (minLat + maxLat) / 2;
-    const latPad = kmToDegLat(offsetKm);
-    const lngPad = kmToDegLng(offsetKm, midLat);
-    const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
-    const exclude = winterMode ? 'winter' : 'default';
-    const body = { bbox, exclude };
-    if (Number.isFinite(maxKm) && maxKm > 0) {
-        body.startLat = startLat;
-        body.startLng = startLng;
-        body.maxKm = maxKm;
-    }
-    if (onProgress) onProgress('Searching for junctions…');
-    const data = await postJunctionsCache('/api/junctions/junctions', body);
-    return data.junctions || [];
 }
 
 // Find the closest junction in the pool to `via` within snapRadius km.
@@ -418,7 +318,7 @@ function pickBetterLoop(outOnRight, backOnLeft, outOnLeft, backOnRight) {
 //   winterMode       excludes winter-unmaintained ways from the junction fetch
 //   spread           precomputed { offsetMult, viaTs } from computeSpreadParams
 //   avoidBacktracking  widens the envelope and keeps the junction snap inside
-//                    it (see the loop envelope constants). Forwarded to every
+//                    it (see the loop envelope constants in geometry.js). Forwarded to every
 //                    loopVias/buildLoop call below — including BOTH fallbacks,
 //                    or a failed junction fetch would silently hand the user the
 //                    legacy geometry the toggle exists to replace.
@@ -481,8 +381,6 @@ globalThis.OSRM_PUBLIC_NEAREST = OSRM_PUBLIC_NEAREST;
 globalThis.OSRM_PUBLIC_TABLE = OSRM_PUBLIC_TABLE;
 globalThis.SELF_HOSTED_RETRY_MS = SELF_HOSTED_RETRY_MS;
 globalThis.PUBLIC_MIN_GAP_MS = PUBLIC_MIN_GAP_MS;
-globalThis.MIN_LOOP_OFFSET_KM = MIN_LOOP_OFFSET_KM;
-globalThis.SNAP_FRACTION_OF_OFFSET = SNAP_FRACTION_OF_OFFSET;
 globalThis.isSelfHostedDown = isSelfHostedDown;
 globalThis.resetOsrmFallbackState = resetOsrmFallbackState;
 globalThis.tryOsrm = tryOsrm;
@@ -490,10 +388,7 @@ globalThis.fetchRouteThrough = fetchRouteThrough;
 globalThis.tryNearest = tryNearest;
 globalThis.snapToRoad = snapToRoad;
 globalThis.screeningTableFn = screeningTableFn;
-globalThis.buildLoopSetup = buildLoopSetup;
-globalThis.loopVias = loopVias;
 globalThis.buildLoop = buildLoop;
-globalThis.fetchCorridorJunctions = fetchCorridorJunctions;
 globalThis.snapToJunction = snapToJunction;
 globalThis.pickBetterLoop = pickBetterLoop;
 globalThis.buildJunctionLoop = buildJunctionLoop;

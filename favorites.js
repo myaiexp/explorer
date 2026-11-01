@@ -3,7 +3,7 @@
 
 // FAVORITES_KEY + getFavorites live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
-// buildListItem in list-item.js; restoreResult in route-restore.js;
+// renderDestRows + destListDistance in list-item.js; restoreResult in route-restore.js;
 // getCurrentSession in session-state.js — all resolved as globals at call time.
 
 // Favorite-identity predicate: does this favorite point at the same destination
@@ -73,27 +73,12 @@ function renderFavoritesSection() {
         return;
     }
 
-    list.replaceChildren();
-    let skipped = 0;
-    let rendered = 0;
-    favs.forEach((entry, i) => {
-        // Skip rather than throw: this runs from app.js's top level, so one
-        // unusable stored row used to abort history, hash restore, and the rest
-        // of init — the same class visitRenderParts closed for visits.
-        const dest = destCoordsOrNull(entry);
-        if (!dest) { skipped++; return; }
-        const label = entry.destName ||
-            `${dest.destLat.toFixed(4)}, ${dest.destLng.toFixed(4)}`;
-        const dist = Number.isFinite(entry.distance) ? `${entry.distance.toFixed(1)} km` : '';
-        const item = buildListItem(label, dist,
-            () => { restoreResult(getFavorites()[i]); updateFavoriteBtn(); },
-            (e) => deleteFavorite(i, e));
-        list.appendChild(item);
-        rendered++;
+    const rendered = renderDestRows(favs, list, {
+        meta: destListDistance,
+        onSelect: (i) => { restoreResult(getFavorites()[i]); updateFavoriteBtn(); },
+        onDelete: deleteFavorite,
+        warnLabel: 'renderFavoritesSection',
     });
-    if (skipped > 0) {
-        console.warn(`renderFavoritesSection: skipped ${skipped} unusable favorite row(s)`);
-    }
     section.classList.toggle('visible', rendered > 0);
 }
 

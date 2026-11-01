@@ -146,8 +146,6 @@ describe('displayRoute derives the button from the session it displays', () => {
     globalThis.L = { latLngBounds: () => ({ pad: () => ({}) }) };
     globalThis.haversineKm = () => 3;
     globalThis.computeRouteTotals = () => ({ totalWalkKm: 6, totalDuration: 4200 });
-    globalThis.computeSpreadParams = () => ({ offsetKm: 1, spreadFactor: 0.5 });
-    globalThis.loopVias = () => ({ rightVias: [], leftVias: [] });
     globalThis.routeSessionFields = () => ({});
     globalThis.fetchElevations = () => Promise.resolve([]);
     globalThis.renderElevationChart = () => {};

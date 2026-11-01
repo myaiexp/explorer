@@ -1,6 +1,7 @@
-// POI / road candidate pools, fetched from the server-side Overpass cache. No DOM.
-// Loaded after net.js (for fetchWithTimeout) and before app.js; the fetchers
-// take all inputs as params and return plain {lat,lng[,name]} arrays.
+// junctions-cache client — POI / road candidate pools and the corridor junctions,
+// fetched from the server-side Overpass cache. No DOM. Loaded after net.js (for
+// fetchWithTimeout) and geo-utils.js (for kmToDegLat / kmToDegLng).
+// The fetchers take all inputs as params and return plain {lat,lng[,name]} arrays.
 //
 // Query assembly, the Overpass retry + status-slot loop, OSM element extraction
 // and the annulus filter all used to live in this file. They now live in
@@ -15,8 +16,7 @@
 // browser only to describe the dropdown.
 //
 // Start coordinates travel in the POST body, never the query string, so nginx
-// access logs cannot persist a walker's home (#7559). osrm.js's
-// fetchCorridorJunctions posts through the same helper.
+// access logs cannot persist a walker's home (#7559).
 
 // One request per pool now, not a 3-attempt client retry budget — the service
 // owns the retries and the slot waiting. 60s matches the proxy_read_timeout in
@@ -74,12 +74,38 @@ async function fetchRoadsInRadius(startLat, startLng, minKm, maxKm, winterMode =
     return candidates.map(c => ({ lat: c.lat, lng: c.lng }));
 }
 
+// Fetch OSM junctions in the start/dest corridor via the shelly cache
+// (mase.fi/api/junctions). Start/radius go in the POST body — never the
+// query string — so nginx access logs cannot persist home coords (#7559).
+// maxKm is the caller's budget (passed in, never read from the DOM) so
+// the cache key matches the radius the caller works in.
+async function fetchCorridorJunctions(startLat, startLng, destLat, destLng, offsetKm, maxKm, onProgress, winterMode = false) {
+    const minLat = Math.min(startLat, destLat);
+    const maxLat = Math.max(startLat, destLat);
+    const minLng = Math.min(startLng, destLng);
+    const maxLng = Math.max(startLng, destLng);
+    const midLat = (minLat + maxLat) / 2;
+    const latPad = kmToDegLat(offsetKm);
+    const lngPad = kmToDegLng(offsetKm, midLat);
+    const bbox = `${minLat - latPad},${minLng - lngPad},${maxLat + latPad},${maxLng + lngPad}`;
+    const exclude = winterMode ? 'winter' : 'default';
+    const body = { bbox, exclude };
+    if (Number.isFinite(maxKm) && maxKm > 0) {
+        body.startLat = startLat;
+        body.startLng = startLng;
+        body.maxKm = maxKm;
+    }
+    if (onProgress) onProgress('Searching for junctions…');
+    const data = await postJunctionsCache('/api/junctions/junctions', body);
+    return data.junctions || [];
+}
+
 // Explicit globalThis exports so the helpers load from non-script consumers
 // (vm.compileFunction in tests/helpers/load.js) as well as the browser's
 // window. That evaluator is function-scoped and does not hoist these
 // declarations onto globalThis.
 globalThis.POOL_TIMEOUT_MS = POOL_TIMEOUT_MS;
-globalThis.postJunctionsCache = postJunctionsCache;
 globalThis.fetchCandidatePool = fetchCandidatePool;
 globalThis.fetchPOIsInRadius = fetchPOIsInRadius;
 globalThis.fetchRoadsInRadius = fetchRoadsInRadius;
+globalThis.fetchCorridorJunctions = fetchCorridorJunctions;

@@ -8,7 +8,8 @@
  * renderSavedLocations,updateSaveLocationBtn}. Collaborators
  * (getSavedLocations, syncedPut/syncedDelete, maybeRequestConsent,
  * showError/showSuccess, saveSettings) resolve as globals at call time, so
- * we install stubs then load it via helpers/load.js.
+ * we install stubs then load it via helpers/load.js. buildDeleteButton is the
+ * real one: SCRIPT_DEPS pulls list-item in front of it.
  */
 
 import { describe, test, expect, beforeEach, vi } from 'vitest';
@@ -193,6 +194,22 @@ describe('selectSavedLocation', () => {
     expect(document.getElementById('location').value).toBe('Jyväskylä');
     expect(starFill()).toBe('#fbbf24');
     expect(saveSettingsCalls).toBe(1);
+  });
+
+  test('clicking a chip × deletes that row without selecting it', () => {
+    localStorage.setItem(SAVED_LOCATIONS_KEY, JSON.stringify([
+      { id: 'a', label: 'Home', value: 'Jyväskylä' },
+      { id: 'b', label: 'Work', value: 'Tampere' },
+    ]));
+    window.renderSavedLocations();
+    saveSettingsCalls = 0;
+
+    document.querySelectorAll('.saved-location-item .history-delete')[1].click();
+
+    expect(stored().map(s => s.id)).toEqual(['a']);
+    expect(document.getElementById('location').value).toBe('');
+    expect(saveSettingsCalls).toBe(0);
+    expect(document.querySelectorAll('.saved-location-item')).toHaveLength(1);
   });
 });
 

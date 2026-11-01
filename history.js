@@ -1,10 +1,9 @@
 // Visit-history CRUD — the recent-routes list and its restore/expand controls.
-// Loaded after visit-shape.js (for destCoordsOrNull).
 
 // HISTORY_KEY + getHistory live in storage.js; syncedPut/syncedDelete/
 // maybeRequestConsent in sync-helpers.js; snapshotSession in session.js;
-// buildListItem in list-item.js; restoreResult in route-restore.js — all resolved
-// as globals at call time.
+// renderDestRows + destListDistance in list-item.js; restoreResult in
+// route-restore.js — all resolved as globals at call time.
 
 const HISTORY_MAX = 20;
 const HISTORY_VISIBLE = 3;
@@ -61,29 +60,16 @@ function renderHistorySection() {
     }
 
     const shown = historyExpanded ? history : history.slice(0, HISTORY_VISIBLE);
-    list.replaceChildren();
-    let skipped = 0;
-    let rendered = 0;
-    shown.forEach((entry, i) => {
-        // Skip rather than throw: this runs from app.js's top level, so one
-        // unusable stored row used to abort hash restore and the rest of init.
-        const dest = destCoordsOrNull(entry);
-        if (!dest) { skipped++; return; }
-        const label = entry.destName ||
-            `${dest.destLat.toFixed(4)}, ${dest.destLng.toFixed(4)}`;
-        const date = new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        const dist = Number.isFinite(entry.distance) ? `${entry.distance.toFixed(1)} km` : '';
-        const meta = [dist, date].filter(Boolean).join(' · ');
-
-        const item = buildListItem(label, meta,
-            () => restoreResult(getHistory()[i]),
-            (e) => { e.stopPropagation(); deleteHistoryEntry(i); });
-        list.appendChild(item);
-        rendered++;
+    const rendered = renderDestRows(shown, list, {
+        meta: (entry) => {
+            const date = new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            return [destListDistance(entry), date].filter(Boolean).join(' · ');
+        },
+        // `shown` is a prefix of the stored order, so its index is the stored index.
+        onSelect: (i) => restoreResult(getHistory()[i]),
+        onDelete: (i, e) => { e.stopPropagation(); deleteHistoryEntry(i); },
+        warnLabel: 'renderHistorySection',
     });
-    if (skipped > 0) {
-        console.warn(`renderHistorySection: skipped ${skipped} unusable history row(s)`);
-    }
     section.classList.toggle('visible', rendered > 0);
 
     const hidden = history.length - HISTORY_VISIBLE;

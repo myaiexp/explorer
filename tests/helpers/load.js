@@ -59,23 +59,29 @@ export const SCRIPT_DEPS = {
     // Sampling interpolates with haversineM; fetch goes through fetchWithTimeout.
     'elevation':    ['net', 'geo-utils'],
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
-    // overpass owns postJunctionsCache, which fetchCorridorJunctions calls.
-    // overpass depends only on net, so this edge does not cycle.
+    // overpass owns fetchCorridorJunctions, which buildJunctionLoop calls;
+    // geometry owns loopVias, which both loop builders call.
     'osrm':         ['net', 'overpass', 'geometry', 'loop-quality'],
-    // fetchWithTimeout only: the bbox/distance math moved server-side with the
-    // Overpass queries, so overpass.js no longer touches geo-utils.
-    'overpass':     ['net'],
+    // fetchWithTimeout, plus kmToDegLat/Lng for the corridor bbox padding. The
+    // pool bbox/distance math moved server-side with the Overpass queries.
+    'overpass':     ['net', 'geo-utils'],
     'result-panel': ['session-state'],
     // The visited counter counts rows visitRenderParts accepts. Other visited.js
     // collaborators are faked by its tests; this one is the real predicate.
     'visited':      ['visit-shape'],
-    // geometry + result-panel are pure/real collaborators named in the header;
+    // geometry (loopVias, computeSpreadParams) + result-panel are pure/real
+    // collaborators named in the header — a suite that fakes loopVias installs the
+    // stub AFTER loading route-view, or geometry's real one overwrites it;
     // map-view / session / elevation / favorites are faked by route-view tests.
     // map-view.test.js loads map-view.js for real against a Leaflet stub, but
     // map-view is not a SCRIPT_DEPS key: adding it would force route-view to
     // list it via the reverse-completeness check and clobber those stubs.
     'route-view':   ['session-state', 'geometry', 'result-panel'],
     'visits-io':    ['visit-shape'],
+    // renderDestRows gates each stored row on the real destCoordsOrNull.
+    'list-item':    ['visit-shape'],
+    // The row's × button comes from list-item's buildDeleteButton.
+    'saved-locations': ['list-item'],
     // The synced-down trip rows go through the same normalizeVisit gate an
     // uploaded backup file does (#2735), so visit-shape must load first.
     'sync-sections': ['visit-shape'],

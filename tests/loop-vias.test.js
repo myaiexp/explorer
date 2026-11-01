@@ -1,21 +1,16 @@
 // @vitest-environment node
 /**
- * Tests for loopVias (osrm.js) — the single source for the loop envelope vias,
- * now shared by buildLoop, buildJunctionLoop, and buildDirectionsUrl.
+ * Tests for loopVias (geometry.js) — the single source for the loop envelope
+ * vias, shared by buildLoop, buildJunctionLoop, and buildDirectionsUrl.
  *
- * Loading: geo-utils.js + geometry.js provide the globals loopVias/buildLoopSetup
- * read at call time (haversineKm, envelopeOffsetPoint, computeSpreadParams);
- * osrm.js only assigns globals at load (no top-level calls),
- * so the whole file runs cleanly in the realm. loopOverlapFraction is unused here.
- * helpers/load.js's SCRIPT_DEPS already lists osrm's edges (net, overpass,
- * geometry, loop-quality; geo-utils arrives transitively), so loading 'osrm'
- * pulls them.
+ * Pure geometry, so loading 'geometry' is enough: helpers/load.js's SCRIPT_DEPS
+ * pulls geo-utils (haversineKm, kmToDegLat) in front of it.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
 import { loadScripts } from './helpers/load.js';
 
 beforeAll(() => {
-    loadScripts('osrm');
+    loadScripts('geometry');
 });
 
 const A = { lat: 60, lng: 24 };

@@ -1,4 +1,5 @@
 // Saved-locations CRUD — the named start-location shortcuts under the input.
+// Loaded after list-item.js (for buildDeleteButton).
 
 // SAVED_LOCATIONS_KEY + getSavedLocations live in storage.js; syncedPut/
 // syncedDelete/maybeRequestConsent in sync-helpers.js; showError/showSuccess in
@@ -60,13 +61,7 @@ function renderSavedLocations() {
         label.textContent = saved[i].label;
         item.appendChild(label);
 
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'history-delete';
-        del.title = 'Remove';
-        del.textContent = '×';
-        del.addEventListener('click', (e) => deleteSavedLocation(i, e));
-        item.appendChild(del);
+        item.appendChild(buildDeleteButton((e) => deleteSavedLocation(i, e)));
 
         container.appendChild(item);
     }

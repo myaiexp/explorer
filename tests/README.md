@@ -59,7 +59,7 @@ Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm �
 
 ### Transform-before-eval
 
-`readScript(name)` returns source text. Every suite loads through `loadScripts`, which evaluates that exact text under the file's URL so coverage attributes it — `fit-encoder` included, via `FitEncoder._internals` on the export line. `corridor-junctions` drives osrm.js's `fetchCorridorJunctions` after `loadScripts('osrm')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
+`readScript(name)` returns source text. Every suite loads through `loadScripts`, which evaluates that exact text under the file's URL so coverage attributes it — `fit-encoder` included, via `FitEncoder._internals` on the export line. `corridor-junctions` drives overpass.js's `fetchCorridorJunctions` after `loadScripts('overpass')`. Don't slice one function out of a source file to test it: the slice cannot see a sibling helper the function later calls.
 
 ### File naming
 
@@ -72,9 +72,10 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 | `export.js` | `export-download.test.js`, `export.test.js` |
 | `visited.js` | `mark-visited.test.js`, `visited-sync.test.js` |
 | `visits-io.js` | `visits-import.test.js` |
-| `osrm.js` | `osrm.test.js`, `loop-vias.test.js`, `corridor-junctions.test.js` |
+| `osrm.js` | `osrm.test.js`, `osrm-fallback.test.js` |
+| `geometry.js` | `geometry.test.js`, `loop-vias.test.js` |
 | `cloud-backup-ui.js` | `cloud-backup-ui.test.js` |
-| `overpass.js` | `overpass.test.js` (query building / element parsing moved to `junctions-cache/tests/overpass-pools.test.ts`) |
+| `overpass.js` | `overpass.test.js`, `corridor-junctions.test.js` (query building / element parsing moved to `junctions-cache/tests/overpass-pools.test.ts`) |
 | `route-view.js` | `route-view.test.js` (visited-button derivation still in `mark-visited.test.js`) |
 | `visit-shape.js` | `visit-shape.test.js`, `visit-shape-parity.test.js` (client/server cap lockstep) |
 | `storage.js` | `storage.test.js`, `geometry-keep-parity.test.js` (client/server newest-N geometry window) |

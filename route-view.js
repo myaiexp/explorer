@@ -6,8 +6,8 @@
 //
 // map-view.js (markers/polylines/route color), session.js
 // (computeRouteTotals/routeSessionFields), elevation.js, favorites.js, and
-// osrm.js (loopVias, isSelfHostedDown) resolve as globals at call time — tests
-// fake them. Every path that puts a route on screen ends up in displayRoute:
+// osrm.js (isSelfHostedDown) resolve as globals at call time — tests fake
+// them. Every path that puts a route on screen ends up in displayRoute:
 // generate.js directly, pick-mode.js / share-link.js / the history + favorites
 // lists via route-restore.js, and spread-control.js via renderRouteTail.
 
@@ -41,8 +41,7 @@ function getLoopShapeOptions() {
 // retry loop for any non-degraded round trip. winterMode is the checkbox as-is:
 // dest-pool road filtering is independent of loop shape, and buildRouteForMode
 // only consults it on the junction branch. degraded mirrors osrm.js's
-// isSelfHostedDown() latch (resolved as a global at call time, like loopVias
-// below) — the only place in the degraded pipeline that touches the DOM/latch;
+// isSelfHostedDown() latch (resolved as a global at call time) — the only place in the degraded pipeline that touches the DOM/latch;
 // every downstream module takes degraded as a passed-in argument.
 function readRouteBuildOptions(tripMode) {
     return {
@@ -115,7 +114,7 @@ function buildDirectionsUrl(startLat, startLng, destLat, destLng, tripMode) {
         return `${base}&origin=${startLat},${startLng}&destination=${destLat},${destLng}`;
     }
 
-    // Round-trip: reuse osrm.js's loopVias so the Google Maps link traces the
+    // Round-trip: reuse geometry.js's loopVias so the Google Maps link traces the
     // same oval the in-app route does — one source for the envelope geometry.
     // The return leg walks the left side back toward the start, so reverse it.
     const { rightVias: outVias, leftVias } =

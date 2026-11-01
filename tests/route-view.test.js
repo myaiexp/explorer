@@ -9,7 +9,8 @@
  *
  * SCRIPT_DEPS pulls session-state, geometry, result-panel. session.js is loaded
  * extra so computeRouteTotals / routeSessionFields are real. map-view /
- * elevation / favorites / osrm (loopVias) are faked on globalThis.
+ * elevation / favorites / osrm are faked on globalThis; loopVias is real geometry
+ * loaded through SCRIPT_DEPS, replaced by a stub after the load.
  */
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
@@ -62,7 +63,6 @@ beforeEach(() => {
     globalThis.addRadiusCircles = vi.fn();
     globalThis.fetchElevations = vi.fn(() => Promise.resolve([]));
     globalThis.renderElevationChart = vi.fn();
-    globalThis.loopVias = vi.fn(() => ({ rightVias: RIGHT, leftVias: LEFT }));
     globalThis.isSelfHostedDown = vi.fn(() => false);
     globalThis.drawRouteGlow = vi.fn();
     globalThis.drawRoutePair = vi.fn((outbound, ret) => {
@@ -74,6 +74,8 @@ beforeEach(() => {
     globalThis.map = { fitBounds: vi.fn() };
     globalThis.L = { latLngBounds: (coords) => ({ pad: (n) => ({ coords, n }) }) };
     loadScripts('route-view', 'session');
+    // After the load: geometry.js, a SCRIPT_DEPS edge, assigns the real loopVias.
+    globalThis.loopVias = vi.fn(() => ({ rightVias: RIGHT, leftVias: LEFT }));
 });
 
 function waypoint(p) {

@@ -430,8 +430,8 @@ describe('buildLoop', () => {
         expect(fetch).toHaveBeenCalledTimes(2);
     });
 
-    // loopVias is module-internal to osrm.js, so a dropped flag cannot be seen
-    // by spying on it — only by the vias the builder actually routes through.
+    // Asserted on the vias the builder actually routes through: that is what a
+    // dropped flag changes for the walker.
     // Degraded skips the snap, so the envelope vias reach /route verbatim.
     test('avoidBacktracking routes through the widened envelope, not the legacy one', async () => {
         const spread = SPREAD();

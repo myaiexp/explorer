@@ -1,12 +1,12 @@
 /**
- * Tests for fetchCorridorJunctions (osrm.js) — the start-anchored junction
+ * Tests for fetchCorridorJunctions (overpass.js) — the start-anchored junction
  * cache fetch.
  *
- * Loading: loadScripts('osrm') evaluates the production module with its real
- * SCRIPT_DEPS (net, overpass, geometry, loop-quality → geo-utils), the same way
- * osrm.test.js does, and the tests drive the globalThis.fetchCorridorJunctions
- * it exports. fetchWithTimeout is the real one: it calls the per-test fake
- * `fetch` and clears its abort timer once the fake's json() settles.
+ * Loading: loadScripts('overpass') evaluates the production module with its real
+ * SCRIPT_DEPS (net, geo-utils), and the tests drive the
+ * globalThis.fetchCorridorJunctions it exports. fetchWithTimeout is the real one:
+ * it calls the per-test fake `fetch` and clears its abort timer once the fake's
+ * json() settles.
  *
  * Guards two invariants:
  *   - audit #1268: maxKm is an explicit parameter, NOT read from the DOM.
@@ -21,7 +21,7 @@ import { jsonResponse, installCannedFetch, requestOf } from './helpers/fetch-stu
 let fetchCorridorJunctions;
 
 beforeAll(() => {
-    loadScripts('osrm');
+    loadScripts('overpass');
     fetchCorridorJunctions = globalThis.fetchCorridorJunctions;
 });
 

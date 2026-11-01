@@ -2,7 +2,7 @@
 /**
  * Tests for geo-utils.js — haversineKm / haversineM plus the km→degree
  * projection (kmToDegLat / kmToDegLng). Finding #7589: the projection helpers
- * back osrm.js's corridor padding. The deleted overpass-parse.test.js only
+ * back overpass.js's corridor padding. The deleted overpass-parse.test.js only
  * asserted the query contained a bbox string — a tautology if the 111 km/deg
  * formula drifted. These assert the numbers.
  *
