@@ -2,13 +2,13 @@
 // the query-kind selector.
 
 import type { ExcludePreset } from '../overpass.js';
-import { MAX_RADIUS_KM, type ParseFailure } from './parse-request.js';
+import { MAX_RADIUS_KM, type Anchor, type ParseFailure } from './parse-request.js';
 import { filtersForTypes, type TypesSelector } from '../poi-catalog.js';
 
 // Unlike the junctions anchor, `bbox` is NOT part of a pool request — the
 // server derives the fetch bbox from the start and radius. minKm defaults to 0;
 // maxKm is required.
-export type PoolAnchor = { startLat: number; startLng: number; minKm: number; maxKm: number };
+export type PoolAnchor = Anchor & { minKm: number };
 
 export type ParsedPoi = { ok: true; anchor: PoolAnchor; types: TypesSelector };
 export type ParsedRoad = { ok: true; anchor: PoolAnchor; exclude: ExcludePreset };

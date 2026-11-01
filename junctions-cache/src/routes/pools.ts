@@ -22,7 +22,7 @@ function respondWithPool(
 ) {
     const sampled = async () => {
         const result = await lookup();
-        return { ...result, junctions: samplePool(result.junctions, POOL_CAP) };
+        return { ...result, points: samplePool(result.points, POOL_CAP) };
     };
     return respondLookup(c, sampled, {
         event: 'pool_lookup',
