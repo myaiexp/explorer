@@ -34,6 +34,12 @@
         localStorage.removeItem(OUTBOX_KEY);
     }
 
+    // The URL segment for a section. Mapped at send time, not at enqueue, so an
+    // entry already sitting in a durable queue reaches the right route too.
+    function sectionRoute(section) {
+        return section === 'savedLocations' ? 'saved-locations' : section;
+    }
+
     function nextBackoff(current) {
         for (var i = 0; i < BACKOFF_STEPS.length; i++) {
             if (current < BACKOFF_STEPS[i]) { return BACKOFF_STEPS[i]; }
@@ -136,7 +142,7 @@
             // entry.id can carry user-supplied text (importVisits takes ids
             // verbatim from an uploaded backup file), and a raw '/' or '..' in
             // it would redirect this authenticated write to another endpoint.
-            var segments = [username, entry.section, entry.id];
+            var segments = [username, sectionRoute(entry.section), entry.id];
             var method = entry.op === 'delete' ? 'DELETE' : 'PUT';
             var body = entry.op === 'delete' ? undefined : entry.data;
 

@@ -21,7 +21,8 @@
     // is that same constant). No shared package — the frontend is a static script —
     // so server/src/lib/cloud-sections.unit.test.ts fails if the sets drift. The
     // 'walk_*' localStorage keys they map to are owned by storage.js; sectionKey()
-    // resolves each from storage.js's globals.
+    // resolves each from storage.js's globals. REST paths are a third spelling:
+    // savedLocations is /saved-locations (sync-flush.js sectionRoute).
     var DATA_SECTIONS = ['visits', 'favorites', 'savedLocations', 'history'];
 
     // Section's localStorage key, resolved from storage.js's globals at call time.
@@ -145,18 +146,38 @@
         return out;
     }
 
-    function mergeSection(section, serverRows) {
+    // The op each id in this section is waiting on. The queue is ordered, so the
+    // last entry for an id is what the device currently wants. Null prototype so
+    // an imported id such as 'constructor' reads as unqueued.
+    function pendingOps(section, outbox) {
+        var ops = Object.create(null);
+        outbox.forEach(function (entry) {
+            if (entry.section === section) { ops[entry.id] = entry.op; }
+        });
+        return ops;
+    }
+
+    // outbox is the flush worker's queue. A queued mutation has not reached the
+    // server, so the snapshot in serverRows predates it and timestamps cannot
+    // arbitrate. A queued delete keeps the server row out: a row re-added here
+    // survives the DELETE in localStorage alone, with nothing to re-queue or
+    // remove it. A queued put keeps the local row: app-written rows carry no
+    // updatedAt, so last-write-wins would hand them to the stale server copy.
+    function mergeSection(section, serverRows, outbox) {
         serverRows = normalizeServerRows(section, serverRows);
+        var pending = pendingOps(section, outbox);
         // Last-write-wins by updatedAt per id
         var local = readSection(section);
         var byId = {};
         local.forEach(function (row) { if (row.id) { byId[row.id] = row; } });
         serverRows.forEach(function (row) {
             if (!row.id) { return; }
+            var op = pending[row.id];
+            if (op === 'delete') { return; }
             var existing = byId[row.id];
             if (!existing) {
                 byId[row.id] = row;
-            } else {
+            } else if (op !== 'put') {
                 var existingTs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
                 var rowTs = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
                 if (rowTs >= existingTs) { byId[row.id] = keepLocalGeometry(row, existing); }

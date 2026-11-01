@@ -37,6 +37,7 @@
     var _state = 'anonymous';   // 'anonymous' | 'accepted' | 'declined'
     var _username = null;
     var _token = null;          // per-account secret; sent as Bearer on every request
+    var _holdFlush = false;     // pump parked while init() settles — see there
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,7 @@
         setAuth: setAuth,
         setToken: setToken,
         fireStateChange: fireStateChange,
+        readOutbox: function () { return flushWorker.peek(); },
         usernamePattern: USERNAME_RE
     });
 
@@ -137,10 +139,10 @@
 
     // The outbox + backoff pump lives in sync-flush.js. It reads none of this
     // module's state directly: getUsername() gates flushing on accepted + a bound
-    // username, and apiFetch carries the Bearer token.
+    // username + no init() in progress, and apiFetch carries the Bearer token.
     var flushWorker = globalThis.createSyncFlushWorker({
         apiFetch: apiFetch,
-        getUsername: function () { return _state === 'accepted' ? _username : null; }
+        getUsername: function () { return (_state === 'accepted' && !_holdFlush) ? _username : null; }
     });
 
     // ── Online listener ──────────────────────────────────────────────────────────
@@ -174,7 +176,14 @@
             // backoff to reset; flushHead no-ops when the queue is empty.
             var consent = readConsentRecord();
             var previous = (consent && consent.state === 'accepted') ? consent.username : null;
-            return WanderSync._runInit().then(function (result) {
+            // Hold the pump across the state machine. The Case 2 merge tells stale
+            // server rows by what is still queued, and its GET can predate a
+            // mutation made while it was in flight; an entry flushed in that window
+            // would leave the queue first and the merge would put its row back.
+            _holdFlush = true;
+            return WanderSync._runInit().finally(function () {
+                _holdFlush = false;
+            }).then(function (result) {
                 // Outbox entries have no owner; flushHead builds the path from the
                 // current username. Clear only after a successful bind to a
                 // different account. A failed or cancelled switch rolls _username

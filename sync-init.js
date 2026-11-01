@@ -22,6 +22,7 @@
     //   setToken(token)                  set the token alone, before a fetch that
     //                                    needs it and might yet be rolled back
     //   fireStateChange()
+    //   readOutbox()         → the queued mutations, oldest first
     //   usernamePattern      RegExp the URL segment must match to be a username
     globalThis.createSyncInit = function (deps) {
         var apiFetch = deps.apiFetch;
@@ -30,6 +31,7 @@
         var setAuth = deps.setAuth;
         var setToken = deps.setToken;
         var fireStateChange = deps.fireStateChange;
+        var readOutbox = deps.readOutbox;
         var usernamePattern = deps.usernamePattern;
 
         var Sections = globalThis.SyncSections;
@@ -213,12 +215,17 @@
             // stored consent (the user's own device), so a bare link still works here.
             if (consent && consent.state === 'accepted' && consent.username === urlUser) {
                 setAuth('accepted', urlUser, consent.token || urlToken || null);
-                // Own device: merge server rows into local (last-write-wins). A
-                // failed GET is silently ignored — state is already 'accepted'.
+                // Own device: merge server rows into local (last-write-wins, except
+                // where a queued mutation says otherwise). The outbox is this
+                // account's: init() clears it on every switch, which is why only
+                // this path reads it. A failed GET is silently ignored — state is
+                // already 'accepted'.
                 // fireStateChange on success so the UI re-renders the merged rows
                 // (the adopt paths below already fire it via bindAdoptedAccount).
                 return loadAccount(urlUser, {
-                    applySection: Sections.mergeSection,
+                    applySection: function (section, rows) {
+                        return Sections.mergeSection(section, rows, readOutbox());
+                    },
                     onSuccess: fireStateChange
                 });
             }
