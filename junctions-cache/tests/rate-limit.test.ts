@@ -123,6 +123,23 @@ describe('ipRateLimit', () => {
         }
     });
 
+    test('IPv6 clients in one /64 share a bucket; another prefix and mapped IPv4 do not', async () => {
+        const app = appWith(1);
+        expect((await reqFrom(app, '2001:db8:0:1::1')).status).toBe(200);
+        expect((await reqFrom(app, '2001:0db8:0000:0001:ffff::2')).status).toBe(429);
+        expect((await reqFrom(app, '2001:db8:0:2::1')).status).toBe(200);
+        expect((await reqFrom(app, '::ffff:203.0.113.9')).status).toBe(200);
+        expect((await reqFrom(app, '::ffff:cb00:7109')).status).toBe(200);
+        expect((await reqFrom(app, '::ffff:cb00:710a')).status).toBe(200);
+    });
+
+    test('an unparseable IPv6 value keeps its whole string as the key', async () => {
+        const app = appWith(1);
+        expect((await reqFrom(app, '1:2:3:4:5:6:7:8:9::a')).status).toBe(200);
+        expect((await reqFrom(app, '1:2:3:4:5:6:7:8:9::a')).status).toBe(429);
+        expect((await reqFrom(app, '1:2:3:4:5:6:7:8:9::b')).status).toBe(200);
+    });
+
     test('tokens refill over the window — a blocked client recovers after one full window', async () => {
         vi.useFakeTimers();
         vi.setSystemTime(0);
