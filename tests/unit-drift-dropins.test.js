@@ -20,8 +20,8 @@ import { tmpdir } from 'node:os';
 import { execDriftScript, installSsh } from './helpers/drift-exec.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const UNIT_SCRIPT = resolve(ROOT, 'deploy/check-unit-drift.sh');
-const NGINX_SCRIPT = resolve(ROOT, 'deploy/check-nginx-drift.sh');
+const SCRIPT = resolve(ROOT, 'deploy/check-unit-drift.sh');
+const script = resolve(ROOT, 'deploy/check-nginx-drift.sh');
 
 const UNIT = '# deploy-host: local\n[Service]\nExecStart=/bin/true\n';
 const DROPIN = '[Service]\nEnvironment=LD_LIBRARY_PATH=/opt/gone\n';
@@ -35,13 +35,16 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 function run(extraEnv = {}) {
-    return execDriftScript(UNIT_SCRIPT, {
+    return execDriftScript(SCRIPT, {
         ...process.env,
         UNIT_SRC_DIR: join(dir, 'src'),
         SYSTEMD_UNIT_DIR: join(dir, 'installed'),
         ...extraEnv,
     });
 }
+
+// SCRIPT is the unit check, `script` the nginx one: drift-exec.test.js's
+// guard checks every drift suite spawns through execDriftScript(SCRIPT|script, …).
 
 // side is 'src' (committed beside the unit) or 'installed' (on the host).
 function write(side, rel, body) {
@@ -124,7 +127,7 @@ describe('check-nginx-drift.sh and unit drop-ins', () => {
         write('src', 'b.timer.d/x.conf', DROPIN);
         write('src', 'c.socket.d/y.conf', DROPIN);
         write('installed', 'etc/nginx/own.conf', 'location / { return 204; }\n');
-        const { code, out } = execDriftScript(NGINX_SCRIPT, {
+        const { code, out } = execDriftScript(script, {
             ...process.env,
             NGINX_SRC_DIR: join(dir, 'src'),
             NGINX_ROOT_PREFIX: join(dir, 'installed'),
