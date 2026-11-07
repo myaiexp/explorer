@@ -10,15 +10,16 @@
  * req/sec fair-use cap, so every public request is paced through a shared
  * throttle queue.
  *
- * tests/osrm.test.js pins tryOsrm/tryNearest/screeningTableFn's parsing and
- * the loop builders against a single (self-hosted-only) backend, and only
+ * tests/osrm.test.js pins tryOsrm/tryNearest/screeningTableFn's parsing, and
+ * the loop-builder suites the builders, against a single (self-hosted-only)
+ * backend, and only
  * incidentally exercises the "does it latch" split. This file is the one
  * that actually distinguishes the two backends and drives the fallback
  * itself: the latch (isSelfHostedDown/resetOsrmFallbackState), when it does
  * and doesn't trip, and the public throttle's pacing.
  *
  * Loading: helpers/load.js's SCRIPT_DEPS already lists osrm's real edges
- * (net, overpass, geometry, loop-quality), so loadScripts('osrm') evaluates
+ * (net, geo-utils), so loadScripts('osrm') evaluates
  * the production module in this realm, same as osrm.test.js.
  */
 import { describe, test, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
@@ -41,8 +42,8 @@ afterEach(() => {
 });
 
 // Keyed on which backend BASE the composed URL starts with — every test here
-// cares about self-hosted vs. public. osrm.test.js's installOsrmKindFetch keys
-// on the endpoint kind (/route, /nearest, /table, /junctions) instead and never
+// cares about self-hosted vs. public. helpers/osrm-fetch.js's
+// installOsrmKindFetch keys on the endpoint kind (/route, /nearest, /table, /junctions) instead and never
 // tells the two backends apart. A backend with no handler throws "unexpected
 // self-hosted/public fetch". (`public` is rebound to `pub` only because it is a
 // reserved word as a binding name.)

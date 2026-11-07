@@ -3,7 +3,7 @@
  * state machine), sync-flush.test.js (durable outbox + backoff pump), and
  * sync-sections.test.js (merge/normalize/wipe of the four synced sections).
  *
- * The four source modules are non-module IIFEs that register globals, so every
+ * The sync source modules are non-module IIFEs that register globals, so every
  * suite that drives WanderSync needs the same realm setup: run the scripts in
  * the jsdom global context, seed location + localStorage, stub fetch. That setup
  * lives here so each suite's bootstrap is `installSyncLifecycle()` plus whatever
@@ -12,6 +12,7 @@
 
 import { beforeEach, afterEach, vi } from 'vitest';
 import { loadScripts } from './load.js';
+import { jsonResponse } from './fetch-stub.js';
 
 // storage.js owns the walk_* key strings and readStoredArray that
 // sync-sections.js resolves off globalThis at call time; net.js registers
@@ -38,11 +39,10 @@ export function destroySync() {
 }
 
 /**
- * Execute the four IIFEs in the jsdom global scope, replacing any previous
- * instance. Order matches index.html: the flush worker, section helpers and
- * init state machine register their globals before sync.js's IIFE consumes them
- * (SCRIPT_DEPS' 'sync' → ['sync-flush', 'sync-sections', 'sync-init'] edge
- * encodes that order).
+ * Execute the sync IIFEs in the jsdom global scope, replacing any previous
+ * instance. Order matches index.html: the flush worker, section helpers, init
+ * state machine and account creation register their globals before sync.js's
+ * IIFE consumes them (SCRIPT_DEPS' 'sync' edge encodes that order).
  */
 export function loadSync() {
     destroySync();
@@ -101,25 +101,11 @@ export function mockFetch(routes) {
             return Promise.reject(new TypeError('Failed to fetch'));
         }
         if (config === undefined) {
-            return Promise.resolve({
-                ok: false, status: 404,
-                headers: new Headers(),
-                json: () => Promise.resolve({}),
-            });
+            return Promise.resolve(jsonResponse({}, { status: 404 }));
         }
 
-        const status = config.status ?? 200;
-        const responseHeaders = new Headers(config.headers ?? {});
-        const body = { ...config };
-        delete body.status;
-        delete body.headers;
-
-        return Promise.resolve({
-            ok: status >= 200 && status < 300,
-            status,
-            headers: responseHeaders,
-            json: () => Promise.resolve(body),
-        });
+        const { status = 200, headers = {}, ...body } = config;
+        return Promise.resolve(jsonResponse(body, { status, headers }));
     });
 }
 

@@ -104,8 +104,9 @@ describe('SCRIPT_DEPS', () => {
     // (screening says "Dependencies" not "Loaded after") or that are the
     // historical gap sites — so a silent drop fails even if wording drifts.
     test('critical real-load edges cannot be silently dropped', () => {
-        expect(SCRIPT_DEPS.osrm).toEqual(
-            expect.arrayContaining(['net', 'geometry', 'loop-quality']),
+        expect(SCRIPT_DEPS.osrm).toEqual(expect.arrayContaining(['net']));
+        expect(SCRIPT_DEPS['loop-builders']).toEqual(
+            expect.arrayContaining(['osrm', 'geometry', 'loop-quality']),
         );
         expect(SCRIPT_DEPS.screening).toEqual(
             expect.arrayContaining(['geo-utils', 'novelty']),

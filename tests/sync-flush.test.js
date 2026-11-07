@@ -13,6 +13,7 @@ import {
     installSyncLifecycle, loadSync, setLocation, setLocalStorage,
     mockFetch, mockFetchOffline, drainFlushPump, flushMicrotasks, setupAccepted,
 } from './helpers/sync-harness.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
 
 installSyncLifecycle();
 
@@ -134,11 +135,7 @@ describe('outbox enqueue and per-status handling', () => {
             let callCount = 0;
             global.fetch = vi.fn(() => {
                 callCount++;
-                return Promise.resolve({
-                    ok: true, status: 204,
-                    headers: new Headers(),
-                    json: () => Promise.resolve({}),
-                });
+                return Promise.resolve(jsonResponse({}, { status: 204 }));
             });
 
             window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
@@ -171,17 +168,9 @@ describe('outbox enqueue and per-status handling', () => {
         global.fetch = vi.fn(() => {
             callCount++;
             if (callCount === 1) {
-                return Promise.resolve({
-                    ok: false, status: 429,
-                    headers: new Headers({ 'Retry-After': '10' }),
-                    json: () => Promise.resolve({}),
-                });
+                return Promise.resolve(jsonResponse({}, { status: 429, headers: { 'Retry-After': '10' } }));
             }
-            return Promise.resolve({
-                ok: true, status: 204,
-                headers: new Headers(),
-                json: () => Promise.resolve({}),
-            });
+            return Promise.resolve(jsonResponse({}, { status: 204 }));
         });
 
         window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
@@ -236,17 +225,9 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         global.fetch = vi.fn(() => {
             callCount++;
             if (callCount === 1) {
-                return Promise.resolve({
-                    ok: false, status: 500,
-                    headers: new Headers(),
-                    json: () => Promise.resolve({}),
-                });
+                return Promise.resolve(jsonResponse({}, { status: 500 }));
             }
-            return Promise.resolve({
-                ok: true, status: 204,
-                headers: new Headers(),
-                json: () => Promise.resolve({}),
-            });
+            return Promise.resolve(jsonResponse({}, { status: 204 }));
         });
 
         window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
@@ -283,11 +264,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
                     Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })
                 );
             }
-            return Promise.resolve({
-                ok: true, status: 204,
-                headers: new Headers(),
-                json: () => Promise.resolve({}),
-            });
+            return Promise.resolve(jsonResponse({}, { status: 204 }));
         });
 
         window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
@@ -314,11 +291,7 @@ describe('#1567 outbox flush DELETE / backoff / drain', () => {
         let callCount = 0;
         global.fetch = vi.fn(() => {
             callCount++;
-            return Promise.resolve({
-                ok: false, status: 500,
-                headers: new Headers(),
-                json: () => Promise.resolve({}),
-            });
+            return Promise.resolve(jsonResponse({}, { status: 500 }));
         });
 
         window.WanderSync.mutate('visits', 'put', 'uuid-1', { id: 'uuid-1' });
@@ -465,9 +438,7 @@ describe('request path encoding', () => {
         localStorage.setItem('walk_sync_outbox', JSON.stringify([
             { section: 'visits', op: 'put', id: '../../accounts', data: { id: 'x' } },
         ]));
-        global.fetch = vi.fn(() => Promise.resolve({
-            ok: true, status: 204, headers: new Headers(), json: () => Promise.resolve({}),
-        }));
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({}, { status: 204 })));
         window.dispatchEvent(new Event('online'));
         await drainFlushPump();
 
@@ -483,9 +454,7 @@ describe('request path encoding', () => {
         localStorage.setItem('walk_sync_outbox', JSON.stringify([
             { section: 'visits/../favorites', op: 'delete', id: 'uuid-1' },
         ]));
-        global.fetch = vi.fn(() => Promise.resolve({
-            ok: true, status: 204, headers: new Headers(), json: () => Promise.resolve({}),
-        }));
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({}, { status: 204 })));
         window.dispatchEvent(new Event('online'));
         await drainFlushPump();
         expect(global.fetch.mock.calls[0][0])

@@ -51,7 +51,9 @@ The suite never migrates — it assumes the schema is already there. `tests/migr
 
 It evaluates with `vm.compileFunction` under the script's `file://` name, so v8 coverage and stack traces land on the real file and line. The source text comes from the `virtual:wander-root-scripts` module (`helpers/root-scripts-plugin.js`, registered in `vitest.config.js`), not a `?raw` glob: v8 keys coverage by path with the query stripped, so each `?raw` string module was reported as its script's own coverage. `new Function` is out for the same reason — its `(function anonymous(` prefix shifts every coverage offset.
 
-`SCRIPT_DEPS` is the single copy of index.html's load-order graph. Direct dependencies only — `loadScripts` walks transitively. A module that gains a real dependency is one edit here rather than a hunt through every test that loads it. `helpers/load.test.js` fails RED if an edge contradicts index.html's `<script>` order.
+`SCRIPT_DEPS` (`helpers/script-deps.js`, re-exported by `load.js`) is the single copy of index.html's load-order graph. Direct dependencies only — `loadScripts` walks transitively. A module that gains a real dependency is one edit here rather than a hunt through every test that loads it. `helpers/load.test.js` fails RED if an edge contradicts index.html's `<script>` order.
+
+**Scoped runs of a root script: `pnpm test:related <file…>`, never `vitest related`.** vitest's related filter walks static imports, and `load.js` evaluates the root scripts from text, so `vitest related geometry.js` finds no test and exits 0. `scripts/test-related.mjs` resolves the edges the suite does have (`helpers/related-tests.js`): `loadScripts` names expanded through `SCRIPT_DEPS`, `readScript` names, any string literal naming a repo file or directory, `readdirSync(…)` filtered on `.js` (a whole-tree guard, related to every root script), and relative helper imports. A file that maps to no test exits 1; `--list` prints the files without running them, and args after `--` go to vitest.
 
 Examples that match the map today: `screening → [geo-utils, novelty]`, `osrm → [net, overpass, geometry, loop-quality]`, `elevation → [net, geo-utils]`. geo-utils is only transitive for osrm (via geometry / loop-quality) — do not list it as a direct osrm dep.
 
@@ -73,6 +75,7 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 | `visited.js` | `mark-visited.test.js`, `visited-sync.test.js` |
 | `visits-io.js` | `visits-import.test.js` |
 | `osrm.js` | `osrm.test.js`, `osrm-fallback.test.js` |
+| `loop-builders.js` | `loop-builders.test.js`, `junction-loop.test.js` (shared setup: `helpers/loop-builders-suite.js`) |
 | `geometry.js` | `geometry.test.js`, `loop-vias.test.js` |
 | `cloud-backup-ui.js` | `cloud-backup-ui.test.js` |
 | `overpass.js` | `overpass.test.js`, `corridor-junctions.test.js` (query building / element parsing moved to `junctions-cache/tests/overpass-pools.test.ts`) |
@@ -83,13 +86,13 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 
 ## Sync harness
 
-`helpers/sync-harness.js` builds on the loader: it runs the three non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `WanderSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
+`helpers/sync-harness.js` builds on the loader: it runs the non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `WanderSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
 
 ## Fetch stubs
 
-`helpers/fetch-stub.js` holds the generic pieces: `jsonResponse(body, {status})` (`ok` derived from `status`, as on a real Response), `installCannedFetch(reply)` (one reply for every call, or `{ throw: err }`), `requestOf(fetchMock)` (the single request as `{url, init, body}`, body parsed), `abortError()` (the one `AbortError`), and `stalledFetch()` / `stalledFetch('body')` (never settles until `init.signal` aborts — the request itself, or `json()` after a 200). `helpers/osrm-fetch.js` holds the OSRM wire fixtures — `routeBody`, `parseRouteWaypoints`, `echoRoute`, `echoNearest` — so a change to the `/foot/` URL layout or the GeoJSON body lands once, not once per OSRM suite.
+`helpers/fetch-stub.js` holds the generic pieces: `jsonResponse(body, {status, headers})` (`ok` derived from `status` and `headers` always a real `Headers`, as on a real Response — sync reads `Retry-After`), `installCannedFetch(reply)` (one reply for every call, or `{ throw: err }`), `requestOf(fetchMock)` (the single request as `{url, init, body}`, body parsed), `abortError()` (the one `AbortError`), and `stalledFetch()` / `stalledFetch('body')` (never settles until `init.signal` aborts — the request itself, or `json()` after a 200). `helpers/osrm-fetch.js` holds the OSRM wire fixtures — `routeBody`, `parseRouteWaypoints`, `echoRoute`, `echoNearest` — so a change to the `/foot/` URL layout or the GeoJSON body lands once, not once per OSRM suite.
 
-A suite that routes by URL keeps its own installer, named for what it keys on: `installOsrmKindFetch` (`osrm.test.js`, endpoint kind) and `installOsrmBackendFetch` (`osrm-fallback.test.js`, self-hosted vs public base). Don't name a new one plain `installFetch` — three same-named installers with three argument shapes is what finding #9762 untangled. Every installer goes through `vi.stubGlobal`, so the suite's `afterEach` calls `vi.unstubAllGlobals()`; a bare `globalThis.fetch =` in such a suite survives into the next test. The sync suites are separate: `sync-harness.js` owns their fetch stub.
+A suite that routes by URL keeps its own installer, named for what it keys on: `installOsrmKindFetch` (`helpers/osrm-fetch.js`, endpoint kind — the transport and loop-builder suites) and `installOsrmBackendFetch` (`osrm-fallback.test.js`, self-hosted vs public base). Don't name a new one plain `installFetch` — three same-named installers with three argument shapes is what finding #9762 untangled. Every installer goes through `vi.stubGlobal`, so the suite's `afterEach` calls `vi.unstubAllGlobals()`; a bare `globalThis.fetch =` in such a suite survives into the next test. The sync suites are separate: `sync-harness.js` owns their fetch stub, and builds its replies with `jsonResponse` like a suite that stubs fetch inline.
 
 ## Backend layout
 

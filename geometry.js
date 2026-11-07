@@ -77,7 +77,7 @@ const MIN_LOOP_OFFSET_KM = 0.3;
 // reach a junction while keeping the via on its own side of the A→B line.
 const SNAP_FRACTION_OF_OFFSET = 0.5;
 
-// Shared geometry for osrm.js's two loop builders. Derives the per-side offset, the
+// Shared geometry for loop-builders.js's two loop builders. Derives the per-side offset, the
 // A/B endpoints, the via t-positions, and the snap radius from start/dest + the
 // spread params. `avoidBacktracking` selects between the two constant pairs
 // above — it widens the envelope and ties the snap radius to it, instead of the
@@ -106,7 +106,7 @@ function buildLoopSetup(startLat, startLng, destLat, destLng, spread, { avoidBac
 }
 
 // Pure loop envelope geometry — the single source for the sin-envelope via
-// points, shared by osrm.js's two loop builders and buildDirectionsUrl
+// points, shared by loop-builders.js's two builders and buildDirectionsUrl
 // (which draws the Google Maps link along the same oval). Built on
 // buildLoopSetup so the offset formula lives in exactly one place.
 // rightVias/leftVias are in forward (A→B) t-order; a leg that walks a side back

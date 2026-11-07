@@ -14,6 +14,7 @@ import {
     installSyncLifecycle, loadSync, setLocation, setLocalStorage, mockFetch, serverTrip,
     drainFlushPump,
 } from './helpers/sync-harness.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
 
 installSyncLifecycle();
 
@@ -152,7 +153,7 @@ describe('the pump waits for the merge', () => {
             if ((opts.method || 'GET') === 'GET') {
                 return new Promise((res) => { answerGet = res; });
             }
-            return Promise.resolve({ ok: true, status: 200, headers: new Headers(), json: () => Promise.resolve({}) });
+            return Promise.resolve(jsonResponse({}));
         });
         loadSync();
         const init = window.WanderSync.init();
@@ -161,12 +162,7 @@ describe('the pump waits for the merge', () => {
         await drainFlushPump();
         expect(requests('DELETE')).toEqual([]);
 
-        answerGet({
-            ok: true,
-            status: 200,
-            headers: new Headers(),
-            json: () => Promise.resolve({ ...EMPTY_ACCOUNT, visits: [SERVER_ROWS.visits] }),
-        });
+        answerGet(jsonResponse({ ...EMPTY_ACCOUNT, visits: [SERVER_ROWS.visits] }));
         await init;
         await drainFlushPump();
 

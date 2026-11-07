@@ -10,6 +10,7 @@ import { describe, test, expect, vi } from 'vitest';
 import {
     installSyncLifecycle, mockFetch, drainFlushPump, setupAccepted,
 } from './helpers/sync-harness.js';
+import { jsonResponse } from './helpers/fetch-stub.js';
 
 installSyncLifecycle();
 
@@ -23,11 +24,7 @@ describe('auth hard-stop (audit #6223)', () => {
         let callCount = 0;
         global.fetch = vi.fn(() => {
             callCount++;
-            return Promise.resolve({
-                ok: false, status: 401,
-                headers: new Headers(),
-                json: () => Promise.resolve({ error: 'Unauthorized' }),
-            });
+            return Promise.resolve(jsonResponse({ error: 'Unauthorized' }, { status: 401 }));
         });
 
         window.WanderSync.mutate('visits', 'put', 'uuid-a', { id: 'uuid-a' });
@@ -79,25 +76,13 @@ describe('auth hard-stop (audit #6223)', () => {
             if (method === 'PUT') {
                 putAttempts++;
                 if (putAttempts === 1) {
-                    return Promise.resolve({
-                        ok: false, status: 401,
-                        headers: new Headers(),
-                        json: () => Promise.resolve({}),
-                    });
+                    return Promise.resolve(jsonResponse({}, { status: 401 }));
                 }
-                return Promise.resolve({
-                    ok: true, status: 204,
-                    headers: new Headers(),
-                    json: () => Promise.resolve({}),
-                });
+                return Promise.resolve(jsonResponse({}, { status: 204 }));
             }
-            return Promise.resolve({
-                ok: true, status: 200,
-                headers: new Headers(),
-                json: () => Promise.resolve({
-                    visits: [], favorites: [], savedLocations: [], history: [],
-                }),
-            });
+            return Promise.resolve(jsonResponse({
+                visits: [], favorites: [], savedLocations: [], history: [],
+            }));
         });
 
         window.WanderSync.mutate('visits', 'put', 'uuid-resume', { id: 'uuid-resume' });

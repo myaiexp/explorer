@@ -6,7 +6,7 @@
 # root:www-data makes it the only one that can connect: every other local uid
 # could reach the old 127.0.0.1:3700, and wander-api trusted X-Real-IP from any
 # loopback peer, so any of them could pick a fresh rate-limit key per request
-# (finding #10094). The service trusts forwarding headers only on this socket.
+# The service trusts forwarding headers only on this socket.
 #
 # Ownership and mode are declared here, by PID 1, rather than chmod'd by the
 # service — whose CapabilityBoundingSet is empty, so it could not chgrp to

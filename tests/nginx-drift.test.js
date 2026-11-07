@@ -34,7 +34,7 @@ const SCRIPT = resolve(ROOT, 'deploy/check-nginx-drift.sh');
 function confFiles(dir = resolve(ROOT, 'deploy'), out = []) {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, e.name);
-        if (e.isDirectory()) confFiles(p, out);
+        if (e.isDirectory()) { if (!/\.(service|timer|socket)\.d$/.test(e.name)) confFiles(p, out); } // unit drop-ins
         else if (e.name.endsWith('.conf')) out.push(p);
     }
     return out;
