@@ -5,7 +5,8 @@
  * installFetch argument shapes; finding #12677: four stalled-fetch copies whose
  * AbortError text had already forked).
  *
- * - jsonResponse(body, {status})  — the Response subset the app reads.
+ * - jsonResponse(body, {status, headers})
+ *                                 — the Response subset the app reads.
  * - installCannedFetch(reply)     — every call gets the same reply.
  * - requestOf(fetchMock)          — the single request made, as {url, init, body}.
  * - abortError()                  — the one AbortError those stalls reject with.
@@ -22,10 +23,16 @@ import { expect, vi } from 'vitest';
 /**
  * A Response-shaped object with a JSON body. `ok` is derived from `status`,
  * as on a real Response, so a test cannot build a `{ok: true, status: 503}`
- * that no server ever sends.
+ * that no server ever sends. `headers` is always a real Headers (empty by
+ * default), as on a real Response — sync reads Retry-After from it.
  */
-export function jsonResponse(body, { status = 200 } = {}) {
-    return { ok: status >= 200 && status < 300, status, json: async () => body };
+export function jsonResponse(body, { status = 200, headers = {} } = {}) {
+    return {
+        ok: status >= 200 && status < 300,
+        status,
+        headers: new Headers(headers),
+        json: async () => body,
+    };
 }
 
 /**

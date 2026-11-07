@@ -12,6 +12,7 @@
 
 import { beforeEach, afterEach, vi } from 'vitest';
 import { loadScripts } from './load.js';
+import { jsonResponse } from './fetch-stub.js';
 
 // storage.js owns the walk_* key strings and readStoredArray that
 // sync-sections.js resolves off globalThis at call time; net.js registers
@@ -101,25 +102,11 @@ export function mockFetch(routes) {
             return Promise.reject(new TypeError('Failed to fetch'));
         }
         if (config === undefined) {
-            return Promise.resolve({
-                ok: false, status: 404,
-                headers: new Headers(),
-                json: () => Promise.resolve({}),
-            });
+            return Promise.resolve(jsonResponse({}, { status: 404 }));
         }
 
-        const status = config.status ?? 200;
-        const responseHeaders = new Headers(config.headers ?? {});
-        const body = { ...config };
-        delete body.status;
-        delete body.headers;
-
-        return Promise.resolve({
-            ok: status >= 200 && status < 300,
-            status,
-            headers: responseHeaders,
-            json: () => Promise.resolve(body),
-        });
+        const { status = 200, headers = {}, ...body } = config;
+        return Promise.resolve(jsonResponse(body, { status, headers }));
     });
 }
 

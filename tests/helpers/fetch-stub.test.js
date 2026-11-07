@@ -1,12 +1,30 @@
-// Pins stalledFetch: one AbortError, two stall stages, installed via stubGlobal.
+// Pins jsonResponse's Response subset, and stalledFetch: one AbortError, two stall stages, installed via stubGlobal.
 // The copies in net/elevation/overpass had already forked the error text
 // (finding #12677). A bare fetch with no signal must reject, not hang.
 import { describe, test, expect, afterEach, vi } from 'vitest';
-import { abortError, stalledFetch } from './fetch-stub.js';
+import { abortError, jsonResponse, stalledFetch } from './fetch-stub.js';
 
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+});
+
+describe('jsonResponse', () => {
+    test('derives ok from status and resolves json() to the body', async () => {
+        expect(jsonResponse({ a: 1 }).ok).toBe(true);
+        expect(jsonResponse({}, { status: 204 }).ok).toBe(true);
+        expect(jsonResponse({}, { status: 429 }).ok).toBe(false);
+        await expect(jsonResponse({ a: 1 }).json()).resolves.toEqual({ a: 1 });
+    });
+
+    // Sync reads Retry-After, so headers is always a real Headers — absent
+    // means empty, never undefined.
+    test('carries headers as a Headers, empty by default', () => {
+        expect(jsonResponse({}).headers).toBeInstanceOf(Headers);
+        expect([...jsonResponse({}).headers]).toEqual([]);
+        const res = jsonResponse({}, { status: 429, headers: { 'Retry-After': '10' } });
+        expect(res.headers.get('retry-after')).toBe('10');
+    });
 });
 
 describe('abortError', () => {

@@ -9,7 +9,7 @@
  */
 import { describe, test, expect, afterEach, vi } from 'vitest';
 import { loadScripts } from './helpers/load.js';
-import { stalledFetch } from './helpers/fetch-stub.js';
+import { jsonResponse, stalledFetch } from './helpers/fetch-stub.js';
 
 loadScripts('net');
 
@@ -77,11 +77,7 @@ describe('fetchWithTimeout', () => {
     test('a finished body read clears the timer so a later tick does not abort', async () => {
         vi.useFakeTimers();
         const abort = vi.spyOn(AbortController.prototype, 'abort');
-        global.fetch = vi.fn(() => Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({ code: 'Ok' }),
-        }));
+        global.fetch = vi.fn(() => Promise.resolve(jsonResponse({ code: 'Ok' })));
 
         const res = await fetchWithTimeout('https://example.test/osrm');
         await expect(res.json()).resolves.toEqual({ code: 'Ok' });
