@@ -126,6 +126,28 @@ describe('check-unit-drift.sh', () => {
         expect(code).not.toBe(0);
     });
 
+    // systemd ignores lines whose first non-blank character is # or ;, and
+    // blank lines. A comment-only edit in the repo must not fail the deploy
+    // until someone reinstalls the unit for a change that changes nothing.
+    test('comment and blank-line differences are not drift', () => {
+        const repo = '# deploy-host: local\n# why: new wording\n\n[Service]\nExecStart=/bin/true\n';
+        const live = '# deploy-host: local\n# why: old wording\n; old note\n[Service]\n  # indented note\nExecStart=/bin/true  \n';
+        unit('a.service', repo, { installed: live });
+        const { code, out } = run();
+        expect(out).toMatch(/a\.service.*ok/);
+        expect(code).toBe(0);
+    });
+
+    // A '#' after content is part of the value in systemd, not a comment.
+    test('a difference after a mid-line # still counts as drift', () => {
+        unit('a.service', OK_UNIT.replace('/bin/true', '/bin/true #a'), {
+            installed: OK_UNIT.replace('/bin/true', '/bin/true #b'),
+        });
+        const { code, out } = run();
+        expect(out).toMatch(/a\.service.*DRIFT/);
+        expect(code).not.toBe(0);
+    });
+
     test('a unit that was never installed is MISSING and fails', () => {
         unit('a.service', OK_UNIT);
         const { code, out } = run();

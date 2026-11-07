@@ -29,12 +29,12 @@ StandardOutput=journal
 StandardError=journal
 
 # Dedicated wander-junctions uid so an RCE/OOM cannot read /home/shelly
-# or share the interactive user's cgroup (finding #7755). ProtectHome=tmpfs
+# or share the interactive user's cgroup. ProtectHome=tmpfs
 # (not yes): yes overmounts /home and hides a BindReadOnlyPaths target.
 # tmpfs + the bind keeps only the junctions-cache tree reachable. Cache
 # lives in StateDirectory (/var/lib/wander-junctions), not under
 # /home/shelly. TRUSTED_PROXIES is the VPS Tailscale IPv4 so nginx's
-# X-Forwarded-For is the client key (finding #7754); loopback is not in
+# X-Forwarded-For is the client key; loopback is not in
 # the list — nothing local proxies. MemoryMax kills this unit rather than
 # uid shelly on a fat Overpass dump. Do not add MemoryDenyWriteExecute —
 # V8 JIT needs W^X pages.
@@ -46,7 +46,7 @@ BindReadOnlyPaths=/home/shelly/Projects/wander/junctions-cache
 # systemd's defaults are StateDirectoryMode=0755 and UMask=0022, and a start
 # resets the directory to that mode — the installer's chmod does not survive
 # without StateDirectoryMode=. cache-store.ts also writes the file as 0600.
-# No other unit reads the file (finding #12871).
+# No other unit reads the file.
 StateDirectory=wander-junctions
 StateDirectoryMode=0750
 UMask=0077

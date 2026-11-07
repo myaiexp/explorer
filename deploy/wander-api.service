@@ -5,7 +5,7 @@
 Description=Wander API (cloud backup)
 # Socket-activated: wander-api.socket (/run/wander-api.sock, 0660
 # root:www-data) is the only listener, so nginx is the only client
-# (finding #10094). Without LISTEN_FDS the server falls back to loopback TCP,
+# Without LISTEN_FDS the server falls back to loopback TCP,
 # which is for dev and tests only.
 Requires=wander-api.socket
 After=network.target postgresql.service wander-api.socket
@@ -22,12 +22,12 @@ Restart=always
 RestartSec=5
 
 # Dedicated wander uid so an RCE/OOM cannot read /home/mase or share the
-# interactive user's cgroup (finding #7560). ProtectHome=tmpfs (not yes):
+# interactive user's cgroup. ProtectHome=tmpfs (not yes):
 # yes overmounts /home and hides a BindReadOnlyPaths target underneath it.
 # tmpfs + the bind keeps only the server tree reachable. EnvironmentFile is
 # read by PID 1 as root, not by the service. MemoryMax sits above a
 # legitimate keep-window GET and kills this unit rather than uid mase on a
-# fat dump (finding #7558). Do not add MemoryDenyWriteExecute — V8 JIT needs
+# fat dump. Do not add MemoryDenyWriteExecute — V8 JIT needs
 # W^X pages.
 NoNewPrivileges=yes
 ProtectSystem=strict
