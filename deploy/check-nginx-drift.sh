@@ -135,7 +135,9 @@ while IFS= read -r src; do
             12) report "$name" "ERROR — reading $host:$declared failed ($installed)"; failed=1 ;;
         esac
     fi
-done < <(find "$NGINX_SRC_DIR" -type f -name '*.conf' | sort)
+# A <unit>.d/*.conf beside a systemd unit is a drop-in, read by check-unit-drift.sh.
+done < <(find "$NGINX_SRC_DIR" -type f -name '*.conf' \
+    -not -path '*.service.d/*' -not -path '*.timer.d/*' -not -path '*.socket.d/*' | sort)
 
 if [[ $checked -eq 0 ]]; then
     echo "  no nginx confs found under $NGINX_SRC_DIR — the scan is broken, not the deployment"

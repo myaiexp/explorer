@@ -23,15 +23,21 @@ mark_unreachable() {
     DRIFT_UNREACHABLE["$1"]=1
 }
 
-# stdout of the installed copy, or a non-zero exit saying why not:
+# stdout of the installed copy, or a non-zero exit saying why not. An optional
+# third argument replaces the plain `cat` with a POSIX sh snippet that prints
+# whatever the caller compares, with the path as "$1"; it runs on the host, so
+# a remote read stays one ssh call. Its own non-zero exit lands in 12.
+#
 #   10 = no such file (the host was reached and looked)
 #   11 = host unreachable (ssh failed, or the timeout cut it off)
 #   12 = anything else; stdout then carries the ssh status for the report
 read_installed() {
-    local host="$1" path="$2"
+    local host="$1" path="$2" emit="${3:-cat \"\$1\"}"
     if [[ "$host" == "local" ]]; then
         [[ -f "$path" ]] || return 10
-        cat "$path"
+        local out
+        out=$(sh -c "$emit" sh "$path") || { printf 'exit %s\n' "$?"; return 12; }
+        printf '%s\n' "$out"
         return 0
     fi
     [[ -n "${DRIFT_UNREACHABLE[$host]:-}" ]] && return 11
@@ -40,7 +46,7 @@ read_installed() {
     # which lands in 12 rather than being folded into MISSING.
     local out rc
     out=$(timeout --kill-after=2 "$DRIFT_SSH_TIMEOUT" \
-        ssh "${DRIFT_SSH_OPTS[@]}" "$host" "test -f '$path' || exit 10; cat '$path'" 2>/dev/null)
+        ssh "${DRIFT_SSH_OPTS[@]}" "$host" "test -f '$path' || exit 10; set -- '$path'; $emit" 2>/dev/null)
     rc=$?
     case $rc in
         0) printf '%s\n' "$out"; return 0 ;;
