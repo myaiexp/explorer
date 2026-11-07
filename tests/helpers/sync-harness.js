@@ -3,7 +3,7 @@
  * state machine), sync-flush.test.js (durable outbox + backoff pump), and
  * sync-sections.test.js (merge/normalize/wipe of the four synced sections).
  *
- * The four source modules are non-module IIFEs that register globals, so every
+ * The sync source modules are non-module IIFEs that register globals, so every
  * suite that drives WanderSync needs the same realm setup: run the scripts in
  * the jsdom global context, seed location + localStorage, stub fetch. That setup
  * lives here so each suite's bootstrap is `installSyncLifecycle()` plus whatever
@@ -39,11 +39,10 @@ export function destroySync() {
 }
 
 /**
- * Execute the four IIFEs in the jsdom global scope, replacing any previous
- * instance. Order matches index.html: the flush worker, section helpers and
- * init state machine register their globals before sync.js's IIFE consumes them
- * (SCRIPT_DEPS' 'sync' → ['sync-flush', 'sync-sections', 'sync-init'] edge
- * encodes that order).
+ * Execute the sync IIFEs in the jsdom global scope, replacing any previous
+ * instance. Order matches index.html: the flush worker, section helpers, init
+ * state machine and account creation register their globals before sync.js's
+ * IIFE consumes them (SCRIPT_DEPS' 'sync' edge encodes that order).
  */
 export function loadSync() {
     destroySync();

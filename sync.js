@@ -4,6 +4,7 @@
 //   • sync-flush.js    — the durable outbox + single-flight backoff flush worker
 //   • sync-sections.js — read/merge/normalize/write of the four synced sections
 //   • sync-init.js     — the load-time consent/URL state machine (Cases 1–5)
+//   • sync-accept.js   — account creation + the first upload of this device
 //
 // Consent-toast hook contract:
 //   Register: window.WanderSyncUI = { showConsentToast: function() { return Promise<'accepted'|'declined'> } }
@@ -11,7 +12,7 @@
 //   If window.WanderSyncUI?.showConsentToast is not set, requestConsent() falls back to window.confirm().
 //
 // Load order: net.js (for fetchWithTimeout) + sync-flush.js + sync-sections.js
-// + sync-init.js BEFORE this; this BEFORE app.js.
+// + sync-init.js + sync-accept.js BEFORE this; this BEFORE app.js.
 
 (function () {
     'use strict';
@@ -61,8 +62,8 @@
         localStorage.removeItem(BACKUP_KEY);
     }
 
-    // The auth triple has exactly one owner (this file), so sync-init.js mutates
-    // it through these two setters rather than reaching into the closure.
+    // The auth triple has exactly one owner (this file), so sync-init.js and
+    // sync-accept.js mutate it through these two setters rather than reaching into the closure.
     // setToken alone is the tentative-credential step: an adopt sets the token
     // before the download that might yet roll it back, leaving state/username
     // untouched until the account has actually landed.
@@ -133,6 +134,18 @@
         fireStateChange: fireStateChange,
         readOutbox: function () { return flushWorker.peek(); },
         usernamePattern: USERNAME_RE
+    });
+
+    // ── Account creation ─────────────────────────────────────────────────────────
+
+    // accept() lives in sync-accept.js, writing the auth triple back through the
+    // same two setters sync-init.js uses.
+    var acceptAccount = globalThis.createSyncAccept({
+        apiFetch: apiFetch,
+        writeConsentRecord: writeConsentRecord,
+        setAuth: setAuth,
+        setToken: setToken,
+        fireStateChange: fireStateChange
     });
 
     // ── Flush worker ─────────────────────────────────────────────────────────────
@@ -229,49 +242,7 @@
         },
 
         accept: function () {
-            return apiFetch('POST', ['accounts']).then(function (res) {
-                if (!res.ok) { throw new Error('POST /accounts failed: ' + res.status); }
-                return res.json();
-            }).then(function (body) {
-                var username = body.username;
-                var token = body.token;
-                // Set the token before the import below — that request is now authenticated.
-                _token = token;
-
-                // Assign missing UUIDs to savedLocations
-                var locs = Sections.readSection('savedLocations');
-                var changed = false;
-                locs.forEach(function (loc) {
-                    if (!loc.id) {
-                        loc.id = crypto.randomUUID();
-                        changed = true;
-                    }
-                });
-                if (changed) {
-                    Sections.writeSection('savedLocations', locs);
-                }
-
-                // Build full payload
-                var payload = {
-                    visits: Sections.readSection('visits'),
-                    favorites: Sections.readSection('favorites'),
-                    savedLocations: Sections.readSection('savedLocations'),
-                    history: Sections.readSection('history')
-                };
-
-                return apiFetch('POST', [username, 'import'], payload).then(function (res2) {
-                    if (!res2.ok) { throw new Error('POST /import failed: ' + res2.status); }
-                    writeConsentRecord({ state: 'accepted', username: username, token: token });
-                    _state = 'accepted';
-                    _username = username;
-                    // Carry the secret in the fragment so the link itself is the credential.
-                    history.replaceState(null, '', '/wander/' + username + '#t=' + token);
-                    fireStateChange();
-                }).catch(function (e) {
-                    _token = null;   // roll back partial auth state if the import failed
-                    throw e;
-                });
-            });
+            return acceptAccount();
         },
 
         decline: function () {

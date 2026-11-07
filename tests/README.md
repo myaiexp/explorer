@@ -86,7 +86,7 @@ Most 1:1 coverage files are `tests/<module>.test.js` (the cloud-backup trio `syn
 
 ## Sync harness
 
-`helpers/sync-harness.js` builds on the loader: it runs the three non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `WanderSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
+`helpers/sync-harness.js` builds on the loader: it runs the non-module sync IIFEs in the jsdom realm and owns the fetch/localStorage stubs, so each sync suite starts with one `installSyncLifecycle()` call. It also retires the previous instance via `WanderSync._destroy()` on every reload — sync.js's `'online'` listener and its flush worker's backoff timer would otherwise pile up on the shared window, all pumping the one `walk_sync_outbox` key.
 
 ## Fetch stubs
 

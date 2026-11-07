@@ -52,10 +52,12 @@ export const SCRIPT_DEPS = {
     // The synced-down trip rows go through the same normalizeVisit gate an
     // uploaded backup file does (#2735), so visit-shape must load first.
     'sync-sections': ['visit-shape'],
-    'sync':         ['sync-flush', 'sync-sections', 'sync-init'],
+    'sync':         ['sync-flush', 'sync-sections', 'sync-init', 'sync-accept'],
     // The state machine reads the section helpers directly (mergeSection /
     // populateSection / wipeSections), so it needs them loaded too.
     'sync-init':    ['sync-sections'],
+    // accept() reads and rewrites the local sections it uploads.
+    'sync-accept':  ['sync-sections'],
     // restoreFromHash gates on inFinland so a shared Stockholm link never
     // hits OSRM-foot. Tests load share-link for real; bbox is the one
     // collaborator that is not faked.
