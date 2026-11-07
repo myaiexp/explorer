@@ -23,9 +23,12 @@ export const SCRIPT_DEPS = {
     // Sampling interpolates with haversineM; fetch goes through fetchWithTimeout.
     'elevation':    ['net', 'geo-utils'],
     // geometry → geo-utils and loop-quality → geo-utils transitively; net has no deps.
-    // overpass owns fetchCorridorJunctions, which buildJunctionLoop calls;
-    // geometry owns loopVias, which both loop builders call.
-    'osrm':         ['net', 'overpass', 'geometry', 'loop-quality'],
+    // fetchWithTimeout, plus haversineKm for snapToRoad's distance check.
+    'osrm':         ['net', 'geo-utils'],
+    // osrm owns fetchRouteThrough + snapToRoad; overpass owns
+    // fetchCorridorJunctions, which buildJunctionLoop calls; geometry owns
+    // loopVias, which both loop builders call.
+    'loop-builders': ['osrm', 'overpass', 'geometry', 'loop-quality'],
     // fetchWithTimeout, plus kmToDegLat/Lng for the corridor bbox padding. The
     // pool bbox/distance math moved server-side with the Overpass queries.
     'overpass':     ['net', 'geo-utils'],

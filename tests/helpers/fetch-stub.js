@@ -14,9 +14,9 @@
  *                                 — never settles until init.signal aborts.
  *                                   'body': headers are 200, json() is what stalls.
  *
- * Suites that route by URL (osrm.test.js, osrm-fallback.test.js) keep their own
- * installer, named after what it keys on; the OSRM response/echo fixtures they
- * share live in ./osrm-fetch.js.
+ * The OSRM suites route by URL, through an installer named after what it keys
+ * on: ./osrm-fetch.js's installOsrmKindFetch, or osrm-fallback.test.js's own
+ * installOsrmBackendFetch. The OSRM response/echo fixtures live in ./osrm-fetch.js.
  */
 import { expect, vi } from 'vitest';
 

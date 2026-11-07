@@ -28,10 +28,10 @@ describe('resolveRelated', () => {
         expect(files).toContain('tests/loop-vias.test.js');
     });
 
-    // osrm's SCRIPT_DEPS name geometry, so a test that loads osrm runs
-    // geometry.js too and belongs in its scoped run.
+    // loop-builders' SCRIPT_DEPS name geometry, so a suite that loads
+    // loop-builders runs geometry.js too and belongs in its scoped run.
     test('walks SCRIPT_DEPS backwards to the suites of dependents', () => {
-        expect(related('geometry.js').files).toContain('tests/osrm.test.js');
+        expect(related('geometry.js').files).toContain('tests/junction-loop.test.js');
         expect(related('geo-utils.js').files).toContain('tests/screening.test.js');
     });
 

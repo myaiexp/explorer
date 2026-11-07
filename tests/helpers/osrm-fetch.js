@@ -1,6 +1,6 @@
 // OSRM response fixtures — GeoJSON route bodies and URL-echoing fetch handlers.
 /**
- * Shared by osrm.test.js and osrm-fallback.test.js (finding #9780). Both mirror
+ * Shared by every OSRM suite. They all mirror
  * the same two facts about the OSRM wire format, and those facts must change in
  * one place or one suite starts asserting against a fiction:
  *
@@ -9,9 +9,12 @@
  * - Body shape: `{ routes: [{ geometry: { coordinates: [[lng,lat]…] }, … }] }`
  *   for route, `{ waypoints: [{ location: [lng,lat] }] }` for nearest.
  *
- * The fetch installers stay local to each suite: they key on different things
- * (URL path kind vs self-hosted/public base) and are named for it.
+ * The two fetch installers key on different things and are named for it:
+ * installOsrmKindFetch here (URL path kind, shared by osrm.test.js and
+ * the loop-builder suites) and osrm-fallback.test.js's local
+ * installOsrmBackendFetch (self-hosted vs public base).
  */
+import { vi } from 'vitest';
 import { jsonResponse } from './fetch-stub.js';
 
 export function routeBody(coordsLngLat, { duration = 60, distance = 1000, legs } = {}) {
@@ -47,4 +50,31 @@ export function echoNearest(url) {
 export function echoRoute(url) {
     const wps = parseRouteWaypoints(url);
     return jsonResponse(routeBody(wps.map((p) => [p.lng, p.lat])));
+}
+
+// Keyed on the endpoint KIND in the URL path (/table/, /nearest/, /route/,
+// /junctions) — `overrides` replaces the default handler per kind. It never
+// tells the self-hosted and public backends apart; osrm-fallback.test.js's
+// installOsrmBackendFetch keys on the backend base instead. Installed via
+// vi.stubGlobal, so the suite's afterEach calls vi.unstubAllGlobals().
+export function installOsrmKindFetch(overrides = {}) {
+    const handlers = {
+        table: () => jsonResponse({ code: 'Ok', destinations: [{ distance: 0 }], distances: [[0]] }),
+        nearest: echoNearest,
+        route: echoRoute,
+        junctions: () => jsonResponse({ junctions: [] }),
+        ...overrides,
+    };
+    const fetch = vi.fn(async (url) => {
+        const u = String(url);
+        const kind = u.includes('/table/') ? 'table'
+            : u.includes('/nearest/') ? 'nearest'
+            : u.includes('/route/') ? 'route'
+            : u.includes('/junctions') ? 'junctions'
+            : null;
+        if (!kind) throw new Error(`unexpected fetch: ${u}`);
+        return handlers[kind](u);
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
 }
