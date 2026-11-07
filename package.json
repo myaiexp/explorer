@@ -2,8 +2,10 @@
   "name": "wander",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "test": "vitest run",
+    "test:related": "node scripts/test-related.mjs",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
