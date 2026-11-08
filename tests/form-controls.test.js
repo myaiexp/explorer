@@ -10,6 +10,7 @@ const FORM_HTML = `
   <input id="location">
   <input type="number" id="minDistance" min="0" max="100" step="0.5" value="0">
   <input type="number" id="maxDistance" min="0.5" max="100" step="0.5" value="5">
+  <input type="number" id="maxMinutes" min="6" max="1200" step="5">
   <input type="number" id="unbounded">
   <input type="radio" name="tripMode" id="roundTrip" value="round" checked>
   <input type="radio" name="tripMode" id="oneWay" value="one-way">
@@ -71,13 +72,25 @@ describe('stepNumInput', () => {
         stepNumInput('maxDistance', 0.5);
         expect(input.value).toBe('5.5');
     });
+
+    // A stepper click is a user edit: listeners that react to typing (the
+    // minutes↔km sync) and to committing (settings persistence) must see it.
+    test('fires input then change on the stepped input', () => {
+        const input = document.getElementById('maxDistance');
+        const seen = [];
+        input.addEventListener('input', () => seen.push(`input:${input.value}`));
+        input.addEventListener('change', () => seen.push(`change:${input.value}`));
+        input.value = '5';
+        stepNumInput('maxDistance', 0.5);
+        expect(seen).toEqual(['input:5.5', 'change:5.5']);
+    });
 });
 
 describe('Enter-to-generate', () => {
     // Input listeners die with innerHTML; the document keydown listener
     // stacks across beforeEach reloads, so document-level asserts use
     // toHaveBeenCalled rather than an exact count.
-    test.each(['location', 'minDistance', 'maxDistance'])(
+    test.each(['location', 'minDistance', 'maxDistance', 'maxMinutes'])(
         'Enter on #%s calls generateDestination',
         (id) => {
             globalThis.generateDestination = vi.fn();

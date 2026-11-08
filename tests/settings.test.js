@@ -22,6 +22,7 @@ const FORM_HTML = `
   <input id="location" value="Helsinki">
   <input id="minDistance" value="0">
   <input id="maxDistance" value="5">
+  <input id="maxMinutes" value="">
   <select id="locationTypeSelect">
     <option value="park">park</option>
     <option value="cafe">cafe</option>
@@ -40,6 +41,7 @@ const DEFAULTS = {
     location: 'Helsinki',
     minDistance: '0',
     maxDistance: '5',
+    maxMinutes: '',
     poiType: 'park',
     spread: '50',
     winterMode: false,
@@ -51,6 +53,7 @@ const NON_DEFAULTS = {
     location: 'Jyväskylä',
     minDistance: '2',
     maxDistance: '12',
+    maxMinutes: '144',
     poiType: 'cafe',
     spread: '75',
     winterMode: true,
@@ -63,6 +66,7 @@ function readForm() {
         location: document.getElementById('location').value,
         minDistance: document.getElementById('minDistance').value,
         maxDistance: document.getElementById('maxDistance').value,
+        maxMinutes: document.getElementById('maxMinutes').value,
         poiType: document.getElementById('locationTypeSelect').value,
         spread: document.getElementById('spreadSlider').value,
         winterMode: document.getElementById('winterMode').checked,
@@ -75,6 +79,7 @@ function applyForm(values) {
     document.getElementById('location').value = values.location;
     document.getElementById('minDistance').value = values.minDistance;
     document.getElementById('maxDistance').value = values.maxDistance;
+    document.getElementById('maxMinutes').value = values.maxMinutes;
     document.getElementById('locationTypeSelect').value = values.poiType;
     document.getElementById('spreadSlider').value = values.spread;
     document.getElementById('winterMode').checked = values.winterMode;
@@ -254,6 +259,7 @@ describe('initSettingsListeners', () => {
         ['location', () => { document.getElementById('location').value = 'Tampere'; }, { location: 'Tampere' }],
         ['minDistance', () => { document.getElementById('minDistance').value = '1.5'; }, { minDistance: '1.5' }],
         ['maxDistance', () => { document.getElementById('maxDistance').value = '9'; }, { maxDistance: '9' }],
+        ['maxMinutes', () => { document.getElementById('maxMinutes').value = '45'; }, { maxMinutes: '45' }],
         ['locationTypeSelect', () => { document.getElementById('locationTypeSelect').value = 'any'; }, { poiType: 'any' }],
         ['spreadSlider', () => { document.getElementById('spreadSlider').value = '20'; }, { spread: '20' }],
         ['winterMode', () => { document.getElementById('winterMode').checked = true; }, { winterMode: true }],

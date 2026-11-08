@@ -20,6 +20,7 @@ const FORM_HTML = `
   <input id="location" value="">
   <input id="minDistance" value="0">
   <input id="maxDistance" value="5">
+  <input id="maxMinutes" value="">
   <select id="locationTypeSelect"></select>
   <input id="spreadSlider" type="range" value="50">
   <input type="checkbox" id="winterMode">

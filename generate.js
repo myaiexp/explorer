@@ -162,7 +162,10 @@ function surpriseMe() {
     const min = +(Math.random() * 3).toFixed(1);          // 0–3 km
     const max = +(min + 1 + Math.random() * 5).toFixed(1); // min+1 to min+6 km
     document.getElementById('minDistance').value = min;
-    document.getElementById('maxDistance').value = max;
+    const maxInput = document.getElementById('maxDistance');
+    maxInput.value = max;
+    // time-budget.js keeps a filled minutes field in step through this event.
+    maxInput.dispatchEvent(new Event('input', { bubbles: true }));
 
     // Random spread
     document.getElementById('spreadSlider').value = Math.round(Math.random() * 100);

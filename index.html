@@ -107,6 +107,17 @@
                                     </div>
                                 </div>
                             </div>
+                            <span class="distance-sep" aria-hidden="true">&asymp;</span>
+                            <div class="distance-field" title="Walking time at 5 km/h — sets the max distance. Leave empty to use km.">
+                                <div class="num-input">
+                                    <input type="number" id="maxMinutes" min="6" max="1200" step="5" placeholder="Time" aria-label="Max walking time in minutes, at 5 km/h">
+                                    <div class="num-btns">
+                                        <button type="button" class="num-btn" onclick="stepBudgetMinutes(5)" tabindex="-1">&plus;</button>
+                                        <button type="button" class="num-btn" onclick="stepBudgetMinutes(-5)" tabindex="-1">&minus;</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="distance-sep">min</span>
                         </div>
                     </div>
 
@@ -284,6 +295,7 @@
     <script src="visits-io.js?v=__COMMIT__" defer></script>
     <script src="prefs-modal.js?v=__COMMIT__" defer></script>
     <script src="overflow-menu.js?v=__COMMIT__" defer></script>
+    <script src="time-budget.js?v=__COMMIT__" defer></script>
     <script src="form-controls.js?v=__COMMIT__" defer></script>
     <script src="app.js?v=__COMMIT__" defer></script>
 </body>

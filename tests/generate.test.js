@@ -611,6 +611,20 @@ describe('surpriseMe', () => {
     expect(resolveStart).not.toHaveBeenCalled();
   });
 
+  // The scrambled max km is a budget edit the minutes field must follow;
+  // time-budget.js only hears about it through the input event.
+  test('announces the new max distance with an input event', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const seen = [];
+    const max = document.getElementById('maxDistance');
+    max.addEventListener('input', () => seen.push(max.value));
+
+    globalThis.surpriseMe();
+
+    expect(seen).toEqual(['1']);
+    Math.random.mockRestore();
+  });
+
   test('scrambles type / distance / spread, saves settings, then generates', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
 

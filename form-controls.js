@@ -11,6 +11,10 @@ function stepNumInput(id, delta) {
     if (!isNaN(min)) val = Math.max(min, val);
     if (!isNaN(max)) val = Math.min(max, val);
     input.value = val;
+    // A stepper click is a user edit: the minutes↔km sync listens for input,
+    // settings persistence for change. A bare value write fires neither.
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 // Distance means different things per trip mode — label it so the number the
@@ -19,10 +23,10 @@ document.querySelectorAll('input[name="tripMode"]').forEach(radio => {
     radio.addEventListener('change', () => syncDistanceLabel());
 });
 
-// Enter in any of the three inputs, or Ctrl/Cmd+Enter anywhere, generates.
+// Enter in any of the four inputs, or Ctrl/Cmd+Enter anywhere, generates.
 // These bypass the (disabled) generate button entirely — generateDestination's
 // own in-flight guard is what keeps them from starting a concurrent build.
-for (const id of ['location', 'minDistance', 'maxDistance']) {
+for (const id of ['location', 'minDistance', 'maxDistance', 'maxMinutes']) {
     document.getElementById(id).addEventListener('keypress', e => {
         if (e.key === 'Enter') generateDestination();
     });

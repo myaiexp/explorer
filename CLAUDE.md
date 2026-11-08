@@ -26,7 +26,7 @@ Its Overpass upstream is `wander-overpass.service`, a pinned `wiktorn/overpass-a
 
 **Core logic flow:**
 
-1. User enters a starting location (address or lat/lng) and a max distance in km
+1. User enters a starting location (address or lat/lng) and a max distance in km — or a walking time in minutes, which `time-budget.js` converts to that km at 5 km/h
 2. Address inputs are geocoded via Nominatim; `resolveStart` then rejects a start outside `FINLAND_BBOX`
 3. `resolveCandidatePool` (`destination-resolve.js`) picks a destination pool: a POI (nature, food, activity, culture, or `any POI` — the default), a random road point, or a fully random point. POI and road pools come from junctions-cache `/pois` and `/roads` through `overpass.js`, which sends catalog keys only — see `junctions-cache/README.md`. `generate.js` shrinks the straight-line radius by `ROUND_TRIP_SCALE`, since the walk is longer than the crow-flies distance out and back
 4. `screenCandidatePool` (`destination-resolve.js` → `screening.js`) drops water-locked candidates with one OSRM `/table` call. The linked plan is the original two-stage nearest+route design and is not rewritten: `docs/plans/2026-04-30-water-aware-candidate-screening-design.md`

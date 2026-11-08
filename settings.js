@@ -19,6 +19,7 @@ const SETTINGS_FIELDS = [
     { key: 'location',     id: 'location',           prop: 'value',   skipEmpty: true },
     { key: 'minDistance',  id: 'minDistance',        prop: 'value' },
     { key: 'maxDistance',  id: 'maxDistance',        prop: 'value' },
+    { key: 'maxMinutes',   id: 'maxMinutes',         prop: 'value' },
     { key: 'poiType',      id: 'locationTypeSelect', prop: 'value',   skipEmpty: true },
     { key: 'spread',       id: 'spreadSlider',       prop: 'value' },
     { key: 'winterMode',   id: 'winterMode',         prop: 'checked' },
