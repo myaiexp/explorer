@@ -1,3 +1,4 @@
+// Adjective half of the generated cloud-backup usernames (adjective-noun-N).
 const adjectives: string[] = [
   'able', 'active', 'actual', 'agile', 'airy', 'alert', 'alive', 'ample', 'ancient', 'angular',
   'apt', 'ardent', 'arid', 'artful', 'astute', 'avid', 'azure', 'balmy', 'bare', 'barren',

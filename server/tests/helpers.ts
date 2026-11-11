@@ -1,3 +1,4 @@
+// Shared integration-test fixtures — the guarded wander_test DB, the app, and account/row seeders.
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../src/db.js';

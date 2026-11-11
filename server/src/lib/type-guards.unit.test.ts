@@ -1,3 +1,4 @@
+// Unit tests for the isObject / isArray request-body type guards.
 import { describe, it, expect } from 'vitest';
 import { isObject, isArray } from './type-guards.js';
 

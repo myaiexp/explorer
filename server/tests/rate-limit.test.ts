@@ -1,3 +1,4 @@
+// Integration tests for the rate limits — per-IP account creation and reads, per-username writes.
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   app,

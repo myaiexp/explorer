@@ -1,3 +1,4 @@
+// Noun half of the generated cloud-backup usernames (adjective-noun-N).
 const nouns: string[] = [
   'acorn', 'alcove', 'alder', 'alley', 'alpine', 'anchor', 'arch', 'arrow', 'ash', 'aspen',
   'atoll', 'avenue', 'badger', 'bank', 'barn', 'bay', 'beach', 'beacon', 'bear', 'beaver',

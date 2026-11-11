@@ -43,7 +43,7 @@ The suite never migrates — it assumes the schema is already there. `tests/migr
 
 ## localStorage is jsdom's, not Node's
 
-`setup/jsdom-storage.js` (a vitest `setupFiles` entry) rebinds `localStorage`, `sessionStorage` and `Storage` onto globals from one jsdom realm. Node ships Web Storage as a getter-only `globalThis.localStorage` — behind `--experimental-webstorage` on 24, on by default from 25 — which vitest's jsdom environment cannot assign over, so the ambient one wins and the suite quietly stops testing browser storage: `Storage.prototype` spies never intercept a write, so every quota-recovery assertion passes vacuously, and with no `--localstorage-file` the getter itself throws. It is a no-op on a host Node without Web Storage, so nothing changes on the VPS's Node 24. `localstorage-binding.test.js` is the guard; reproduce the hostile ambient with `NODE_OPTIONS=--experimental-webstorage npx vitest run`.
+`setup/jsdom-storage.js` (a vitest `setupFiles` entry) rebinds `localStorage`, `sessionStorage` and `Storage` onto globals from one jsdom realm. Node ships Web Storage as a getter-only `globalThis.localStorage` — behind `--experimental-webstorage` on 24, on by default from 25 — which vitest's jsdom environment cannot assign over, so the ambient one wins and the suite quietly stops testing browser storage: `Storage.prototype` spies never intercept a write, so every quota-recovery assertion passes vacuously, and with no `--localstorage-file` the getter itself throws. It is a no-op on a host Node without Web Storage, so nothing changes on the VPS's Node 24. `localstorage-binding.test.js` is the guard; reproduce the hostile ambient with `NODE_OPTIONS=--experimental-webstorage pnpm exec vitest run`.
 
 ## Frontend loader
 
