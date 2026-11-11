@@ -1,3 +1,4 @@
+// Account routes — POST /accounts issues a username + bearer token, DELETE /:username removes the account.
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db.js';

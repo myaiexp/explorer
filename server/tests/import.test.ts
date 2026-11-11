@@ -1,3 +1,4 @@
+// Integration tests for POST /api/:username/import — atomic replace, validation and size limits.
 import { describe, test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, authHeaders, insertTestVisit, insertTestFavorite, resetRateLimiter, VISIT_BODY } from './helpers.js';

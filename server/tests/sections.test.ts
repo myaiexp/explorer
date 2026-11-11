@@ -1,3 +1,4 @@
+// Integration tests for the section PUT/DELETE routes — round-trips, owner scoping and row caps.
 import { describe, test, expect, beforeEach } from 'vitest';
 import { eq, and, sql } from 'drizzle-orm';
 import { app, db, truncateAll, createTestAccount, authHeaders, VISIT_BODY, resetRateLimiter } from './helpers.js';

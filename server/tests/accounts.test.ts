@@ -1,3 +1,4 @@
+// Integration tests for account creation, ipFirstSeen storage and account deletion.
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {

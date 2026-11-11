@@ -1,3 +1,4 @@
+// Unit tests for assertRouteCoords — route-geometry shape, length and Finland-range checks.
 import { describe, it, expect } from 'vitest';
 import {
   assertRouteCoords,

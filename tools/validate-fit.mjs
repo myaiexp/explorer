@@ -1,6 +1,6 @@
 // Round-trip validator: encode a synthetic course with our encoder,
 // decode it with @garmin/fitsdk, and assert the structure round-trips cleanly.
-// Run: npx --package=@garmin/fitsdk -- node tools/validate-fit.mjs
+// Run: pnpm --dir tools install && pnpm --dir tools validate-fit
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Script } from 'node:vm';

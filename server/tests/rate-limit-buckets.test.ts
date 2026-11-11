@@ -2,7 +2,7 @@
 // (audit #1568). Production mounts ipWriteRateLimit BEFORE accountAuth and
 // usernameWriteRateLimit AFTER it; this harness stacks them with no auth so
 // the bucket math is isolated from the DB.
-import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import {
   ipWriteRateLimit,
@@ -45,9 +45,13 @@ async function write(username: string, ip: string): Promise<Response> {
 beforeEach(() => {
   resetRateLimiter();
 });
+afterEach(() => vi.useRealTimers());
 
 describe('ipWriteRateLimit — IP write bucket (300/min)', () => {
   test('300 writes from one IP across distinct usernames all pass; 301st is 429 with Retry-After', async () => {
+    // Frozen clock: the bucket refills 5 tokens/s, so on real timers 300 writes
+    // that take over 200 ms (a loaded box) earn a token back and the 301st passes.
+    vi.useFakeTimers();
     const ip = '203.0.113.7';
 
     // Distinct username per write → each username bucket consumes a single token,

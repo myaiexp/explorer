@@ -1,3 +1,4 @@
+// Integration tests for GET /api/:username — the four-section snapshot, geometry trimming and auth.
 import { describe, test, expect, beforeEach } from 'vitest';
 import { app, db, truncateAll, createTestAccount, insertTestVisit, insertTestFavorite, resetRateLimiter, authHeaders, VISIT_BODY } from './helpers.js';
 import { schema } from '../src/db.js';
