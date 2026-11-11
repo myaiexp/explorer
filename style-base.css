@@ -1,0 +1,283 @@
+/* Custom properties, keyframes, reset, app shell, top bar, consent toast, main layout, map and Leaflet dark overrides */
+/* ── Custom properties ──────────────────────────────────────────────────── */
+
+:root {
+    --bg: #1a1a1a;
+    --bg-deep: #0f0f0f;
+    --surface: #252525;
+    --border: #333;
+    --text: #e5e5e5;
+    --text-secondary: #888;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --success: #22c55e;
+    --error: #ef4444;
+    --radius: 6px;
+    --font: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────── */
+
+@keyframes slideUpFade {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDownFade {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes menuOpen {
+    from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--text);
+    background: var(--bg-deep);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ── App shell ─────────────────────────────────────────────────────────── */
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────────── */
+
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 40px;
+    padding: 0 12px;
+    background: var(--bg-deep);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1100;
+}
+
+.brand {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+}
+
+.top-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+}
+
+.visited-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.overflow-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.overflow-btn:hover {
+    color: var(--text);
+    border-color: var(--text-secondary);
+}
+
+.overflow-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    z-index: 200;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.overflow-menu.open {
+    display: block;
+    transform-origin: top right;
+    animation: menuOpen 0.15s ease-out both;
+}
+
+.overflow-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--font);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.1s;
+}
+
+.overflow-menu button:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.overflow-status {
+    padding: 8px 12px 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+
+.overflow-status-value {
+    font-family: var(--mono);
+    color: var(--text);
+    margin-left: 4px;
+    word-break: break-all;
+}
+
+/* ── Consent toast ─────────────────────────────────────────────────────── */
+
+.toast-consent {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    max-width: 360px;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.45;
+    animation: slideUpFade 0.18s ease-out both;
+}
+
+.toast-consent-message {
+    margin-bottom: 10px;
+}
+
+.toast-consent-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.toast-consent-buttons button {
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--font);
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    transition: background 0.1s, border-color 0.1s;
+}
+
+.toast-consent-buttons button:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.toast-consent-buttons button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.toast-consent-buttons button.primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+/* ── Main layout ───────────────────────────────────────────────────────── */
+
+.main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ── Map ───────────────────────────────────────────────────────────────── */
+
+.map-area {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+}
+
+/* Override Leaflet controls for dark theme */
+.leaflet-control-layers,
+.leaflet-control-zoom a {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+}
+
+.leaflet-control-zoom a {
+    line-height: 26px !important;
+    width: 26px !important;
+    height: 26px !important;
+    font-size: 14px !important;
+}
+
+.leaflet-control-layers-expanded {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+}
+
+.leaflet-control-attribution {
+    background: rgba(15, 15, 15, 0.7) !important;
+    color: var(--text-secondary) !important;
+    font-size: 10px !important;
+}
+
+.leaflet-control-attribution a {
+    color: var(--text-secondary) !important;
+}
+
